@@ -108,8 +108,14 @@
 
 ## 运行方式
 - 开发预览：`.coze` 已配置 `python3 -m http.server ${DEPLOY_RUN_PORT}`，静态服务即可，无编译步骤。
-- 所有 JS 为 ES Module，通过 CDN（jsdelivr）加载 `three@0.160.0` 与 `GLTFLoader`，无本地 npm 依赖（无 package.json）。
-- GLB 模型走站点本地路径 `/models/*.glb`。
+- 所有 JS 为 ES Module，**`three@0.160.0` 已本地化到 `vendor/three/`**（`build/three.module.js` + `examples/jsm/loaders/GLTFLoader.js` + `examples/jsm/utils/BufferGeometryUtils.js`，后者是 GLTFLoader 的相对依赖，**少一个都加载不了**），由 `index.html` 的 import map 指向本地。无本地 npm 依赖（无 package.json）。
+  - **不再依赖 jsdelivr。** 原来是 CDN，国内访问时常只回响应头不回正文、模块图卡死在 three 的 import 上且不报错（无头测试里靠拦截 CDN 喂本地镜像绕过，见「无头测试的几个坑」）。本地化之后那份镜像也就不需要了。
+  - 升级 three 要**三件一起换**（版本必须一致），并同步 `REVISION`。
+- GLB 模型走站点本地路径 `./models/*.glb`。
+- **所有资源路径都是相对文档的（`./…`），不是根绝对路径**。`/styles/game.css`、`/scripts/main.js`、`/models/*.glb` 这类写法在 GitHub Pages 的**项目页**上会去根域找 → 整站 404（项目页的站点根在 `/<仓库名>/`）。改路径时注意：`fetch("./models/x.glb")` 是按**文档 URL**解析的，不是按模块 URL，所以写在 `scripts/*.js` 里也是对的。
+- **线上部署**：<https://tianlic2.github.io/cf-browser-game/>（仓库 `tianlic2/cf-browser-game`，公开，Pages 发布 main 分支根目录）。改了代码 `git push` 后 Pages 会自动重建（约 1 分钟）。
+  - **`vendor/` 必须入库**（`.gitignore` 里那条 `/vendor` 已因此移除），否则线上站点拉不到 three。
+  - 部署后自检：从**子路径**起一个服务模拟项目页（把整个目录拷到 `<某目录>/cf-browser-game/` 再在 `<某目录>` 起 `http.server`），并**把所有 CDN 请求判失败**——这样这条用例才能真正证明「相对路径成立 + 零 CDN 依赖」，在根目录下测是测不出来的。
 
 ## 关键实现约定
 - 瞄准单一数据源：`player.yaw/pitch` 为唯一朝向，**直接驱动相机**（`camera.rotation.x = player.pitch + recoilPitch`、`rotation.y = player.yaw + recoilYaw`，无缓动追赶）；移动方向与射击射线都由 `player.yaw/pitch` 计算，保证 W=视角正前方、子弹=准星方向。

@@ -1,0 +1,1139 @@
+/* ===== 战术突击 FPS - 全局样式（CF 风格 HUD）===== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #0a0e14;
+  font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+#viewport {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+}
+#viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+#viewport:not(.active) {
+  cursor: default;
+}
+
+/* ===== 反馈层（受击血雾 / 命中标记 / 闪光白屏）===== */
+.fx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+/* 闪光弹白屏：不透明度由 JS 每帧写入（时长与强度是变量，不能用 CSS 动画） */
+.fx-layer .flash-overlay {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  z-index: 3;
+  will-change: opacity;
+}
+.fx-layer .damage {
+  position: absolute;
+  inset: 0;
+  /* 调柔：只压边缘，不碰中央准星区 */
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(180, 20, 20, 0) 60%);
+  animation: damageFlash 0.5s ease-out forwards;
+}
+@keyframes damageFlash {
+  0% {
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(190, 24, 24, 0.42) 74%, rgba(110, 8, 8, 0.38) 100%);
+  }
+  100% {
+    background: radial-gradient(ellipse at center, transparent 52%, rgba(180, 20, 20, 0) 60%);
+  }
+}
+/* 命中标记：CF 的白色四斜线（中间留缺口），爆头红、击杀金 */
+.fx-layer .hitmark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  opacity: 0;
+  color: #ffffff;
+}
+.fx-layer .hitmark.head { color: #ff4d4d; }
+.fx-layer .hitmark.kill { color: #ffd24a; }
+.fx-layer .hitmark.show {
+  animation: hitmarkAnim 0.24s ease-out forwards;
+}
+@keyframes hitmarkAnim {
+  0% { opacity: 1; transform: scale(1.3); }
+  100% { opacity: 0; transform: scale(0.85); }
+}
+.fx-layer .hitmark::before,
+.fx-layer .hitmark::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, currentColor 0 36%, transparent 36% 64%, currentColor 64% 100%);
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
+}
+.fx-layer .hitmark::before { transform: translate(-50%, -50%) rotate(45deg); }
+.fx-layer .hitmark::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.fx-layer .hitmark.kill::before,
+.fx-layer .hitmark.kill::after { height: 3px; width: 28px; }
+
+/* ===== 狙击镜（AWM）=====
+   整块黑场里抠出一个正圆镜筒，圆内是细十字 + 密位刻度。
+   --tube 是镜筒半径；二级变倍（.scope.x2）自动收窄成更长的焦距。 */
+.scope {
+  --tube: 31vh;
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.scope.x2 { --tube: 21vh; }
+.scope.hidden { display: none; }
+
+/* 用超大 spread 的 box-shadow 把圆外一次性涂黑 —— 比 radial-gradient 的边缘干净得多，
+   而且 overflow:hidden 会把圆内的十字线精确裁到圆周上。 */
+.scope .sc-tube {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--tube) * 2);
+  height: calc(var(--tube) * 2);
+  margin: calc(var(--tube) * -1) 0 0 calc(var(--tube) * -1);
+  border-radius: 50%;
+  overflow: hidden;
+  /* 圆外纯黑：镜筒之外不该看见任何东西（HUD 因为层级更高仍然可见） */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 0 0 1.1vh #000,
+    0 0 0 200vmax #000;
+}
+/* 镜筒暗角：越靠边越暗，模拟目镜边缘的光学衰减 */
+.scope .sc-vig {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0) 0 58%,
+    rgba(0, 0, 0, 0.42) 84%,
+    rgba(0, 0, 0, 0.82) 100%
+  );
+}
+/* 十字分划。用 ::before / ::after 挂密位刻度，宽度按 --tube 走，两级变倍下自动跟着变。 */
+.scope .sc-h,
+.scope .sc-v {
+  position: absolute;
+  background: rgba(12, 14, 16, 0.82);
+}
+.scope .sc-h {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+.scope .sc-v {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+/* 密位刻度：每根轴 6 个短齿，对称排布 */
+.scope .sc-h::before,
+.scope .sc-h::after {
+  content: "";
+  position: absolute;
+  top: -3.5px;
+  width: 1px;
+  height: 8px;
+  background: rgba(12, 14, 16, 0.7);
+}
+.scope .sc-h::before {
+  left: 50%;
+  margin-left: calc(var(--tube) * -0.62);
+  box-shadow:
+    calc(var(--tube) * 0.19) 0 0 rgba(12, 14, 16, 0.7),
+    calc(var(--tube) * 0.38) 0 0 rgba(12, 14, 16, 0.7);
+}
+.scope .sc-h::after {
+  right: 50%;
+  margin-right: calc(var(--tube) * -0.62);
+  box-shadow:
+    calc(var(--tube) * -0.19) 0 0 rgba(12, 14, 16, 0.7),
+    calc(var(--tube) * -0.38) 0 0 rgba(12, 14, 16, 0.7);
+}
+.scope .sc-v::before,
+.scope .sc-v::after {
+  content: "";
+  position: absolute;
+  left: -3.5px;
+  width: 8px;
+  height: 1px;
+  background: rgba(12, 14, 16, 0.7);
+}
+.scope .sc-v::before {
+  top: 50%;
+  margin-top: calc(var(--tube) * -0.62);
+  box-shadow:
+    0 calc(var(--tube) * 0.19) 0 rgba(12, 14, 16, 0.7),
+    0 calc(var(--tube) * 0.38) 0 rgba(12, 14, 16, 0.7);
+}
+.scope .sc-v::after {
+  bottom: 50%;
+  margin-bottom: calc(var(--tube) * -0.62);
+  box-shadow:
+    0 calc(var(--tube) * -0.19) 0 rgba(12, 14, 16, 0.7),
+    0 calc(var(--tube) * -0.38) 0 rgba(12, 14, 16, 0.7);
+}
+.scope .sc-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: rgba(12, 14, 16, 0.92);
+}
+
+/* ===== HUD ===== */
+/* z-index 7：要盖在狙击镜（6）的黑场之上 —— CF 开镜后血量/弹药/击杀信息照常可见。
+   顶层的闪光白屏（.fx-layer 8）和菜单（.menu 10）仍在它上面。 */
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  font-family: "Consolas", "SF Mono", "Courier New", monospace;
+  color: #e5e7eb;
+}
+.hud.hidden { display: none; }
+
+/* 准星：CF 默认的绿色细线 + 中心点，间隙由 --gap 驱动（开火/移动时实时变化） */
+.crosshair {
+  --gap: 5px;
+  --len: 9px;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+.crosshair.hidden { display: none; }
+.crosshair .x {
+  position: absolute;
+  background: rgba(120, 255, 140, 0.95);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+}
+.crosshair .x-top {
+  left: -1px;
+  width: 2px;
+  height: var(--len);
+  bottom: var(--gap);
+}
+.crosshair .x-bottom {
+  left: -1px;
+  width: 2px;
+  height: var(--len);
+  top: var(--gap);
+}
+.crosshair .x-left {
+  top: -1px;
+  height: 2px;
+  width: var(--len);
+  right: var(--gap);
+}
+.crosshair .x-right {
+  top: -1px;
+  height: 2px;
+  width: var(--len);
+  left: var(--gap);
+}
+.crosshair .x-dot {
+  left: -1.5px;
+  top: -1.5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(120, 255, 140, 0.95);
+}
+
+/* ---- 顶部：比分 + 回合倒计时 ---- */
+.hud-top {
+  position: absolute;
+  top: 16px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+}
+.roundbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 7px 22px;
+  background: rgba(8, 13, 20, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+}
+.rb-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 110px;
+}
+.rb-side.rb-b { justify-content: flex-end; }
+.rb-team {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: #9ca3af;
+}
+.rb-score {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+}
+.rb-a .rb-score { color: #6fb3ff; }
+.rb-b .rb-score { color: #ff6b6b; }
+.rb-mid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 104px;
+  padding: 0 10px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+.rb-time {
+  font-size: 24px;
+  font-weight: 800;
+  color: #fbbf24;
+  line-height: 1.1;
+}
+.rb-time.low { color: #ef4444; animation: pulse 1s infinite; }
+.rb-limit {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #9ca3af;
+}
+.rb-limit b { color: #e5e7eb; }
+
+/* ---- 右上：击杀信息条 ---- */
+.killfeed {
+  position: absolute;
+  right: 22px;
+  top: 78px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+.kf-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 12px;
+  background: rgba(6, 10, 16, 0.66);
+  border-right: 3px solid #6fb3ff;
+  font-size: 14px;
+  animation: kfIn 0.16s ease-out;
+}
+.kf-row.foe { border-right-color: #ff6b6b; }
+@keyframes kfIn {
+  0% { opacity: 0; transform: translateX(18px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.kf-k { color: #6fb3ff; font-weight: 700; }
+.kf-row.foe .kf-k { color: #ff6b6b; }
+.kf-v { color: #cbd5e1; }
+.kf-w {
+  color: #fbbf24;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.kf-hs {
+  color: #ff4d4d;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+/* ===== 战绩面板（按住 TAB，与 CF 一致）===== */
+/* 放在 #hud 内部，所以 z-index 的 5 是相对于 .hud（7）这个层叠上下文的：
+   压得住准星/血条，但仍低于闪光白屏（.fx-layer 8）与菜单（.menu 10）。 */
+.scoreboard {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 13, 0.52);
+}
+.scoreboard.hidden { display: none; }
+.sb-panel {
+  width: min(880px, 92vw);
+  background: linear-gradient(180deg, rgba(10, 16, 24, 0.97), rgba(7, 11, 17, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 2px solid #6fb3ff;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.62);
+}
+.sb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.sb-team {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 150px;
+}
+.sb-team.sb-red { justify-content: flex-end; }
+.sb-tname {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+.sb-blue .sb-tname { color: #6fb3ff; }
+.sb-red .sb-tname { color: #ff6b6b; }
+.sb-tscore {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.sb-blue .sb-tscore { color: #6fb3ff; }
+.sb-red .sb-tscore { color: #ff6b6b; }
+.sb-mid { text-align: center; }
+.sb-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: #e5e7eb;
+}
+.sb-sub {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #64748b;
+  margin-top: 2px;
+}
+.sb-target {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 5px;
+}
+.sb-target b { color: #fbbf24; font-size: 13px; }
+.sb-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.09); /* 1px 间隙 + 底色 = 中缝分隔线 */
+}
+.sb-col {
+  background: #080d14;
+  padding: 9px 0 12px;
+}
+.sb-colhead,
+.sb-row {
+  display: grid;
+  grid-template-columns: 1fr 54px 54px;
+  align-items: center;
+  padding: 0 18px;
+  height: 26px;
+  font-size: 13px;
+}
+.sb-colhead {
+  height: 22px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #64748b;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 5px;
+}
+.sb-colhead span:not(:first-child),
+.sb-row span:not(:first-child) { text-align: center; }
+.sb-row { color: #cbd5e1; }
+.sb-row .sb-k { color: #e5e7eb; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sb-row .sb-d { color: #94a3b8; font-variant-numeric: tabular-nums; }
+/* 自己那一行高亮（CF 同样会标出玩家本人） */
+.sb-row.me {
+  background: rgba(111, 179, 255, 0.15);
+  color: #fff;
+  font-weight: 700;
+}
+.sb-row.me .sb-k { color: #fbbf24; }
+.sb-foot {
+  padding: 9px 20px;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #64748b;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.sb-foot b { color: #cbd5e1; }
+
+/* ---- 中上：连杀播报 ---- */
+.streak {
+  position: absolute;
+  left: 50%;
+  top: 24%;
+  transform: translateX(-50%);
+  font-size: 42px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: #ffd24a;
+  text-shadow: 0 0 20px rgba(255, 180, 40, 0.8), 0 2px 6px rgba(0, 0, 0, 0.95);
+  opacity: 0;
+  white-space: nowrap;
+}
+.streak.show { animation: streakPop 1.5s ease-out forwards; }
+@keyframes streakPop {
+  0% { opacity: 0; transform: translateX(-50%) scale(1.7); }
+  14% { opacity: 1; transform: translateX(-50%) scale(1); }
+  72% { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.06); }
+}
+
+/* ---- 屏幕中心：击杀图标 ---- */
+.killicon {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 92px);
+  transform: translateX(-50%);
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #ffd24a;
+  text-shadow: 0 0 14px rgba(255, 180, 40, 0.85), 0 2px 5px rgba(0, 0, 0, 0.95);
+  opacity: 0;
+}
+.killicon.show { animation: killIconAnim 0.85s ease-out forwards; }
+@keyframes killIconAnim {
+  0% { opacity: 0; transform: translateX(-50%) scale(1.5); }
+  18% { opacity: 1; transform: translateX(-50%) scale(1); }
+  60% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) scale(0.92); }
+}
+
+/* ---- 受击方向指示：绕屏幕中心旋转的红色弧 ---- */
+.hitdir {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+.hitdir.show { animation: hitdirFade 0.9s ease-out forwards; }
+@keyframes hitdirFade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.hitdir span {
+  position: absolute;
+  left: -36px;
+  top: -152px;
+  width: 72px;
+  height: 30px;
+  background: radial-gradient(ellipse at 50% 100%, rgba(255, 46, 46, 0.95), rgba(255, 46, 46, 0) 72%);
+}
+
+/* ---- 左下：生命值 ---- */
+.hud-bottom-left {
+  position: absolute;
+  left: 26px;
+  bottom: 24px;
+  width: 220px;
+}
+.hp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.hp-icon {
+  font-size: 15px;
+  color: #4ade80;
+}
+.hp-num {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+  color: #e5e7eb;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.9);
+}
+.hp-num.low { color: #ef4444; animation: pulse 0.7s infinite; }
+.hud-bar {
+  height: 7px;
+  background: rgba(8, 13, 20, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.hud-bar-fill {
+  height: 100%;
+  width: 100%;
+  transition: width 0.2s ease, background 0.3s ease;
+}
+#hpFill { background: linear-gradient(90deg, #166534, #4ade80); }
+#hpFill.low {
+  background: linear-gradient(90deg, #7f1d1d, #ef4444);
+  animation: pulse 0.8s infinite;
+}
+#ammoFill { background: linear-gradient(90deg, #b45309, #fbbf24); }
+#ammoFill.low {
+  background: linear-gradient(90deg, #7f1d1d, #ef4444);
+  animation: pulse 0.8s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ---- 右下：武器名 + 弹药 ---- */
+.hud-bottom-right {
+  position: absolute;
+  right: 26px;
+  bottom: 24px;
+  width: 240px;
+  text-align: right;
+}
+.wname {
+  font-size: 15px;
+  letter-spacing: 3px;
+  color: #cbd5e1;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.9);
+}
+.ammo-num {
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: #e5e7eb;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.9);
+}
+.ammo-num.low { color: #fbbf24; }
+.hud-bottom-right .hud-bar { margin-top: 4px; }
+
+/* 提示 */
+.hud-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 22%;
+  transform: translateX(-50%);
+  font-size: 20px;
+  letter-spacing: 4px;
+  color: #fbbf24;
+  opacity: 0;
+  transition: opacity 0.25s;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.9);
+}
+.hud-toast.show { opacity: 1; }
+.hud-toast.red { color: #ef4444; }
+
+/* ===== 阵亡界面（死亡视角 3 秒）===== */
+/* 挂在 #hud 内部，所以这里的 z-index 4 是相对 .hud(7) 的层内值：
+   压得住准星与血条弹药，又低于战绩面板(5)、狙击镜(.scope 6 在 hud 之下)、
+   闪光白屏(.fx-layer 8)与菜单(.menu 10)。pointer-events 由 .hud 继承为 none，
+   死亡期间点不到任何东西 —— 与「不能移动/开枪」的规则一致。 */
+.death {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.death.hidden { display: none; }
+/* 红晕：中心始终透明，只在四周压红 —— 死亡反馈的红是 DESIGN.md 明确允许的例外 */
+.death-vig {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(140, 12, 12, 0) 34%, rgba(120, 10, 10, 0.62) 100%);
+}
+.death-body {
+  position: relative;
+  /* 信息块整体压在中心偏下：中央那一块留给「你倒下的地方」，也不违「不遮准星」的规矩 */
+  margin-top: 14vh;
+  text-align: center;
+  animation: deathIn 0.28s ease-out;
+}
+@keyframes deathIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.death-title {
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 7px;
+  color: #ef4444;
+  text-shadow: 0 0 18px rgba(239, 68, 68, 0.5), 0 2px 6px rgba(0, 0, 0, 0.95);
+}
+.death-line {
+  margin-top: 10px;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
+}
+.death-k {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #e5e7eb;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.95);
+}
+.death-w {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #fbbf24;
+}
+.death-bar {
+  margin: 12px auto 0;
+  width: 220px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.death-bar i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #ef4444;
+}
+.death-tip {
+  margin-top: 8px;
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: #9ca3af;
+}
+
+/* ===== 菜单（CF 大厅风格：炭黑 + 琥珀橙 + 斜切角）=====
+   CF 的大厅配色是「近黑底 + 大面积橙黄」，而不是本作 HUD 的战术绿。菜单与 HUD 用两套色
+   是刻意的：大厅是「界面」，橙黄在这里承担强调与可点性；战场 HUD 保持绿/红/黄的功能色。
+   所有可点控件都切成斜角（clip-path），这是 CF 面板的招牌轮廓。 */
+.menu {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 超高内容兜底：flex 的 align-items:center 在内容超出视口时会把**上下两端**同时裁掉、
+     且不可滚动 ——「进入战场」按钮会直接点不到（实测踩到）。改成可滚动 + 子元素 margin:auto：
+     有富余空间时 auto 外边距照样居中，不够时退化成 0、面板从顶部开始并可滚动到尾部。 */
+  overflow-y: auto;
+  padding: 24px 0;
+  /* 背景整个写在滚动容器自己身上（含斜向拉丝）—— 放在 ::before 里的话它会跟着内容滚走，
+     滚到下半屏就没有暗纹了。 */
+  background:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.022) 0 2px, rgba(255, 255, 255, 0) 2px 9px),
+    radial-gradient(ellipse 70% 60% at 50% 40%, rgba(255, 155, 26, 0.11) 0%, rgba(255, 155, 26, 0) 62%),
+    radial-gradient(ellipse at center, rgba(24, 25, 28, 0.92) 0%, rgba(6, 7, 9, 0.99) 100%),
+    #08090b;
+}
+.menu.hidden { display: none; }
+.menu-panel {
+  position: relative;
+  /* 与 .menu 的 overflow-y:auto 配套：auto 外边距优先于 align-items，空间不足时不被裁切 */
+  margin: auto;
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 38px 64px 44px;
+  background: linear-gradient(180deg, rgba(27, 28, 32, 0.96), rgba(14, 15, 18, 0.97));
+  border: 1px solid rgba(255, 155, 26, 0.28);
+  /* box-shadow 会被 clip-path 一起裁掉，所以只用内阴影（画在盒内，裁不到）——外发光交给
+     ::after 那条橙线。 */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  clip-path: polygon(26px 0, 100% 0, 100% calc(100% - 26px), calc(100% - 26px) 100%, 0 100%, 0 26px);
+}
+/* 面板顶端的橙色高光条：CF 面板的招牌。left 从切角结束处起，免得被斜角切掉一截。 */
+.menu-panel::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 26px;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #ff9b1a 0%, rgba(255, 155, 26, 0.25) 55%, rgba(255, 155, 26, 0) 100%);
+}
+.menu-brand {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 11px;
+  letter-spacing: 9px;
+  color: #ff9b1a;
+  margin-bottom: 12px;
+  text-shadow: 0 0 14px rgba(255, 155, 26, 0.5);
+}
+.menu-title {
+  /* 金属渐变字：透明填充 + background-clip:text。**这种写法不能配 text-shadow** ——
+     填充透明时阴影会从字形里透出来，字看起来是糊的；要发光只能用 filter: drop-shadow()。 */
+  font-size: 46px;
+  letter-spacing: 14px;
+  font-weight: 900;
+  background: linear-gradient(180deg, #ffffff 0%, #d6d9dd 46%, #8b9198 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.7));
+}
+/* 结算画面的胜负标题要把渐变字还原成纯色（语义色优先于装饰） */
+.menu-title.lose,
+.menu-title.dead,
+.menu-title.win,
+.menu-title.draw {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+.menu-title.lose,
+.menu-title.dead {
+  color: #e03b2f;
+  text-shadow: 0 0 26px rgba(224, 59, 47, 0.45);
+}
+.menu-title.win {
+  color: #4ade80;
+  text-shadow: 0 0 26px rgba(74, 222, 128, 0.4);
+}
+.menu-title.draw {
+  color: #fbbf24;
+  text-shadow: 0 0 26px rgba(251, 191, 36, 0.4);
+}
+.menu-sub {
+  margin-top: 10px;
+  letter-spacing: 6px;
+  color: #8b9099;
+  font-size: 12px;
+}
+/* 标题下的橙色渐隐分隔线 */
+.menu-sub::after {
+  content: "";
+  display: block;
+  width: 140px;
+  height: 1px;
+  margin: 20px auto 0;
+  background: linear-gradient(90deg, rgba(255, 155, 26, 0) 0%, #ff9b1a 50%, rgba(255, 155, 26, 0) 100%);
+}
+.menu-btn {
+  padding: 14px 60px;
+  background: linear-gradient(180deg, #ffb64d 0%, #ff9b1a 46%, #d97706 100%);
+  color: #17120a;
+  border: 1px solid #ffd08a;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  transition: filter 0.18s, transform 0.18s;
+}
+.menu-btn:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+.menu-btn:active {
+  filter: brightness(0.94);
+  transform: translateY(1px);
+}
+.gameover-stats {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  margin: 24px 0;
+}
+.gameover-stats div span {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #8b9099;
+}
+.gameover-stats div b {
+  display: block;
+  font-size: 30px;
+  color: #e8eaed;
+  font-family: "Consolas", monospace;
+}
+.gameover-stats div:last-child b { color: #ffb64d; }
+
+/* ===== 背包面板 ===== */
+.backpack {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  min-width: 340px;
+  padding: 26px 30px;
+  background: rgba(12, 18, 26, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  clip-path: polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px);
+  backdrop-filter: blur(4px);
+  pointer-events: auto; /* .hud 是 pointer-events:none，这里必须复位，否则面板不可交互 */
+}
+.backpack.hidden { display: none; }
+.bp-title {
+  font-size: 17px;
+  letter-spacing: 5px;
+  color: #e5e7eb;
+  text-align: center;
+  margin-bottom: 18px;
+}
+.bp-title small {
+  display: block;
+  font-size: 11px;
+  color: #9ca3af;
+  letter-spacing: 2px;
+  margin-top: 6px;
+}
+.bp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bp-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 16px;
+  background: rgba(20, 30, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #d1d5db;
+  font-family: "Consolas", "Courier New", monospace;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.bp-item:hover {
+  background: rgba(35, 52, 70, 0.85);
+  border-color: rgba(74, 222, 128, 0.5);
+}
+.bp-item.active { border-color: rgba(74, 222, 128, 0.8); }
+.bp-item.active .bp-name { color: #4ade80; }
+.bp-name {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+/* 背包行里的皮肤名（小号、灰）：两个背包都用 AK 时靠它区分 */
+.bp-skin {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #9ca3af;
+}
+.bp-item.active .bp-skin { color: #86efac; }
+/* 背包行：编号 + 主武器名。指针锁定时没有光标，这里的点击实际点不到，
+   主路径是 B + 数字键；pointer-events: auto 是为了语义正确（.hud 是 none）。 */
+.bp-row {
+  justify-content: flex-start;
+  gap: 14px;
+}
+.bp-idx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 700;
+}
+.bp-row.active .bp-idx {
+  background: rgba(74, 222, 128, 0.22);
+  border-color: rgba(74, 222, 128, 0.8);
+  color: #4ade80;
+}
+.bp-hint {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  line-height: 1.7;
+  letter-spacing: 1px;
+  color: #9ca3af;
+  text-align: center;
+}
+.bp-hint.warn { color: #fbbf24; }
+
+/* HUD 右下角的当前背包标识 */
+.bp-badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 6px;
+  border: 1px solid rgba(74, 222, 128, 0.55);
+  color: #4ade80;
+  font-size: 11px;
+  letter-spacing: 1px;
+  vertical-align: middle;
+}
+
+/* ===== 开始菜单：对局设置 ===== */
+.menu-setup {
+  margin: 26px auto 30px;
+  width: 100%;
+  max-width: 400px;
+  padding: 16px 20px 20px;
+  text-align: left;
+  background: linear-gradient(180deg, rgba(32, 33, 38, 0.9), rgba(18, 19, 22, 0.9));
+  border: 1px solid rgba(255, 155, 26, 0.18);
+  border-left: 3px solid #ff9b1a;   /* CF 分区标题那条橙竖线 */
+  pointer-events: auto;
+}
+.ml-title {
+  font-size: 13px;
+  letter-spacing: 4px;
+  font-weight: 700;
+  color: #ff9b1a;
+  text-align: left;
+  margin-bottom: 2px;
+}
+.ml-title small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #7c828b;
+  letter-spacing: 1px;
+  margin-top: 5px;
+}
+.ml-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.ml-row {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+.ml-label {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #b7bcc4;
+}
+
+/* ===== 对局设置的两个控件：敌人数步进器 / 难度三档 =====
+   与 .menu-btn 同一套 CF 语言：斜切角 + 琥珀橙。active = 橙底黑字。 */
+.ml-stepper {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.ml-step-btn {
+  width: 42px;
+  padding: 8px 0;
+  background: rgba(70, 49, 18, 0.55);
+  border: 1px solid rgba(255, 155, 26, 0.45);
+  color: #ffb64d;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+  transition: background 0.15s, color 0.15s;
+}
+.ml-step-btn:hover {
+  background: #ff9b1a;
+  color: #17120a;
+}
+.ml-step-val {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 4px;
+  background: rgba(10, 11, 13, 0.9);
+  border: 1px solid rgba(255, 155, 26, 0.5);
+  color: #ffb64d;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.ml-seg {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.ml-seg-btn {
+  padding: 9px 4px;
+  background: rgba(24, 25, 29, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #b7bcc4;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ml-seg-btn:hover {
+  border-color: rgba(255, 155, 26, 0.6);
+  color: #ffb64d;
+}
+.ml-seg-btn.active {
+  background: linear-gradient(180deg, #ffb64d, #ef8a00);
+  border-color: #ffd08a;
+  color: #17120a;
+  font-weight: 700;
+}
+
+/* ===== 响应式 ===== */
+@media (max-width: 820px) {
+  .hud-top { transform: scale(0.82); transform-origin: top center; }
+  .hud-bottom-left { left: 18px; bottom: 18px; transform: scale(0.85); transform-origin: left bottom; }
+  .hud-bottom-right { right: 18px; bottom: 18px; width: 200px; transform: scale(0.85); transform-origin: right bottom; }
+  .killfeed { transform: scale(0.88); transform-origin: top right; }
+  .streak { font-size: 32px; letter-spacing: 6px; }
+  .death-title { font-size: 22px; letter-spacing: 5px; }
+  .death-k { font-size: 17px; }
+  .death-bar { width: 180px; }
+}
+
+@media (max-width: 480px) {
+  .hud-bottom-left { left: 10px; bottom: 10px; }
+  .hud-bottom-right { right: 10px; bottom: 10px; }
+  .rb-score { font-size: 22px; }
+  .rb-time { font-size: 18px; }
+  .hp-num { font-size: 30px; }
+  .ammo-num { font-size: 30px; }
+  .backpack { min-width: 0; width: 88vw; padding: 20px; }
+  /* 窄屏：缩内边距与字号，不要用 transform:scale —— 缩放会让斜切角与描边发虚，
+     也会把「进入战场」的可点区域一起缩掉。 */
+  .menu { padding: 16px 12px; }
+  .menu-panel { padding: 28px 26px 32px; }
+  .menu-brand { letter-spacing: 6px; }
+  .menu-title { font-size: 32px; letter-spacing: 8px; }
+  .menu-sub { letter-spacing: 4px; }
+  .menu-setup { padding: 14px 16px 16px; }
+  .ml-row { grid-template-columns: 64px 1fr; gap: 8px; }
+  .menu-btn { padding: 13px 40px; letter-spacing: 5px; }
+  .death-title { font-size: 18px; letter-spacing: 4px; }
+  .death-k { font-size: 15px; }
+  .death-bar { width: 150px; }
+}

@@ -507,13 +507,112 @@ body {
   text-shadow: 0 0 20px rgba(255, 180, 40, 0.8), 0 2px 6px rgba(0, 0, 0, 0.95);
   opacity: 0;
   white-space: nowrap;
+  /* 文案全是中文，**必须自带中文栈**：.hud 的 Consolas 没有中文字形，
+     不覆盖就掉到系统衬线体（同 .chat 那条）。 */
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
 }
+/* 长文案（「二十一连杀!」这种，6 字起）收一档字号，免得被顶出 480px 窄屏。
+   阈值在 main.js 的 showStreak 里（label.length > 5）。
+   **不用 transform 缩** —— 同菜单那条禁忌，缩放会把描边磨虚、也把占位一起缩掉。 */
+.streak.long { font-size: 30px; letter-spacing: 6px; }
 .streak.show { animation: streakPop 1.5s ease-out forwards; }
 @keyframes streakPop {
   0% { opacity: 0; transform: translateX(-50%) scale(1.7); }
   14% { opacity: 1; transform: translateX(-50%) scale(1); }
   72% { opacity: 1; transform: translateX(-50%) scale(1); }
   100% { opacity: 0; transform: translateX(-50%) scale(1.06); }
+}
+/* 档位配色（r1 黄 → r5 紫金，由 main.js 的 streakRank 给）。**只改颜色与辉光，
+   不动时长** —— 让高档位的动画更长会显得「卡」。 */
+.streak.r2 { color: #ff9b1a; text-shadow: 0 0 22px rgba(255, 140, 30, 0.9), 0 2px 6px rgba(0, 0, 0, 0.95); }
+.streak.r3 { color: #ff7a2f; text-shadow: 0 0 26px rgba(255, 110, 30, 0.95), 0 2px 7px rgba(0, 0, 0, 0.95); }
+.streak.r4 { color: #ff4d4d; text-shadow: 0 0 30px rgba(255, 60, 60, 1), 0 2px 8px rgba(0, 0, 0, 0.95); }
+.streak.r5 {
+  color: #ffe6ff;
+  text-shadow: 0 0 12px #b340ff, 0 0 34px rgba(160, 60, 255, 0.95), 0 2px 8px rgba(0, 0, 0, 0.95);
+}
+/* 高档位另配一条更「炸」的弹入：带一点旋转抖动，收尾多停一拍。
+   选择器三节 > `.streak.show` 的两节，所以一定压得住，与书写顺序无关。 */
+.streak.r4.show, .streak.r5.show { animation: streakPopBig 1.7s ease-out forwards; }
+@keyframes streakPopBig {
+  0% { opacity: 0; transform: translateX(-50%) scale(2.4) rotate(-4deg); }
+  12% { opacity: 1; transform: translateX(-50%) scale(1) rotate(2deg); }
+  18% { transform: translateX(-50%) scale(1.06) rotate(-1.4deg); }
+  24% { transform: translateX(-50%) scale(1) rotate(0deg); }
+  78% { opacity: 1; transform: translateX(-50%) scale(1) rotate(0deg); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.1) rotate(0deg); }
+}
+
+/* ---- 中上：连杀窗口倒计时（常驻）----
+   只要身上挂着连杀（streakCount >= 1）就显示，紫色条走完 = 连杀断了。
+   条宽**每帧由 JS 写**（同死亡面板），不做 CSS 动画 —— 那样跟不上 pause()。 */
+.sk-timer {
+  position: absolute;
+  left: 50%;
+  top: calc(24% + 56px);
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px 4px 9px;
+  background: rgba(8, 12, 18, 0.62);
+  border: 1px solid rgba(255, 210, 74, 0.35);
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.18s ease-out, visibility 0.18s;
+}
+.sk-timer.show { opacity: 1; visibility: visible; }
+.sk-timer-num {
+  min-width: 30px;
+  text-align: right;
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  color: #ffd24a;
+}
+.sk-timer-txt { font-size: 11px; letter-spacing: 3px; color: #94a3b8; }
+.sk-timer-track {
+  width: 74px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.sk-timer-track i {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #ffd24a, #ff9b1a);
+}
+/* 快断了（1.2s 内）：转红 + 呼吸闪，提示「再不杀就断了」 */
+.sk-timer.low { border-color: rgba(239, 68, 68, 0.75); animation: skTimerPulse 0.45s ease-in-out infinite; }
+.sk-timer.low .sk-timer-num { color: #ef4444; }
+.sk-timer.low .sk-timer-track i { background: linear-gradient(90deg, #ef4444, #ff7a2f); }
+@keyframes skTimerPulse {
+  0%, 100% { border-color: rgba(239, 68, 68, 0.8); }
+  50% { border-color: rgba(239, 68, 68, 0.18); }
+}
+
+/* ---- 高档连杀的全屏边缘辉光 ----
+   只压边缘、中央留空，不挡准星（同 .damage 那条）。一次性动画，
+   重触发靠 JS 的「重写类名 → 回流 → 加 show」。 */
+.fx-layer .streak-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 46%, rgba(255, 120, 30, 0.5) 100%);
+}
+/* 高档只把**颜色**推浓，`transparent` 的那圈不能往里收太多：收到 38% 时整屏都会被
+   染上一层（实测 r5 紫金时甲板都在发紫），那就不是「边缘辉光」而是「戴墨镜」了。 */
+.fx-layer .streak-flash.f4 { background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 50, 50, 0.58) 100%); }
+.fx-layer .streak-flash.f5 { background: radial-gradient(ellipse at center, transparent 44%, rgba(170, 70, 255, 0.62) 100%); }
+.fx-layer .streak-flash.show { animation: streakFlashAnim 0.75s ease-out forwards; }
+@keyframes streakFlashAnim {
+  0% { opacity: 0; }
+  16% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* ---- 屏幕中心：击杀图标 ---- */
@@ -558,6 +657,81 @@ body {
   width: 72px;
   height: 30px;
   background: radial-gradient(ellipse at 50% 100%, rgba(255, 46, 46, 0.95), rgba(255, 46, 46, 0) 72%);
+}
+
+/* ---- 左下：聊天（压在血条之上，向上生长）---- */
+/* 只锚 bottom、不定 top/height：下沿钉死在血条上方（.hud-bottom-left 是
+   left:26px; bottom:24px、含 40px 大号数字约 70px 高），内容变高时自然向上生长，
+   新行出现在最下方、旧行往上顶——不需要任何 flex 技巧。 */
+.chat {
+  position: absolute;
+  left: 26px;
+  bottom: 104px;
+  width: min(330px, 34vw);
+  /* 字体栈**必须自带中文**：.hud 的 Consolas 没有中文字形，会掉到系统默认衬线体 */
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+.chat-line {
+  display: block;
+  margin-top: 2px;
+  padding: 3px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e5e7eb;
+  background: rgba(6, 10, 16, 0.66);
+  border-left: 3px solid #ff6b6b; /* 敌方红（沿用击杀信息条的调色板）*/
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+  word-break: break-word;
+}
+/* 配色只用击杀信息条那套绿/红/灰功能色。**不要用 #fbbf24** ——
+   DESIGN.md 规定「进战场后橙只保留警戒黄这一个既有用途（爆头/连杀/低弹）」，
+   拿它当聊天强调色就是新增用途、破了那条禁忌。 */
+.chat-line.me { border-left-color: #6fb3ff; }
+.chat-line.system { border-left-color: #9ca3af; }
+.chat-name { color: #9ca3af; }
+.chat-line.enemy .chat-name { color: #ff9c9c; }
+.chat-line.me .chat-name { color: #6fb3ff; }
+
+/* 输入行**常驻占位**、不用 display:none 切换 —— 否则每次开关输入，整摞行都会跳一下。
+   .hidden 走 opacity + visibility 收起，布局高度照占。 */
+.chat-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 3px 8px;
+  background: rgba(6, 10, 16, 0.82);
+  border-left: 3px solid #6fb3ff;
+}
+.chat-input.hidden { opacity: 0; visibility: hidden; }
+.chat-tag { flex: 0 0 auto; font-size: 12px; color: #9ca3af; }
+.chat-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 13px;
+  color: #e5e7eb;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(111, 179, 255, 0.55);
+  outline: none;
+  caret-color: #6fb3ff;
+  /* .hud 是 pointer-events:none —— 输入框这里必须复位才能聚焦与选词
+     （同 .backpack 那条既有先例）。外层 .chat 保持 none，
+     日志区就永远不吃点击、挡不到准星与开火。 */
+  pointer-events: auto;
+}
+
+/* 窄屏缩字号与宽度，**不用 transform: scale()**（缩放会让 1px 描边发虚，
+   也会把可交互区域一起缩掉 —— AGENTS.md 明令禁止，HUD 文本同理会更糊）。 */
+@media (max-width: 820px) {
+  .chat { width: min(260px, 46vw); }
+  .chat-line, .chat-input input { font-size: 12px; }
+}
+@media (max-width: 480px) {
+  .chat { width: 52vw; bottom: 110px; }
+  .chat-line, .chat-input input { font-size: 11px; }
 }
 
 /* ---- 左下：生命值 ---- */
@@ -966,6 +1140,58 @@ body {
   border-color: rgba(74, 222, 128, 0.8);
   color: #4ade80;
 }
+/* 面板里的分区（现在是「背包」与「皮肤」两段）：与上一段之间拉一条分隔线，
+   免得皮肤行看起来像是第 4 个背包。 */
+.bp-sec {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.bp-sec-title {
+  margin-bottom: 10px;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #9ca3af;
+}
+.bp-sec-title::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 11px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  background: #4ade80;
+}
+/* 皮肤行横向铺开、按需换行：一款枪 4~6 个皮肤，竖着排会把面板撑得很高 */
+.bp-list.bp-skins {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.bp-skin-row {
+  flex: 1 1 auto;
+  min-width: 92px;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 12px;
+}
+.bp-skin-row .bp-name {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+}
+/* 「模型」标记：这一款换的是整把枪的模型，不只是配色 */
+.bp-model {
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 155, 26, 0.55);
+  color: #ff9b1a;
+  font-size: 10px;
+  letter-spacing: 1px;
+  flex: none;
+}
+.bp-item.active .bp-model {
+  border-color: rgba(255, 155, 26, 0.9);
+  background: rgba(255, 155, 26, 0.14);
+}
 .bp-hint {
   margin-top: 16px;
   padding-top: 12px;
@@ -976,7 +1202,50 @@ body {
   color: #9ca3af;
   text-align: center;
 }
-.bp-hint.warn { color: #fbbf24; }
+/* 按键提示做成键帽。**不能退回纯文本 `[ / ]`**：括号只有 6.6px 宽、笔画极细，混在
+   11px 灰字里与相邻的真斜杠糊成一体，整句会被读成「按 `/` 换皮肤」（用户实测报的正是这
+   条）。样式抄 `.bp-idx` 那套方角键帽，尺寸收小一号。注意 `.bp-hint` 上的 letter-spacing
+   必须在这里归零，否则键帽里的单个字符会被推开、看起来不像一个键。 */
+.bp-hint-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 5px 12px;
+}
+.bp-hint-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #cbd5e1;
+}
+.bp-hint kbd {
+  display: inline-block;
+  min-width: 17px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-color: rgba(0, 0, 0, 0.55);
+  color: #e5e7eb;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  letter-spacing: 0;
+  text-align: center;
+}
+.bp-hint-sep {
+  color: #9ca3af;
+  opacity: 0.5;
+}
+/* 只有「换背包被拦」那条染警示黄：皮肤那条仍然可用，整句染黄会误导。 */
+.bp-hint-item.warn { color: #fbbf24; }
+/* 槽位图例与这个面板的操作无关，另起一行压暗 —— 混在同一行会把上面的按键提示淹掉 */
+.bp-hint-legend {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: #6b7280;
+}
 
 /* HUD 右下角的当前背包标识 */
 .bp-badge {

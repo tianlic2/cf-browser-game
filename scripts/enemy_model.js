@@ -99,14 +99,22 @@ const RIFLE_HALF = RIFLE_LEN / 2;
 const RIFLE_YAW = Math.PI / 2;   // AK 枪口在本体 -x，+90° → 指向本组 +z
 
 // 两个握点（相对枪心、在枪自身坐标系里）：扣扳机的手在下后方，托举手在护木上
-// 握点/护木点（mount 本地系）：AK 归一化后是「中心归零、枪口朝 +z」的一根长枪，
-// 扳机握把在中心**之后**约 19cm，木护木在中心之前约 13cm —— 这两个值是从实测截图上
-// 量出来的（枪全长 0.92 → 用像素比例反推），不是拍脑袋。放错会让左手够到枪管中段。
+// 握点/护木点（mount 本地系）：归一化后是「中心归零、枪口朝 +z」的一根长枪（全长 0.92），
+// 扳机握把在中心**之后**约 19cm，木护木在中心之前约 10cm —— 这两个值是从实测截图上
+// 量出来的（用像素比例反推），不是拍脑袋。放错会让左手够到枪管中段。
 // 更硬的一条约束：左肩(0.20, 0.22, 0) 到护木点的距离必须明显小于臂展 UPPER+FORE=0.58，
 // 否则 IK 被迫把支撑臂拉成一条直线（实测护木取 z=0.20 时距离 0.577，手臂完全绷直，
-// 看起来像「枪飘在胸前、手够不着」）。取 0.13 后约 0.50，肘部自然弯 ~60°。
-const GRIP = new THREE.Vector3(0, -0.10, -0.19);
-const HANDGUARD = new THREE.Vector3(0, -0.04, 0.10);
+// 看起来像「枪飘在胸前、手够不着」）。取 0.10 后约 0.50，肘部自然弯 ~60°。
+//
+// **按枪型号分开取**：三把枪归一化后都在同一个 0.92 的盒子里、枪口都朝 +z，
+// 但握把/护木在盒子里的位置不同（AWM 是手动枪机、M4 的护木更长），共用一套会让某把枪的手插进枪身。
+// 形态照抄 viewarms.js 的 ARM_ANCHORS：**导出成可变对象**，可以用 __tactical 在线微调，
+// 不必为了挪一厘米重启页面（初值三把暂时相同，是实测截图后按需分别调的起点）。
+export const RIFLE_ANCHORS = {
+  ak: { grip: new THREE.Vector3(0, -0.10, -0.19), handguard: new THREE.Vector3(0, -0.04, 0.10) },
+  m4: { grip: new THREE.Vector3(0, -0.10, -0.19), handguard: new THREE.Vector3(0, -0.04, 0.10) },
+  awm: { grip: new THREE.Vector3(0, -0.10, -0.19), handguard: new THREE.Vector3(0, -0.04, 0.10) },
+};
 
 // 两个持枪姿态（相对胸腔中心的枪心位置 + 俯仰；俯仰 >0 = 枪口压下）。
 // 两个姿态都**保证双手够得着**（臂展 0.58）：低姿 0.598/0.40、据枪 0.57/0.34，
@@ -168,25 +176,6 @@ const _dropL = new THREE.Vector3(0.30, -0.32, -0.06);
 // 握点目标（每帧从常量算出来，绝不在 GRIP/HANDGUARD 上原地 applyMatrix4）
 const _gripT = new THREE.Vector3();
 const _hgT = new THREE.Vector3();
-
-// 把步枪模板定标成「世界模型」：最长边 RIFLE_LEN、枪口朝 +z、中心归零、整体压暗
-export function normalizeRifle(source) {
-  const g = source;
-  g.rotation.set(0, 0, 0);
-  const size = new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3());
-  g.scale.multiplyScalar(RIFLE_LEN / Math.max(size.x, size.y, size.z));
-  g.rotation.y = RIFLE_YAW;
-  g.position.sub(new THREE.Box3().setFromObject(g).getCenter(new THREE.Vector3()));
-  g.traverse((o) => {
-    if (o.isMesh && o.material) {
-      const m = o.material.clone();
-      if (m.color) m.color.multiplyScalar(0.6).lerp(new THREE.Color(0x6d6355), 0.2);
-      if (m.metalness !== undefined) m.metalness = Math.min(m.metalness, 0.4);
-      o.material = m;
-    }
-  });
-  return g;
-}
 
 export class SoldierRig {
   constructor(rifleTemplate) {
@@ -298,11 +287,15 @@ export class SoldierRig {
     this.legR = mkLeg(-1);
     this.legL = mkLeg(1);
 
-    // 枪：挂在胸腔的挂点上，位置/俯仰由姿态插值驱动
+    // 枪：挂在胸腔的挂点上，位置/俯仰由姿态插值驱动。
+    // 枪型每局随机（见 guncatalog.js），所以真正挂上去是 setRifle() 干的 —— 对象池复用
+    // 也要能换枪，不能只在构造函数里挂一次。
     this.mount = new THREE.Group();
     chest.add(this.mount);
-    this.rifle = rifleTemplate ? rifleTemplate.clone(true) : null;
-    if (this.rifle) this.mount.add(this.rifle);
+    this.rifle = null;
+    this.rifleYaw = RIFLE_YAW;
+    this.anchors = RIFLE_ANCHORS.ak;
+    if (rifleTemplate) this.setRifle(rifleTemplate);
 
     this.root = root;
     this.pelvis = pelvis;
@@ -326,6 +319,21 @@ export class SoldierRig {
     this.deathBlend = 0;
     this.walkW = 0;
     this.reset();
+  }
+
+  // 换枪。枪型是每局随机的（见 scripts/guncatalog.js），而敌人是对象池复用的，
+  // 所以**每次刷出**都要走这里，不能只在构造函数里挂一次。
+  // 模板是目录缓存的共享对象（同一个「枪型+皮肤」的材质在所有实例间共用），
+  // 所以**不 dispose 旧的** —— dispose 会连累其它敌人和目录本身。
+  setRifle(template, gunId) {
+    if (this.rifle) this.mount.remove(this.rifle);
+    this.rifle = template ? template.clone(true) : null;
+    if (this.rifle) this.mount.add(this.rifle);
+    // 枪的朝向由 animate() 每帧写死（倒地时还要叠 RIFLE_DEATH_YAW），所以这里把模板上
+    // 已经烘好的角度记下来当基准：不同枪的 GLB 原始朝向不同，目录按「枪口朝本组 +z」
+    // 各自烘了一个角度，不能一律用 RIFLE_YAW。
+    this.rifleYaw = this.rifle ? this.rifle.rotation.y : RIFLE_YAW;
+    this.anchors = RIFLE_ANCHORS[gunId] || RIFLE_ANCHORS.ak;
   }
 
   reset() {
@@ -471,15 +479,15 @@ export class SoldierRig {
       this.mountPos.lerp(_mountDeadP, db);
       this.mountPitch += (_MOUNT_DEAD_PITCH - this.mountPitch) * db;
     }
-    if (this.rifle) this.rifle.rotation.y = RIFLE_YAW + RIFLE_DEATH_YAW * db;
+    if (this.rifle) this.rifle.rotation.y = this.rifleYaw + RIFLE_DEATH_YAW * db;
     this.mount.position.copy(this.mountPos);
     this.mount.rotation.set(this.mountPitch, 0, 0);
     this.mount.updateMatrix();
 
     // ⑧ 双臂 IK：手要一直黏在握把与护木上（「看起来真的在持枪」的关键）。
     //    挂点在胸腔系里 → 肩也在胸腔系里，两边同系，IK 直接在这个系里解。
-    _gripT.copy(GRIP).applyMatrix4(this.mount.matrix);
-    _hgT.copy(HANDGUARD).applyMatrix4(this.mount.matrix);
+    _gripT.copy(this.anchors.grip).applyMatrix4(this.mount.matrix);
+    _hgT.copy(this.anchors.handguard).applyMatrix4(this.mount.matrix);
     if (blind > 0.02) _hgT.lerp(_faceT, blind * 0.85);          // 致盲：左手抬起来捂脸
     if (this.deathBlend > 0.02) {                               // 倒地：双手松开垂在身侧
       _gripT.lerp(_dropR, this.deathBlend);

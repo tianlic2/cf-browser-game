@@ -2,7 +2,7 @@
 // 模型不再是 GLB：soldier.glb 是静态单网格、无骨骼无动画，四肢永远垂着、枪只能飘在胸前。
 // 现在用 scripts/enemy_model.js 里自建的关节骨架，走位/瞄准/开火/受击/倒地全程序化。
 import * as THREE from "three";
-import { SoldierRig, normalizeRifle } from "./enemy_model.js";
+import { SoldierRig } from "./enemy_model.js";
 
 // 敌人血量恒定：HP 必须固定，否则「AK 3 枪死」的数值不成立 —— 所以难度**不碰血量**，
 // 只缩放下面这份 ENEMY_TUNING 里的乘数。
@@ -25,7 +25,9 @@ const TURN_RATE = 3.4;     // 最大转身角速度（rad/s）：转半圈约 0.
 const MOVE_ACCEL = 4.5;    // 水平速度逼近系数：约 0.22s 加到目标速度（起停有惯性）
 // 点射停顿的随机取值。两处赋值（reset 的初值与 updateBurst 的每轮停顿）都过这里，
 // 难度的 pause 乘数就只需要接一次。
-const pauseFor = (min, span) => (min + Math.random() * span) * ENEMY_TUNING.pause;
+// 第三个乘数 mul 是**枪型**的：端着手动枪机的 AWM 却按 AK 的节奏扫射太出戏。
+// 只影响节奏、**不改伤害**（伤害固定走 ENEMY_DAMAGE * 难度），所以「AK 三枪死」不受影响。
+const pauseFor = (min, span, mul = 1) => (min + Math.random() * span) * ENEMY_TUNING.pause * mul;
 
 // 朝向与目标方向差超过这个角度就先不开火（要先转正枪口）。
 // 别收得太紧：玩家贴身绕圈时敌人跟不上转速，容差过小会让它一直不还击
@@ -57,7 +59,9 @@ export class Enemy {
 
     // 自建骨架：四肢有关节，走位/瞄准/开火/受击/倒地全部由它演。
     // 几何体在模块内全局共享（8 个敌人共用一份），材质每人一份（受击闪红不能串台）。
-    this.rig = new SoldierRig(opts.rifle || null);
+    // 枪这里传 null —— 底下的 reset() 会用 opts.rifle 走 setRifle()，传进来再挂一次
+    // 等于白 clone 一份模板（setRifle 内部会先摘掉旧的）。
+    this.rig = new SoldierRig(null);
     body.add(this.rig.root);
     // 步枪不进 meshes：① 受击闪红不该闪到枪上；② 子弹可以穿过枪身不算命中
     this.meshes = this.rig.meshes;
@@ -78,6 +82,13 @@ export class Enemy {
     this.maxHealth = ENEMY_HP;
     this.damage = ENEMY_DAMAGE * ENEMY_TUNING.dmg;
     this.name = opts.name || ENEMY_NAMES[0];
+    // 枪型/皮肤每局随机（main.js 的 loadoutPicker 抽的），死亡时按这两个字段掉在地上。
+    // 枪必须在这里换：敌人是对象池复用的，构造函数只跑一次。
+    if (opts.rifle) this.rig.setRifle(opts.rifle, opts.gunId);
+    this.gunId = opts.gunId || "ak";
+    this.gunSkin = opts.gunSkin || null;
+    this.weaponName = opts.weaponName || "步枪";
+    this.fireMul = opts.fireMul || 1;
     this.dead = false;
     this.corpseT = 0;
     this.blindT = 0;
@@ -123,7 +134,7 @@ export class Enemy {
     // 点射节奏：burstLeft 发子弹打完后停顿 burstPause
     this.burstLeft = 0;
     this.burstTimer = 0;
-    this.burstPause = pauseFor(0.6, 0.8);
+    this.burstPause = pauseFor(0.6, 0.8, this.fireMul);
     this.wantShoot = false;
     if (!this.group.parent) this.scene.add(this.group);
   }
@@ -298,7 +309,7 @@ export class Enemy {
       if (this.burstPause <= 0) {
         this.burstLeft = 3 + Math.floor(Math.random() * 3); // 3~5 连发
         this.burstTimer = 0;
-        this.burstPause = pauseFor(0.85, 0.75);
+        this.burstPause = pauseFor(0.85, 0.75, this.fireMul);
       }
     }
     this.wantShoot = false;
@@ -427,17 +438,12 @@ export class EnemyManager {
     this.corpses = [];   // 倒地尸身（既挡不了子弹，也不计入存活）
     this.free = [];      // 对象池
     this.wave = 0;
-    this.rifle = null;
     this.frozen = false;
     this.onFootstep = opts.onFootstep || null;
     this._nameSeq = 0;
-  }
-
-  // 敌人手上的步枪：玩家那把 AK 是按「视模」定标的（def.rotY/targetLen，枪口朝本地 -z），
-  // 敌人的是**世界模型**，必须重新定标：最长边 RIFLE_LEN、枪口朝 +z（= 模型正面）、中心归零。
-  // 只做一次，之后每个敌人的骨架 clone 同一份模板。
-  setRifle(source) {
-    this.rifle = normalizeRifle(source);
+    // 每次刷出抽一份「枪型 + 皮肤」，由 main.js 注入（它才有 WEAPON_DEFS 与 guncatalog）。
+    // 返回 { rifle, gunId, gunSkin, weaponName, fireMul }；没注入就退回裸 AK 的旧行为。
+    this.loadoutPicker = opts.loadoutPicker || null;
   }
 
   aliveCount() {
@@ -448,15 +454,18 @@ export class EnemyManager {
     return ENEMY_NAMES[this._nameSeq++ % ENEMY_NAMES.length];
   }
 
-  // 复用池里的尸体/新建，避免一局创建上百个敌人导致材质与纹理泄漏
+  // 复用池里的尸体/新建，避免一局创建上百个敌人导致材质与纹理泄漏。
+  // 枪型/皮肤**每次刷出都重抽**：敌人是对象池复用的，同一具骨架会反复易主，
+  // 只在构造函数里挂一次枪会让所有人都端着上一个死者的枪。
   acquire(x, z) {
+    const load = this.loadoutPicker ? this.loadoutPicker() : null;
     let e = this.free.pop();
     if (!e) {
-      e = new Enemy(this.scene, x, z, { rifle: this.rifle });
+      e = new Enemy(this.scene, x, z, load || {});
       e.onFootstep = this.onFootstep;
       e.colliders = this._colliders || null;
     }
-    e.reset(x, z, { name: this.nextName() });
+    e.reset(x, z, Object.assign({ name: this.nextName() }, load || {}));
     return e;
   }
 

@@ -23,6 +23,8 @@
     <!-- 命中/受击反馈层（血雾 / 命中标记 / 闪光白屏） -->
     <div id="fx-layer" class="fx-layer">
       <div class="flash-overlay" id="flashOverlay"></div>
+      <!-- 高档连杀的全屏边缘辉光（一次性 CSS 动画，重触发靠 classList 移除/回流/加回） -->
+      <div class="streak-flash" id="streakFlash"></div>
     </div>
 
     <!-- 狙击镜（AWM 右键开镜；再按一次升到二级变倍） -->
@@ -67,14 +69,32 @@
       <!-- 右上：击杀信息条 -->
       <div class="killfeed" id="killfeed"></div>
 
-      <!-- 中上：连杀播报 -->
+      <!-- 中上：连杀播报（主标题 = 阶梯称号，见 main.js 的 streakLabel）。高档位会另起一层
+           全屏边缘辉光（#streakFlash，在 .fx-layer 里）。 -->
       <div class="streak" id="streak"></div>
+
+      <!-- 中上：连杀窗口倒计时（只要身上有连杀就一直挂着，条走完 = 连杀断）
+           位置钉在播报标题正下方，两者同时在场时不打架。 -->
+      <div class="sk-timer" id="streakTimer">
+        <span class="sk-timer-num" id="streakTimerNum"></span>
+        <span class="sk-timer-txt">连杀</span>
+        <span class="sk-timer-track"><i id="streakTimerFill"></i></span>
+      </div>
 
       <!-- 屏幕中心：击杀图标 -->
       <div class="killicon" id="killIcon"></div>
 
       <!-- 屏幕中心：受击方向指示 -->
       <div class="hitdir" id="hitdir"></div>
+
+      <!-- 左下：聊天（敌人按你的表现评论 + 回车发言，位置与 CF 一致） -->
+      <div class="chat" id="chat">
+        <div class="chat-log" id="chatLog"></div>
+        <div class="chat-input hidden" id="chatInputWrap">
+          <span class="chat-tag">全部</span>
+          <input id="chatInput" type="text" maxlength="60" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
 
       <!-- 左下：生命值 -->
       <div class="hud-bottom-left">

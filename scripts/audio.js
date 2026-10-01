@@ -507,11 +507,13 @@ export class SFX {
     this.muffle(d * 0.9);
   }
 
-  // 连杀播报 stinger：音高随连杀数递增，走高频总线以免被闪光的闷音吃掉
+  // 连杀播报 stinger：音高随连杀数递增，走高频总线以免被闪光的闷音吃掉。
+  // `notes` 的档数与 `main.js` 的播报阶梯是两回事 —— 这里只是「越高越尖」，8 档之后
+  // 停在最高音（连杀 10 往上仍然是同一条 stinger，靠文案与辉光区分，听感不会退步）。
   streak(n) {
     if (!this.ready()) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const notes = [0, 4, 7, 12, 16].map((s) => 440 * Math.pow(2, s / 12));
+    const notes = [0, 4, 7, 12, 16, 19, 24, 28].map((s) => 440 * Math.pow(2, s / 12));
     const k = Math.min(Math.max(n - 2, 0), notes.length - 1);
     for (let i = 0; i < 3; i++) {
       const f = notes[Math.min(k + i, notes.length - 1)];
@@ -642,25 +644,26 @@ export class SFX {
   }
 
   // 近战挥砍（风声）
-  melee() {
+  // 挥刀。`heavy` = 重击（CS 的轻/重两档，见 WEAPON_DEFS.knife）：更长、更低、更响一声。
+  melee(heavy) {
     if (!this.ready()) return;
     const ctx = this.ctx, t = ctx.currentTime;
-    const len = 0.18;
+    const len = heavy ? 0.34 : 0.18;
     const buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) {
       const p = i / data.length;
-      data[i] = (Math.random() * 2 - 1) * (1 - p) * (0.4 + 0.6 * Math.abs(Math.sin(p * 20)));
+      data[i] = (Math.random() * 2 - 1) * (1 - p) * (0.4 + 0.6 * Math.abs(Math.sin(p * (heavy ? 11 : 20))));
     }
     const src = ctx.createBufferSource();
     src.buffer = buf;
     const f = ctx.createBiquadFilter();
     f.type = "bandpass";
-    f.frequency.setValueAtTime(600, t);
-    f.frequency.exponentialRampToValueAtTime(2000, t + len);
+    f.frequency.setValueAtTime(heavy ? 260 : 600, t);
+    f.frequency.exponentialRampToValueAtTime(heavy ? 900 : 2000, t + len);
     f.Q.value = 2;
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.5, t);
+    g.gain.setValueAtTime(heavy ? 0.72 : 0.5, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + len);
     src.connect(f).connect(g).connect(this.master);
     src.start(t);

@@ -10,7 +10,32 @@ __pycache__/
 *.a
 # 注意：`/vendor` 原本在这里被忽略。现在 `vendor/three/` 是站点的一部分
 # （index.html 的 import map 指着它，用来摆脱 jsdelivr 依赖），必须入库，故已移除。
+#
+# 参考项目（CS 风格武器手感与双手的出处），65MB。**只借数值与手部几何**，
+# 真正要用的那份已经拷进 `models/cs/ak47.glb`（640KB）。站点从仓库根目录发布到
+# GitHub Pages，不挡掉这里就会被 `git add -A` 一起推上线。
+counter-strike-in-browser-main/
 *.egg-info/
+
+# ---- 非站点资源（本地留档，不上传到 GitHub Pages）----
+# 站点是从仓库根目录发布的，凡是不被 `index.html` / `scripts/*.js` 引用的东西
+# 都会跟着上线，白白让访客多下几 MB。下面这些都已确认零引用（`grep` 过），
+# 本地文件保留备查，只是不再入库。
+# 项目根下这批游离的 GLB 是最初拖进来时留下的：map.js 用的是 `models/` 里那份。
+/helo.glb
+/militaryman.glb
+/soldier1.glb
+/soldier2.glb
+/soldier3.glb
+/barrel.glb
+/oilbarrels.glb
+# 敌人改用程序化骨架（`scripts/enemy_model.js`）、龙门吊在运输船改版中移除，
+# 这两个模型已不再被加载。
+/models/soldier.glb
+/models/crane.glb
+# 参考截图（只在 map.js 的注释里被提过一句配色），以及 Coze 模板自带的样式表。
+/assets/
+/styles/main.css
 /.env
 .env
 .cozeproj/reduction

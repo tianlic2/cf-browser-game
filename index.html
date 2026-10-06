@@ -69,6 +69,12 @@
       <!-- 右上：击杀信息条 -->
       <div class="killfeed" id="killfeed"></div>
 
+      <!-- 左上：CF 式小地图（底图由 map.js 的 topdown 烘一次，每帧只 blit + 画点）。
+           整个模块不 import THREE、零 WebGL 调用；节点缺失时 scripts/minimap.js 转静默禁用。 -->
+      <div class="minimap" id="minimap">
+        <canvas id="mmCanvas"></canvas>
+      </div>
+
       <!-- 中上：连杀播报（主标题 = 阶梯称号，见 main.js 的 streakLabel）。高档位会另起一层
            全屏边缘辉光（#streakFlash，在 .fx-layer 里）。 -->
       <div class="streak" id="streak"></div>
@@ -169,31 +175,84 @@
       </div>
     </div>
 
-    <!-- 开始菜单（CF 大厅风格：炭黑面板 + 琥珀橙强调 + 斜切角） -->
-    <div id="menu" class="menu">
-      <div class="menu-panel">
-        <div class="menu-brand">TACTICAL ASSAULT</div>
-        <h1 class="menu-title">战术突击</h1>
-        <p class="menu-sub">运输船 · 团队竞技</p>
-        <div class="menu-setup">
-          <div class="ml-title">对局设置<small>进入战场后可用 + / - 随时增减敌人</small></div>
-          <div class="ml-rows">
-            <div class="ml-row">
-              <span class="ml-label">敌人数量</span>
-              <div class="ml-stepper">
-                <button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button>
-                <span class="ml-step-val" id="enemyCountVal">8</span>
-                <button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button>
+    <!-- 开始菜单 = CF 大厅（全屏四页签；背景半透明，透出实时运输船甲板）。
+         注意：#menu 与 #gameover **共用** .menu / .menu-panel / .menu-title / .menu-sub /
+         .menu-btn / .gameover-stats 这几个类，所以本大厅的样式一律另起 .lobby* 作用域
+         （见 styles/game.css 末尾那一段），绝不能去改那几个共用的规则。
+         页签 2/3/4 的正文由 scripts/lobby.js 生成；页签 1 里的对局设置是**原样搬家**，
+         id 一个都没动（buildMenuMatch / init 里的步进器要靠它们）。 -->
+    <div id="menu" class="menu lobby">
+      <header class="lobby-top">
+        <div class="lobby-mark" aria-hidden="true"></div>
+        <div class="lobby-id">
+          <h1 class="lobby-title">战术突击</h1>
+          <div class="lobby-brand">TACTICAL ASSAULT · TRANSPORT SHIP</div>
+        </div>
+        <div class="lobby-chips">
+          <span class="lobby-chip">运输船</span>
+          <span class="lobby-chip">团队竞技</span>
+          <span class="lobby-chip lobby-chip-hl" id="lobbyMatchChip">8 人 · 普通</span>
+        </div>
+      </header>
+
+      <div class="lobby-body">
+        <nav class="lobby-rail" id="lobbyTabs" role="tablist" aria-label="大厅导航">
+          <button type="button" class="lobby-tab active" data-tab="play" role="tab" aria-selected="true">开始游戏</button>
+          <button type="button" class="lobby-tab" data-tab="manual" role="tab" aria-selected="false">作战手册</button>
+          <button type="button" class="lobby-tab" data-tab="arsenal" role="tab" aria-selected="false">武器库</button>
+          <button type="button" class="lobby-tab" data-tab="storage" role="tab" aria-selected="false">个人仓库</button>
+        </nav>
+
+        <section class="lobby-content">
+          <!-- 页签 1：对局设置（原样搬家）+ 战况简报 + 进入战场 -->
+          <div class="lobby-pane" data-pane="play">
+            <div class="lp-head">
+              <h2 class="lp-h2">作战准备</h2>
+              <p class="lp-desc">选择本局的敌人数量与难度，随后进入运输船甲板。</p>
+            </div>
+            <div class="lp-cols">
+              <div class="menu-setup">
+                <div class="ml-title">对局设置<small>进入战场后可用 + / - 随时增减敌人</small></div>
+                <div class="ml-rows">
+                  <div class="ml-row">
+                    <span class="ml-label">敌人数量</span>
+                    <div class="ml-stepper">
+                      <button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button>
+                      <span class="ml-step-val" id="enemyCountVal">8</span>
+                      <button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button>
+                    </div>
+                  </div>
+                  <div class="ml-row">
+                    <span class="ml-label">难度</span>
+                    <div class="ml-seg" id="mlDiff"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="lobby-brief">
+                <div class="lb-title">战况简报</div>
+                <div class="lb-row"><span>地图</span><b>运输船</b></div>
+                <div class="lb-row"><span>模式</span><b>团队竞技</b></div>
+                <div class="lb-row"><span>目标击杀</span><b id="lobbyLimit">40</b></div>
+                <div class="lb-row"><span>回合时限</span><b id="lobbyTime">10:00</b></div>
+                <div class="lb-row"><span>我方出生点</span><b>船尾甲板</b></div>
               </div>
             </div>
-            <div class="ml-row">
-              <span class="ml-label">难度</span>
-              <div class="ml-seg" id="mlDiff"></div>
-            </div>
+            <button class="menu-btn" id="startBtn">进入战场</button>
           </div>
-        </div>
-        <button class="menu-btn" id="startBtn">进入战场</button>
+
+          <!-- 页签 2/3/4：只读信息页，正文全部由 scripts/lobby.js 生成（单一数据源） -->
+          <div class="lobby-pane hidden" data-pane="manual"></div>
+          <div class="lobby-pane hidden" data-pane="arsenal"></div>
+          <div class="lobby-pane hidden" data-pane="storage"></div>
+        </section>
       </div>
+
+      <footer class="lobby-ticker">
+        <span class="lobby-ticker-tag">公告</span>
+        <div class="lobby-ticker-view">
+          <div class="lobby-ticker-run" id="lobbyTicker"></div>
+        </div>
+      </footer>
     </div>
 
     <!-- 结算画面 -->

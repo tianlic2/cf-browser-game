@@ -133,8 +133,11 @@ export function enemyModel(id, skinId) {
 }
 
 // 抽一份敌人配装：型号等概率抽一个，再在该型号的皮肤列表里等概率抽一款。
-// 组合数 = 每个型号的皮肤款数之和（不是型号数 × 款数）：ak 5 + m4 6 + awm 6 = **17** 种。
-// 全部能持枪的皮肤加 pistol 的 3 款 = **20**（`worldModels()` 断言的数就是它）。
+// 组合数 = 每个型号的皮肤款数之和（不是型号数 × 款数）：ak 2 + m4 6 + awm 3 = **11** 种。
+// 全部能持枪的皮肤加 pistol 的 1 款 = **12**（`worldModels()` 断言的数就是它）。
+// 表里只剩「原厂 + 模型皮肤」两类（见 skins.js 开头那条），所以这四个数就是
+// 「型号的条目数」：ak 2 / m4 6 / awm 3 / pistol 1 / knife 1。
+// 匕首不计入这里（`randomGunRoll` 也不抽匕首）。
 // 注意这里**不排除模型皮肤**：敌人拿的仍是基础低模（目录只从 baseGun 派生），
 // 但配色用的是那款模型皮肤的 `slots`。
 export function randomGunRoll() {

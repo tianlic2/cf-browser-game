@@ -3,455 +3,641 @@
 // 为什么要有这个模块：武器是挂在相机下的一个 Group，`animateWeapon()` 每帧写它的位移/旋转，
 // 于是枪看起来是**从右下角凭空浮出来**的 —— 没有手、也没有「人在操作它」的证据。
 //
-// **几何来源：`models/cs/ak47.glb` 的 `HandR`/`ArmR`/`HandL`/`ArmL` 四个节点**
-// （参考项目 counter-strike-in-browser-main，MIT）。只取这四块**手与袖**，枪身一律不渲染 ——
-// 枪还是我们自己的 GLB。为什么不用程序化几何现搭：手型是本项目最难用基础盒子凑出来的东西，
-// 上一版用「掌 + 四指 + 拇指」五块盒拼了一个，放大看仍是一排板子。CS 这份是烘好的握拳姿态，
-// 右拳扣竖直握把、左拳绕横护木 —— 那是**造型信息**，不是几个数字能参数化的。
+// **几何来源：`models/fps_arms.glb`（一具 47 骨的蒙皮骨架：一双手 + 两条前臂）。**
+// 上一版借的是 `models/cs/ak47.glb` 的 `HandR`/`ArmR`/`HandL`/`ArmL` 四个节点
+// （参考项目 counter-strike-in-browser-main，MIT）—— 那是四块**没有骨骼、没有手指、
+// 没有掌心结构**的静态壳，放大看就是几个方块拼出的拳。现在这份是**真的手**：
+// 四指与拇指各有 3 节可用骨（外加两侧共 10 根「IBM 是单位阵、且不被任何顶点引用」的末节骨），
+// bind 姿势是左右**严格镜像**的放松张开手，手上有半指战术手套 + 露出肤色手指，
+// 前臂是螺旋缠布。
 //
-// 但**配色不搬**：CS 那套是近黑手套 + 织纹贴图，配我们这把近黑的枪会糊成一团
-// （AGENTS.md 记过：第一版程序化手用近黑时「放大 4 倍也只看得出几片黑色平板」）。
-// 所以只借几何与姿势，材质一律换成我们自己的暖棕针织 + 深棕合成革 + 橄榄绿袖。
+// 【一具有骨架的模型怎么用】蒙皮只作用在**顶点**上，而且在装载期一次性算完 ——
+// 游戏里 47 根骨头一帧都不会再动。所以 `bakeFpsArms()` 在装载时：
+//   ① 按「指根连线」为轴把手指程序化弯成握拳（轴与符号都是量出来的，见 curlRotations）；
+//   ② 把 bind 姿势烘成静态顶点（位置与法线一起，推导见 bakeFpsArms）；
+//   ③ 按主导关节切成四块（手 L/R、前臂 L/R），与 CS 那四块**同构** ——
+//      于是 `_install()` 之后的一切（handWrap 枢轴 / armWrap 转正 / armStretch / _aim）
+//      一个字都不用改。75° FOV 下手指本来就看不出动画，烘成静态反而省掉了
+//      `SkinnedMesh` 分侧、共享 skeleton、每帧重算 47 个矩阵的全部复杂度。
 //
-// **材质：四套程序化 canvas PBR（albedo / normal / roughness 同出一张高度场）。**
-// 旧版把 `glove`/`glove_palm`/`gun_rubber` 三个源材质名统统映到**一块**同色、无贴图、
-// roughness 恒定的材质上，于是手背那三块本来就该有不同的手感的面糊成一团 —— 这是
-// 「太假」的一半；另一半是**袖管**：一根光滑的锥管，没有任何东西告诉眼睛「这是布」。
-// 现在手背是涤纶针织（1.8mm 织孔）、掌心是合成革（细密粒面 + 汗渍磨光）、虎口是橡胶垫、
-// 袖管是平织 + ripstop 加固格 + 2~4cm 折痕，腕上再加一圈**罗纹弹力束带**
-// （`_cuff()`，几何按袖管的实测半径现造）。贴图全部 512² 或 256² 现生成，
-// 无外部资源；生成是确定性的（整数哈希，不用 Math.random），同一版代码每次长得一样，
-// 改一处可以直接用截图前后对比。
+// **配色走「重映射模型自带的贴图」**：保留作者那套 1024² 漫反射/法线/AO 与它们的
+// **结构细节**（肤色手指、缠布棱线），只在装载期按亮度把近黑的手套映到本作的
+// 皮革棕 / 橄榄绿调色板，并把 `glossinessFactor = 1`（经 gltf.js 之后 = roughness 0，
+// 也就是一副镜面黑手套）压到 0.62 上下。见 `fpsArmMaterial()`。
 //
-// 贴图配方（针织 / 粒面皮革 / ripstop 平织、以及「尼龙磨损是变亮、皮革磨损是变亮且更滑」
-// 这条）参考了参考项目 counter-strike-in-browser-main 的 `src/gameplay/WeaponTextures.js`
-// （MIT，Copyright (c) 2026 StarKnightt），**代码是重写的**，只沿用它的织纹尺度约定。
+// **材质：重映射模型自带的贴图（`fpsArmMaterial()`）。**
+// 上一版是自己现画四套程序化 canvas PBR（针织 / 粒面皮革 / 橡胶垫 / ripstop 袖布，
+// 见 git 历史），那是在「手上根本没有贴图」的前提下才划算的做法。现在这份模型自带
+// 4 张 1024² 作者贴图（diffuse / spec-gloss / normal / AO），手背的织纹、指关节的褶皱、
+// 缠布一圈圈的棱线全都在里面，再拿程序化贴图去盖只会把它糊掉。所以改走「保留结构、重映配色」：
+//   ① 反照率 = 拿 diffuse 逐像素按亮度过一条 ramp，把手套的近黑抬到本作的皮革棕 / 橄榄绿，
+//      肤色手指天然落在 ramp 的亮端 —— 「戴着手套的手」这个对比正是选这条路的理由；
+//   ② 法线 / AO 原样共用，`repeat` 固定 (1,1)（UV 是作者为这张图排的，**绝不能**再去
+//      反推「一张图铺多少米」—— 那是给程序化平铺贴图用的）；
+//   ③ `roughness` 显式压到 ~0.62：源文件 `glossinessFactor = 1`，经 gltf.js 之后是
+//      `roughness = 0` 的一副**镜面黑手套**（与 `m4_gold` 那个 met 1 / rou 0 同类）。
+//
+// 唯一还吃程序化贴图的是**袖口束带**（`_cuff()` / `cuffMaps()`）—— 那是我们现加的构件、
+// 模型里没有对应的贴图。几何按袖管的实测半径现造，UV 烘成「格数」（见 cuffGeo 的注释）。
 //
 // 坐标系：武器组的局部坐标 = **相机空间**（-z 前、+x 右、+y 上）。
 // 因为组挂在相机下、且组自身的变换只由 animateWeapon 写，所以组局部就是「相对眼睛」的坐标。
 //
 // 骨段约定：**从原点向局部 -y 伸展**。于是「把前臂指向肘部」就是
 // `fore.quaternion.setFromUnitVectors(DOWN, normalize(elbow - wrist))`。
-// CS 的前臂**不是轴对齐的**（实测主轴是 (±0.23, -0.83, +0.51) 这种斜的），
-// 所以装载时要先把它转正到 -Y，否则 setFromUnitVectors 会把它指歪 —— 见 CS_SRC 的注释。
+// 新模型的前臂也不是轴对齐的（实测腕→肘 ≈ (±0.19, +0.17, ∓0.97) 这种斜的），
+// 所以装载时要先把它转正到 -Y，否则 setFromUnitVectors 会把它指歪 —— 见 FPS_SRC 的注释。
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-
-// CS 双手的源文件。用视图模相对路径（`fetch` 按**文档 URL** 解析，写在 scripts/ 里也是对的）。
-export const CS_HANDS_URL = "./models/cs/ak47.glb";
+import { makeGLTFLoader } from "./gltf.js";
+// 只 import 这份文件**真的用到**的原语（纹理管线的实现全在那边）：
+// 袖口束带那套程序化贴图（vnoise/field/lowField/buildMaps）＋ 重映射用的色彩转换
+// （hexLin 线性化、lin2srgb 回写、makeCanvas/texFrom 出贴图）。
+// **手套/袖布那四套程序化配方已删** —— 手上现在自带 4 张 1024² 作者贴图，走 fpsArmMaterial()。
+import { vnoise, field, lowField, hexLin, buildMaps, makeCanvas, texFrom, lin2srgb } from "./texturekit.js";
 
 const DOWN = new THREE.Vector3(0, -1, 0);
 const _d = new THREE.Vector3();
 
-// 配色：**故意不用 CS 的近黑**（见文件头）。枪本身就是近黑的，手再用同色，整块就是一团
-// 分不出结构的黑。棕色皮革 + 橄榄绿袖 —— 与敌人装备仍是同一套迷彩体系，但在枪身上有明确明暗对比。
+// 配色：**故意不用源贴图那副近黑手套**。枪本身就是近黑的，手再用同色，整块就是一团
+// 分不出结构的黑。棕色皮革 + 橄榄绿袖 —— 与敌人装备仍是同一套迷彩体系，
+// 但在枪身上有明确明暗对比。
 //
-// **四个色而不是一个**：真实战术手套本来就是**拼料**的 —— 手背是弹力针织、掌心是合成革、
-// 虎口一块橡胶垫。原来三块网格同色，于是手的「结构」只剩外轮廓（放大看就是一块肉色橡皮泥）。
-// 现在靠**材质差异**把手背 / 掌心 / 垫子分开，这是不增加一个多边形就能拿到立体感的做法。
-//
-// **这四个色是烘进 albedo 贴图的基色，不是 `material.color`。** 上色只有这一处：
-// `gloveKnitMaps()` 等用它当基色，材质那边固定 `color = 0xffffff`。两边都上色会
-// 色值平方（`0x6d563e² ≈ 0x2f1c0f`，手套直接黑成一块；AGENTS.md 记过集装箱那个坑）。
+// **这五个色是「重映射 ramp」的两端，不是 `material.color`。**
+// `fpsArmMaterial()` 拿 diffuse 的亮度在 `[PALM → GLOVE]`（手）与 `[CUFF → SLEEVE]`（前臂）
+// 之间插值，材质那边固定 `color = 0xffffff`。**两边都上色会色值平方**
+// （`0x60492e² ≈ 0x241b0d`，手套直接黑成一块；AGENTS.md 记过集装箱那个坑，这会是第三次）。
 // 想调色改这里，改完贴图与材质会一起跟着变。
-const GLOVE = 0x6d563e;   // 手背针织：暖棕（比原来的 0x7a5f45 沉一档，不再读成「裸手」）
-const PALM = 0x4b392a;    // 掌心合成革：更深的棕，与手背拉开层次
-const PAD = 0x26241f;     // 虎口橡胶垫：近黑
-const SLEEVE = 0x474d3a;  // 袖布：橄榄绿
-const CUFF = 0x3d4231;    // 袖口罗纹束带：比袖布深一档，给袖口一个交代
+const GLOVE = 0x60492e;   // 手背：暖棕（原手背针织的基色，现在当手的 ramp 亮端）
+const PALM = 0x2e2114;    // 掌心 / 指缝：更深的棕，当手的 ramp 暗端
+const PAD = 0x26241f;     // 虎口橡胶垫：近黑（保留给袖口束带的暗部）
+// 袖布这**一对照旧值（0x474d3a / 0x2c3023）整体压暗了一档**，理由是实拍而不是配色偏好：
+// 视模那四盏灯（hemi + sun + fill + rim）是**为枪**配的，枪上有大量近黑与木质面能吃下它们，
+// 而袖子是一整根 43cm 的素色圆柱、没有任何结构去承接，同样的照度下它整根泛白，
+// 在小臂那一块读成一根塑料管子、比枪还亮（实测截图里它是最浅的一块）。
+// 压暗之后手（暖棕）与袖（橄榄绿）才拉开明暗，而不是两个同亮度的色块并排。
+const SLEEVE = 0x363d24;  // 袖布：橄榄绿，前臂 ramp 的亮端
+// 袖口罗纹束带。**它必须比袖布（0x363d24）深得明显**，不能只深十几个色阶 ——
+// 束带是一圈**朝向天空的小圆柱**，`vmHemi`/`vmRim` 打在上面的能量比斜着的袖管高一大截，
+// 实测同色阶时它反而比袖子亮，读成"手腕上套了个亮箍"（截图里最扎眼的一块）。
+const CUFF = 0x232818;
+// 前臂 ramp 的**暗端**不能直接用 `CUFF`：0x3d4231 比 SLEEVE 只深 10 个色阶，
+// 那个量级是给 3cm 宽的袖口束带用的（够读出「这里收了一道」），
+// 但铺到 43cm 长的小臂上就等于整条袖子一个色 —— 实测（照顶点 UV 采样）暗端到亮端
+// 只有 rgb 61..71，缠布那圈圈棱线完全读不出来，而「保住棱线」正是选重映射这条路的全部理由。
+// 所以单列一个真正深的暗端：与 SLEEVE 同色相、压到约 40% 亮度。
+const SLEEVE_DK = 0x1f2316;
 
-// ---------- CS 源数据的实测常数（`models/cs/ak47.glb`）----------
-// **这几个数只能量不能猜**，全部由 `node /tmp/glbpca.mjs models/cs/ak47.glb` 从顶点直接算出：
-//   · handPivot = 手网格的**包围盒中心** —— 装进来后落在 ARM_ANCHORS 的 `r`/`l` 上。
-//   · armWrist  = 前臂**靠手那一端**（沿主轴取两端各 12% 的顶点质心）。
-//   · armDir    = 前臂主轴（顶点协方差的主特征向量），**由腕指向肘**。
-// 四个节点的变换都是单位阵、顶点直接烘在枪空间里，所以这些数就是它们的世界坐标。
+// ---------- fps_arms 源数据的实测常数（**装载期现量，不写死**）----------
+// 上一版这里躺的是 CS 的六个数（由 `node /tmp/glbpca.mjs models/cs/ak47.glb` 从顶点云
+// PCA 反推），现在源模型换了，那段与那六个数一起作废。
 //
-// 为什么 armDir 是关键：CS 的前臂是**斜的**，主轴 (0.23, -0.83, 0.51) 与 -Y 差着 33°。
-// 直接塞进 `fore` 再让 `_aim` 去指，等于在「本来就歪的模型」上再叠一次旋转，前臂会指着枪托。
-// 所以装载时先 `setFromUnitVectors(armDir, DOWN)` 把它转正，此后 `_aim` 才说了算。
+// **为什么这次不写死**：fps_arms 是一具 47 骨的蒙皮骨架，「手掌枢轴」「腕点」「前臂主轴」
+// 都是骨架里现成的数（`inverse(IBM)` 的平移就是那根骨在 bind 姿势里的世界位置），
+// 结算方式与 CS 那套「从一堆顶点里反推」完全不同。所以 `bakeFpsArms()` 在烘焙完成后
+// **当场量**它们写进这张表 —— 换模型只要换文件、不需要重新抄一遍数。
 //
-// 顺带一个反直觉的实测结论：**CS 的肘在腕的斜后方（+z、-y），而本模块原来的 ELBOWS 把肘
-// 摆在腕的斜前方（-z）**。旧的程序化圆柱只有「方向」有意义、长度 0.62 一路伸出画外，
-// 所以摆反了看不出来；换成有形状的真实前臂就立刻穿帮。ELBOWS 已按这里的方向重写。
-const CS_SRC = {
-  handPivot: { R: [0.0077, -0.0631, 0.0723], L: [-0.0331, -0.0463, -0.2871] },
-  armWrist: { R: [0.0433, -0.0085, 0.1647], L: [-0.1205, -0.0774, -0.2753] },
-  armDir: { R: [0.2299, -0.8275, 0.5122], L: [-0.3167, -0.8386, 0.4433] },
+// 三个字段的语义与旧版一致（都是**烘焙之后**的武器组局部坐标，单位米）：
+//   · handPivot = 手那一半的**包围盒中心** —— 装进来后落在 ARM_ANCHORS 的 `r`/`l` 上。
+//   · armWrist  = 腕骨在 bind 姿势里的位置。
+//   · armDir    = 归一化的「腕 → 肘」，**由腕指向肘**。
+//
+// 为什么 armDir 是关键：源数据的前臂是**斜的**，直接塞进 `fore` 再让 `_aim` 去指，等于在
+// 「本来就歪的模型」上再叠一次旋转，前臂会指着枪托。所以装载时先
+// `setFromUnitVectors(armDir, DOWN)` 把它转正，此后 `_aim` 才说了算。
+// **注意这里量的是「掰正之后」的轴**（= `FPS_ARM_DIR`）—— 源数据那份近乎顺着视线，
+// 会让小臂扎进相机里被近平面切开，由烘焙里的整体旋转修掉，见 `FPS_ARM_DIR`。
+//
+// **它同时决定了焊缝**：`ELBOW_DIR == armDir` ⇒ `q_aim = q_axis⁻¹` ⇒ 手与袖的总相对旋转是
+// 单位阵 ⇒ `ARM_ANCHORS` 的 `hr`/`hl` 取 0 时腕子上**严丝合缝**。所以 `bakeFpsArms()`
+// 量到 armDir 之后会把它一并写进 `ELBOW_DIR`（见下）。两个值必须同源。
+export const FPS_SRC = {
+  handPivot: { R: [0, 0, 0], L: [0, 0, 0] },
+  armWrist: { R: [0, 0, 0], L: [0, 0, 0] },
+  armDir: { R: [0, 0, 1], L: [0, 0, 1] },
+  // 拳的握持轴 = 归一化的「食指掌指关节 → 小指掌指关节」。**它现在不是调参依据**：
+  // 实测它与前臂轴近似正交，而握把柱几乎顺着前臂 ⇒ 对进通道要把手相对小臂拧 ~98°，
+  // 那是一道撕焊缝的折角。所以 `hr`/`hl` 恒为 0，这个量留在表里只当「为什么拧不了」的证据
+  // （由 `bakeFpsArms` 量、结论见 `ARM_ANCHORS` 上方那段）。
+  gripAxis: { R: [1, 0, 0], L: [-1, 0, 0] },
 };
 
-// 手部网格里「哪块算是手、哪块算是袖」由源材质名决定（实测材质表）：
-//   HandR/HandL → glove, glove_palm, gun_rubber（掌垫）  ArmR/ArmL → sleeve
-// CS 自己的织纹贴图（WeaponTextures.js）**不搬**，只按名换材质。
-const MAT_SLEEVE_NAMES = new Set(["sleeve"]);
+// 双手的源文件。用**相对文档**的路径（`fetch` 按文档 URL 解析，写在 scripts/ 里也是对的）。
+export const FPS_ARMS_URL = "./models/fps_arms.glb";
+
+// 手指弯曲量：0 = bind 姿势（张开），越大拳越紧。
+//
+// **单位是弧度、而且是「全手指合计」**：`CURL_W` 把这一份量按 0.42/0.33/0.25 分摊到
+// 三节指骨上，再乘 `CURL_STEM` 那根手指的整体系数，所以中指（系数 1.00）三节分别转
+// 1.16 / 0.91 / 0.69 rad（合计 2.75 rad ≈ 158°）。**握拳需要合计 ~2.5 rad** ——
+// 1.0 只弯 57°，那是一只「放松的手」不是拳。
+const FPS_CURL = 2.75;
+
+// 拇指的弯曲量单独打个折：拇指的掌腕关节在真人身上只能屈 ~50°（四指是 ~90°），
+// 全量拧会让拇指横穿掌心插进对面。**0.55 时拇指是「竖着的」**（截图里读成点赞手势），
+// 0.72 才落到「横搭在食指上」这一档（合计 0.72×2.75 ≈ 1.98 rad ≈ 113°，仍小于真人的 ~130°）。
+const FPS_CURL_THUMB = 0.72;
+
+// 源单位 → 米。**定标依据：让这双手与 CS 那双手在画面上一样大**
+// （包围盒对角线对齐：CS 0.2408m ↔ fps 24.22 单位 ⇒ 0.0099）。于是 `ARM_ANCHORS` 里的
+// `s`（步枪 0.743 …）一个都不用动 —— 那个 0.743 是 `0.82 / 1.1036` 推出来的，
+// 与手的大小无关，是「视模超尺寸」这条既有约定的产物。
+const FPS_BAKE_SCALE = 0.0099;
+
+// 源模型的造型朝向：**肘在 -z、手指朝 +z、右手在 -x**，绕 Y 转 180° 之后才对上武器组
+// （枪口 -z、右手 +x）。一记 180° 偏航同时把「前后」和「左右手」一起掰正 ——
+// 源文件里右手在 -x，不转的话两只手会左右互换。
+//
+// 【别用 PCA 去"验证"这个方向】手枪那次踩过：PCA 主轴会被握把那一团顶点拽偏。
+// 这里判朝向只用**骨的对称性**（bind 姿势左右严格镜像，手心 / 手背哪边朝上是可读的）。
+const FPS_BAKE_ROT_Y = Math.PI;
+
+// 摊在「基础旋转」（`RY(π)·S`）之上的**整体掰正**：把前臂轴从源数据的方向转到它该指的方向。
+// 坐标是**武器组局部**（与 ARM_ANCHORS / ELBOW_DIR 同一个系）：+x 右 / +y 上 / +z 朝玩家。
+//
+// 【为什么必须掰】源数据的 bind 姿势是「双手前伸、小臂几乎顺着视线」。基础旋转之后实测
+// `armDir(R) = (0.187, 0.165, 0.968)` —— 肘在腕的**右上方、且几乎正对着相机**（离视轴
+// 只有 14.5°）。装进武器组之后右腕落在相机 z = −0.355，前臂长 0.326m ⇒ 肘到 z ≈ −0.039，
+// **直接进了相机里面**；`vmCamera.near = 0.01` 把筒壁齐刷刷切开，看到的是内壁，画面上就是
+// 一片「扭曲的板」（实测 `foreR` 的相机空间 z 最大到 −0.0047，确实越过了近平面）。
+// 左臂没被切，但同样近乎轴向，沿长度方向摊开 1.9 倍，读起来也像张板。
+//
+// 【为什么在烘焙里转，而不是去改 ELBOW_DIR】改 `ELBOW_DIR` 会把腕子撕开一道折角
+// （`hr == R_total` 才是零焊缝，见 FPS_SRC 的推导）。在烘焙里转是手与袖**一起**转，
+// 相对关系一个字没动，焊缝仍然是零 —— 所以目标方向只能写在烘焙这一侧。
+//
+// 取值照 CS 那套手感（它那份是 `(0.23, -0.83, 0.51)`）：肘在腕的**右下方、稍靠后**，
+// 于是小臂从画面右下角斜着出画，而不是正面怼向镜头。左臂由它镜像而来（见 bakeFpsArms）。
+const FPS_ARM_DIR = [0.23, -0.80, 0.55];
+
+// 绕前臂轴的**滚转**（弧度）。**只拧不掰**，所以焊缝不受影响 —— 它唯一的作用是调手的朝向
+// （掌心朝哪、拇指倒向哪边）。先取 0，靠截图与 `setArmAnchor` 调不出来时才动这里。
+const FPS_ARM_ROLL = 0;
+
+// 按部位分组的骨名（`<side>_<part><n>_<id>` 里的 `<part>`）。
+// `wrist` **归手**（不是归前臂）：手腕本来就该跟着手转，而且这样前臂组正好从腕根干净地开始。
+const FPS_HAND_PARTS = new Set(["wrist", "thumb", "point", "middle", "ring", "pink"]);
+const FPS_FORE_PARTS = new Set(["arm", "elbow"]);
 
 // 腕 → 肘 的方向（**单位向量**，武器组局部）。两侧各自固定：这是「人的胳膊往哪撇」，
 // 与手里是哪把枪无关 —— 所以它**不是** ELBOWS 那种绝对点，而是一个方向，
 // 由 configure() 按当前武器的手腕锚点现算成肘点（见该处）。
-// 值直接取自 CS 两只前臂各自的主轴，即源模型烘好的姿势。
-// 约束：① 肘必须在腕的**后方或正侧面**，z 不能比腕更靠前（否则前臂从枪管方向支棱出去）；
-//       ② 肘必须落在画面外，前臂才像从屏幕外伸进来的，而不是凭空长在手后面。
-export const ELBOW_DIR = { r: [0.2299, -0.8275, 0.5122], l: [-0.3167, -0.8386, 0.4433] };
+// **值由 `bakeFpsArms()` 在装载期写入**（= 实测的 `FPS_SRC.armDir`），初值只是占位。
+// 上面那两条约束仍然成立，而且现在多了一条更硬的：**它必须与 `FPS_SRC.armDir` 相等**，
+// 否则手与袖的相对旋转不是单位阵，腕子会裂开一道折角 —— 见 FPS_SRC 的注释。
+export const ELBOW_DIR = { r: [0, 0, 1], l: [0, 0, 1] };
 // 肘到腕的距离只影响方向、不影响画面（前臂只有 ~0.25m 长，肘点永远在画外），
 // 取 0.62 是为了让「方向」在数值上稳定，不至于被浮点噪声放大。
 const ELBOW_DIST = 0.62;
 
-// 前臂的**轴向拉伸**。CS 的袖管只有 0.369m(右) / 0.284m(左) 长，而视模的前臂必须一直画到
-// **画面外**才不像「凭空长在手后面的一截管子」。实测（步枪握持位 0.32/-0.17/-0.5、1280×713）：
-//   · 右袖：腕点就落在 px≈1232（画面右缘 1280），沿轴走 6% 就出画了 —— 不用拉。
-//   · 左袖：腕点在 (800,475)，**袖口停在 (773,638)，在画面里**，会看到一个齐刷刷的断口。
-//     解 `py(袖口)=713` 得袖长至少要 0.289m（原生 0.211m）→ 拉伸 ≥1.37。取 1.8 留余量。
-// 拉伸只作用在**轴向**（局部 y），袖管是等截面的，拉长只是变长、不会变成一根细面条。
-const ARM_STRETCH = { R: 1.0, L: 1.8 };
+// 前臂的**轴向拉伸**。视模的前臂必须一直画到**画面外**才不像「凭空长在手后面的一截管子」。
+//
+// CS 那份左袖只有 0.284m、袖口停在画面里（(773,638)，画布高 713），所以要拉 1.8 倍。
+// **fps_arms 的前臂长得多**：`fore` 组从腕一直含到肩（源单位 ≈51 → 0.508m），
+// 两侧都已经远远伸出画外，所以是 1.0 / 1.0 —— 但**这个结论要用 `armTip()` + `project()`
+// 量过再落**（见验证清单），别照着「前臂更长了所以不用拉」这句话推。
+//
+// 拉伸只作用在**轴向**（`fore` 空间的局部 y，因为 armStretch 是 fore 的子节点），
+// 袖管是等截面的，拉长只是变长、不会变成一根细面条。
+const ARM_STRETCH = { R: 1.0, L: 1.0 };
 
 // =====================================================================================
-// 程序化 PBR 贴图（手套 / 袖布 / 橡胶垫）
+// 装载期烘焙：把 `models/fps_arms.glb` 的骨架烘成静态几何
 // =====================================================================================
-//
-// 【为什么需要】几何是 CS 烘好的（握拳姿态、指节分层，实测 HandR 3720 面），本身够用；
-// 病灶在**材质**：四块网格原来全吃同一个纯色 MeshStandardMaterial，于是手在画面上是一团
-// 没有起伏、没有纹理、没有明暗过渡的橡皮泥（放大 4 倍的截图里只剩光滑的肉色块）。
-// 纯色 + 粗糙度 0.86 的表面在「半球光 + 一盏方向光」下只有亮面/暗面两个台阶，
-// **没有任何可读的表面信息** —— 这就是「假」的全部来源。
-//
-// 【三张图各管一件事，缺一张就退回橡皮泥】
-//   · map（反照率）—— 织纹疏密、磨损、汗渍，让同一块面有明暗层次；
-//   · normalMap    —— 颗粒与织纹的起伏，让掠射光下的高光碎开；
-//   · roughnessMap —— 颗粒顶端磨亮、凹处发涩。**「织物」与「塑料」的第一分野是粗糙度的
-//                     空间分布**，不是颜色、也不是形状。三张图必须由**同一张高度场**派生，
-//                     各画各的必然对不上（凸起处反而发暗，一眼假）。
-//
-// 【尺度按屏幕反推，不按美术直觉】视模里手离相机只有 0.3~0.4m。实测 1280 宽画面下
-// 手背约 110px 宽、袖子约 70px —— 也就是 **≈0.3mm 一个像素**。于是：
-//   · 1~2mm 的皮革粒面/织孔在屏幕上是 3~6px，读得出来，但只读成「微光」而不是「图案」；
-//   · 真正能被看见的是 **1cm 量级的磨损斑、松紧不一处**，纹理必须带这一层，
-//     否则远看仍是一块平色 —— 细纹再精致也扛不住 mipmap 一平均。
-// 参考项目 counter-strike-in-browser-main 的 WeaponTextures.js 从同一组实测得出同一结论
-// （它的 512² 贴图在屏幕上只有 2.5px 的织孔），这里沿用它的尺度：**手套 10cm 一格、
-// 袖子 14cm 一格**。格子开这么大还有个附带好处 —— 手背周长才 ~10cm，
-// **整只手只落一格，重复感为零**。
-//
-// 【授权】织纹的做法（平织的 sin·sin 结构、织物纤维噪声、磨损/汗渍低频斑、ripstop 加固格、
-// 以及 256² 保存预算的分工）参考了 counter-strike-in-browser-main 的 WeaponTextures.js
-// （MIT，Copyright (c) 2026 StarKnightt），与本项目已有的「借 CS 的双手几何 / 借 CS 的手感
-// 数值」同源；实现按本项目自己的写法重写，配色仍是我们自己的皮革棕 + 橄榄绿。
-//
-// 所有贴图都**无缝可平铺**：噪声按格点数环绕取模、Sobel 也环绕取样。这不是锦上添花 ——
-// 袖管/手掌的 UV 都跨好几格（实测 ArmR 的 u 跨 7.4 个单位），有接缝会直接穿帮。
 
-const TEX_SIZE = 512;
-
-// 目标：一张贴图铺满多少米。见上面「尺度按屏幕反推」。256² 的那两张（掌垫、橡胶）
-// 是因为它们在手背上只占一小块、基本被挡住 —— 参考项目也是这么省的。
-const TEX_TILE = { glove: 0.10, palm: 0.10, sleeve: 0.14, pad: 0.04, cuff: 0.03 };
-const TEX_PX = { glove: 512, palm: 256, sleeve: 512, pad: 256, cuff: 256 };
-
-/** 确定性整数哈希 → [0,1)。贴图必须每次加载长得一模一样，否则「这张皮子好不好看」
- *  就变成一次抽奖，改一处代码前后也没法用截图对比。Math.random() 做不到这一点。 */
-function hash2(ix, iy, seed) {
-  let h = Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(seed, 1442695041);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+/** 骨名 `<side>_<part><level>_<id>` → `{ side, part, level }`；不是手/臂骨就返回 null。
+ *  **实测**的全表（47 根）长这样：
+ *    `L_arm_01` `L_elbow_02` `L_wrist_03`                        ← 臂骨**没有** level 位
+ *    `L_thumb1_04` … `L_thumb4_07` `L_point1_08` … `L_pink4_022` ← 指骨有
+ *    `R_arm_023` `R_thumb1_026` … `R_pink4_045`
+ *  三个坑都在这一行正则里：① 臂骨没有 level，所以 `(\d*)` 必须允许空、缺省补 1；
+ *  ② `part` 部分对指骨是**贪婪不起来的**（`middle2` 要切成 `middle`+`2`），所以
+ *  用非贪婪的 `([a-z]+?)`；③ 尾号补零位数**不统一**（`_00` 与 `_045` 并存），
+ *  只能写 `\d+`，写死 `_\d{2}$` 会漏掉一半。 */
+const FPS_BONE_RE = /^([LR])_([a-z]+?)(\d*)_\d+$/;
+function fpsBone(name) {
+  const m = FPS_BONE_RE.exec(name);
+  return m ? { side: m[1], part: m[2], level: m[3] ? +m[3] : 1 } : null;
 }
 
-/** 可平铺的值噪声。`per` / `perY` 是**格点数**（整数），环绕取模，所以左右上下都接得上。
- *  perY 单独给，是为了让一个场能沿某个方向拉长（袖子的纵向褶皱正是这么来的）而仍然可平铺。 */
-function vnoise(x, y, per, seed, perY) {
-  const P = perY || per;
-  const ix = Math.floor(x), iy = Math.floor(y);
-  const fx = x - ix, fy = y - iy;
-  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-  const x0 = ((ix % per) + per) % per, x1 = (x0 + 1) % per;
-  const y0 = ((iy % P) + P) % P, y1 = (y0 + 1) % P;
-  const a = hash2(x0, y0, seed), b = hash2(x1, y0, seed);
-  const c = hash2(x0, y1, seed), d = hash2(x1, y1, seed);
-  const t = a + (b - a) * sx, u = c + (d - c) * sx;
-  return t + (u - t) * sy;
+/** 骨名 → `handR` / `handL` / `foreR` / `foreL`；不是四肢骨（只有 `_rootJoint`）返回 null。 */
+function fpsPartOf(name) {
+  const b = fpsBone(name);
+  if (!b) return null;
+  if (FPS_HAND_PARTS.has(b.part)) return "hand" + b.side;
+  if (FPS_FORE_PARTS.has(b.part)) return "fore" + b.side;
+  return null;
 }
 
-/** 可平铺的 fBm。baseCells 必须是整数，否则最粗那一层接不上。 */
-function fbm(u, v, base, oct, seed, gain) {
-  let amp = 1, sum = 0, norm = 0, cells = base;
-  const g = gain || 0.5;
-  for (let i = 0; i < oct; i++) {
-    sum += amp * vnoise(u * cells, v * cells, cells, seed + i * 17);
-    norm += amp; amp *= g; cells *= 2;
-  }
-  return sum / norm;
-}
-
-const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
-
-/** 逐像素算一张单通道场。**逐像素调 fn 很贵**（512² = 26 万次），所以只有真正需要
- *  逐像素精度的结构（织孔、粒面）才走它，低频一律走 lowField。 */
-function field(S, fn) {
-  const out = new Float32Array(S * S);
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) out[y * S + x] = fn((x + 0.5) / S, (y + 0.5) / S);
-  }
-  return out;
-}
-
-/** 低频场：在 1/div 的分辨率上算完再双线性放大（环绕）。省 div² 倍算力 ——
- *  低频本来就没有逐像素的信息，放大不会丢东西。div=4 时误差在 1/512 像素尺度上不可见。 */
-function lowField(S, fn, div) {
-  const N = Math.max(4, Math.round(S / (div || 8)));
-  const g = new Float32Array(N * N);
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) g[y * N + x] = fn((x + 0.5) / N, (y + 0.5) / N);
-  }
-  const out = new Float32Array(S * S);
-  for (let y = 0; y < S; y++) {
-    const fy = (y / S) * N, y0 = Math.floor(fy), ty = fy - y0;
-    const r0 = (y0 % N) * N, r1 = ((y0 + 1) % N) * N;
-    for (let x = 0; x < S; x++) {
-      const fx = (x / S) * N, x0 = Math.floor(fx), tx = fx - x0;
-      const c0 = x0 % N, c1 = (x0 + 1) % N;
-      const a = g[r0 + c0], b = g[r0 + c1], c = g[r1 + c0], d = g[r1 + c1];
-      const t = a + (b - a) * tx, u = c + (d - c) * tx;
-      out[y * S + x] = t + (u - t) * ty;
-    }
-  }
-  return out;
-}
-
-/** 可分离场：结构只由 u 或只由 v 决定时（织纹就是），用两个一维数组 + 一个组合子，
- *  把 O(S²) 降到 O(S)。512² 的平织如果按逐像素算，光这一个场就是 26 万次三角函数。 */
-/** 可分离结构（经纬织纹）用的场：`fu`/`fv` 各把**两个 1-D 分量**写进自己的临时数组，
- *  再由 `comb(au, bu, av, bv)` 把它们横向/纵向地拼起来。
- *
- *  **`fu(t, out, off)` 必须写 `out[off]` 与 `out[off+1]` 两个分量**（不是写 `out[0]`）——
- *  A/B 是 `2*S` 长的交错存储。第一版把回调写成 `A[0] = ...; A[1] = ...`，而拼合时读的是
- *  `A[x]`（沿 x 下标走），于是 x ≥ 2 一律读到 0，而本该是「纵向分量」的那个参数
- *  拿到的是**像素下标 x 本身**（0~511）—— `0.12 * max(gu, x)` 直接把袖布推成纯白。
- *  症状极具误导性：只有袖子一张贴图炸掉、另外三张正常，看着像配色写错了。 */
-function sepField(S, fu, fv, comb) {
-  const A = new Float32Array(2 * S), B = new Float32Array(2 * S);
-  for (let i = 0; i < S; i++) { const t = (i + 0.5) / S; fu(t, A, i * 2); fv(t, B, i * 2); }
-  const out = new Float32Array(S * S);
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-    const a = x * 2, b = y * 2;
-    out[y * S + x] = comb(A[a], A[a + 1], B[b], B[b + 1]);
-  }
-  return out;
-}
-
-/** 高度场 → 切线空间法线贴图（Sobel，取样同样环绕）。`strength` 就是「起伏有多陡」。 */
-function normalFromHeight(h, S, strength) {
-  const cv = makeCanvas(S);
-  const ctx = cv.getContext("2d");
-  const img = ctx.createImageData(S, S);
-  const d = img.data;
-  const at = (x, y) => h[(((y % S) + S) % S) * S + (((x % S) + S) % S)];
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
-      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
-      const len = Math.sqrt(dx * dx + dy * dy + 1);
-      const i = (y * S + x) * 4;
-      d[i] = (-dx / len * 0.5 + 0.5) * 255;
-      d[i + 1] = (-dy / len * 0.5 + 0.5) * 255;
-      d[i + 2] = (1 / len * 0.5 + 0.5) * 255;
-      d[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  return cv;
-}
-
-function makeCanvas(size) {
-  const c = document.createElement("canvas");
-  c.width = c.height = size;
-  return c;
-}
-
-/** 线性 → sRGB 传输。源色一律**先在 sRGB 空间按美术直觉定 hex**，再转成线性做运算、
- *  最后转回来 —— 直接在线性空间里乘系数会让暗部的变化看起来比亮的快得多。 */
-const SRGB_LUT = new Float32Array(1025);
-for (let i = 0; i <= 1024; i++) {
-  const c = i / 1024;
-  SRGB_LUT[i] = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
-}
-const lin2srgb = (c) => SRGB_LUT[Math.round(clamp01(c) * 1024)];
-function hexLin(hex) {
-  return [(hex >> 16 & 255) / 255, (hex >> 8 & 255) / 255, (hex & 255) / 255].map((v) => {
-    // sRGB → 线性
-    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+/** 按 `侧_部位_节号` 查骨数组下标的闭包（顶点权重索引的就是骨数组，不是场景树）。
+ *  **建表必须走 `fpsBone()`**，不能再自己 `exec` 一遍：臂骨的 level 是「缺省补 1」而不是 0，
+ *  两处各写一次必然分叉 —— 第一版这里写了 `+m[3]`（空串 → 0），
+ *  于是 `wrist`/`elbow` 全部查不到、`FPS_SRC.armWrist` 与 `armDir` **静默**停在占位值上
+ *  （不抛异常，只是量出来的枢轴恒为 [0,0,0] / [0,0,1]）。 */
+function fpsBoneFinder(bones) {
+  const map = new Map();
+  bones.forEach((b, i) => {
+    const m = fpsBone(b.name);
+    if (m) map.set(`${m.side}_${m.part}_${m.level}`, i);
   });
+  return (side, part, level) => (map.has(`${side}_${part}_${level}`) ? map.get(`${side}_${part}_${level}`) : -1);
+}
+
+// 每根手指三节的弯曲权重，**合计 1.0**：乘上 FPS_CURL 就是「这条手指一共弯多少弧度」。
+// **只有 3 节** —— 每根手指的第 4 节骨在源文件里 IBM 是单位阵（bind 位置落在原点、
+// 且不被任何顶点引用），拿它当旋转轴会绕着一个不存在的点转。所以那 10% 的权重
+// 按比例（0.40/0.30/0.20/0.10 → 0.42/0.33/0.25）并进前三节，合计仍是 1.0。
+const CURL_W = { thumb: [0.34, 0.36, 0.30], finger: [0.42, 0.33, 0.25] };
+// 每根手指的**整体系数**（相对中指）。**真人握拳不是四指齐平**：小指收得最紧、食指最松，
+// 拳面是一条从食指弯到小指的弧。四指共用同一组权重时截图上是「一排等高的小肉柱」，
+// 加上这条 0.90→1.18 的梯度才读得出指节。这条同时压低了食指末端 —— 托护木那只手
+// 原来指尖会探到手背上沿之外，看着像爪子。
+const CURL_STEM = { point: 0.90, middle: 1.00, ring: 1.08, pink: 1.18 };
+const FINGER_STEMS = ["point", "middle", "ring", "pink"];
+
+/**
+ * 算出「把手指弯成握拳」所需的逐骨旋转（**只有轴与角度，不是矩阵**）。
+ *
+ * 轴与符号全部**量出来**，一个都不猜：
+ *   · 四指的轴 = **指根连线** `pinky1 − point1`（横跨拳面的一条线）。绕它转手指就往掌心收
+ *     —— 这正是真人指关节的自由度方向。
+ *   · 符号 = 让指尖**朝掌心那一侧**转。判据是「旋转的一阶位移 `K × F` 是否指向掌心」，
+ *     掌心那一侧用**拇指**的位置代表（真人手掌上拇指与四指相对，这个近似在张开的手上很准）。
+ *   · 拇指的轴 = **掌面法线** `K × F`（拇指绕法线扫过掌心），符号同理，
+ *     但参照物换成食指指节（拇指靠近四指就是攥拳）。
+ *
+ * bind 姿势左右**严格镜像**，所以两侧各自算出来会**自动得到同一个符号** —— 镜像同时翻掉
+ * 轴线与参照物的 x 分量，点积里的 x 项相消。这正是「两侧同一个符号」那条实测结论的来历，
+ * 也意味着**不需要**任何按侧取号的特判。
+ */
+function curlRotations(bones, head, curl) {
+  const out = new Array(bones.length).fill(null);
+  if (!(curl > 0)) return out;
+  const at = fpsBoneFinder(bones);
+  for (const side of ["L", "R"]) {
+    const p1 = at(side, "point", 1), k1 = at(side, "pink", 1);
+    const m1 = at(side, "middle", 1), m3 = at(side, "middle", 3);
+    const t1 = at(side, "thumb", 1), t3 = at(side, "thumb", 3);
+    const p2 = at(side, "point", 2);
+    if ([p1, k1, m1, m3, t1, t3, p2].some((i) => i < 0)) continue;  // 骨名对不上就不弯这只手
+    const K = head[k1].clone().sub(head[p1]).normalize();            // 指根连线
+    const F = head[m3].clone().sub(head[m1]).normalize();            // 中指指向（拳面内的前向）
+    const N = K.clone().cross(F).normalize();                        // 掌面法线
+    const sF = N.dot(head[t1].clone().sub(head[m1])) > 0 ? 1 : -1;
+
+    for (const stem of FINGER_STEMS) {
+      const g = CURL_STEM[stem] === undefined ? 1 : CURL_STEM[stem];
+      CURL_W.finger.forEach((w, k) => {
+        const bi = at(side, stem, k + 1);
+        if (bi >= 0) out[bi] = { axis: K.clone(), angle: sF * w * curl * g };
+      });
+    }
+    const Ft = head[t3].clone().sub(head[t1]).normalize();
+    const sT = N.clone().cross(Ft).dot(head[p2].clone().sub(head[t1])) > 0 ? 1 : -1;
+    CURL_W.thumb.forEach((w, k) => {
+      const bi = at(side, "thumb", k + 1);
+      if (bi >= 0) out[bi] = { axis: N.clone(), angle: sT * w * curl * FPS_CURL_THUMB };
+    });
+  }
+  return out;
 }
 
 /**
- * 由一张高度场 + 一个配色回调生成 { map, normalMap, roughnessMap } 三件套。
- * `albedo(i, o)` 把**线性** rgb 写进 o（长度 3），三张图因此天然对齐。
- */
-function buildMaps(S, h, normalStrength, normalScale, albedo, rough) {
-  const cv = makeCanvas(S);
-  const ctx = cv.getContext("2d");
-  const img = ctx.createImageData(S, S);
-  const d = img.data;
-  const rgbLin = [0, 0, 0];
-  for (let i = 0; i < h.length; i++) {
-    albedo(i, rgbLin);
-    d[i * 4] = lin2srgb(rgbLin[0]) * 255;
-    d[i * 4 + 1] = lin2srgb(rgbLin[1]) * 255;
-    d[i * 4 + 2] = lin2srgb(rgbLin[2]) * 255;
-    d[i * 4 + 3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
-
-  // 粗糙度只被 three 读绿色通道，三个通道写同一个值是为了肉眼能直接看这张图。
-  const rc = makeCanvas(S);
-  const rctx = rc.getContext("2d");
-  const rimg = rctx.createImageData(S, S);
-  const rd = rimg.data;
-  for (let i = 0; i < h.length; i++) {
-    const v = clamp01(rough(i)) * 255;
-    rd[i * 4] = v; rd[i * 4 + 1] = v; rd[i * 4 + 2] = v; rd[i * 4 + 3] = 255;
-  }
-  rctx.putImageData(rimg, 0, 0);
-
-  return {
-    map: texFrom(cv, true),
-    normalMap: texFrom(normalFromHeight(h, S, normalStrength), false),
-    roughnessMap: texFrom(rc, false),
-    normalScale: new THREE.Vector2(normalScale, normalScale),
-  };
-}
-
-/** 反照率贴图是颜色贴图 → **必须显式标 SRGBColorSpace**；法线/粗糙度是数据贴图 →
- *  **必须保持 NoColorSpace**。CanvasTexture 默认就是 NoColorSpace，所以漏标的后果
- *  是颜色被当线性数据读进来、整体发白（AGENTS.md 记过同一坑，出现在集装箱上）。
- *  anisotropy 稍后由 load() 按 renderer 的上限补 —— 袖子是贴着视线的斜面，
- *  各向异性过滤对它的观感影响最大。 */
-function texFrom(cv, srgb) {
-  const t = new THREE.CanvasTexture(cv);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-  return t;
-}
-
-/** 手套手背：**涤纶针织**（不是皮革）。真实的战术手套手背是弹力针织、掌心才是合成革 ——
- *  这个区分本身就是「看着像真东西」的一部分，两块面因此有不同的手感。
- *  织孔只有 0.7mm 见方（屏幕上 2.5px），读出来的是**织物光泽**而不是图案。 */
-function gloveKnitMaps() {
-  const S = TEX_PX.glove;
-  const W = 56, C = 80;                       // 10cm 一格 → 织孔 1.8×1.25mm
-  const knit = field(S, (u, v) => {
-    const wale = 0.5 + 0.5 * Math.cos(u * Math.PI * 2 * W);       // 纵行（菱形柱）
-    // **相邻纵行的线圈要错开半个横列** —— 不错开就是一排方格，不是针织（实测对比过）
-    const phase = (Math.floor(u * W) & 1) ? 0.5 : 0;
-    const course = 0.5 + 0.5 * Math.cos((v * C + phase) * Math.PI * 2);
-    return wale * (0.55 + 0.45 * course);
-  });
-  const fibers = lowField(S, (u, v) =>
-    0.22 * (vnoise(u * 44, v * 44, 44, 19) - 0.5) +
-    // 沿纵行方向拉长的纤维束（vnoise 的 perY 比 per 小 = 纵向拉伸）
-    0.26 * (vnoise(u * 112, v * 28, 112, 15, 28) - 0.5), 4);
-  // 磨损/松紧：~1cm 的斑块。**这才是屏幕上真正能看见的那一层**（见文件头）。
-  const wear = lowField(S, (u, v) => sstep(0.46, 0.80, fbm(u, v, 3, 3, 17, 0.55)), 8);
-  const h = new Float32Array(S * S);
-  for (let i = 0; i < h.length; i++) h[i] = knit[i] * 0.55 + fibers[i] - wear[i] * 0.06;
-
-  const base = hexLin(GLOVE);
-  return buildMaps(S, h, 3.4, 0.42,
-    (i, o) => {
-      const k = knit[i] - 0.5, f = fibers[i], w = wear[i];
-      // 线圈顶被磨亮、磨白（尼龙的磨损是**变亮**，不是变脏）
-      const l = (1 + 0.16 * k + f) * (1 + 0.30 * w);
-      o[0] = base[0] * l * (1 + 0.05 * f);
-      o[1] = base[1] * l;
-      o[2] = base[2] * l * (1 - 0.06 * f);
-    },
-    (i) => 0.82 + 0.07 * (knit[i] - 0.5) + 0.15 * fibers[i] - 0.07 * wear[i]);
-}
-
-/** 手套掌心：**合成革**（Amara）。细密的圆润粒面 + 汗渍磨光斑 —— 磨光处**更亮也更滑**，
- *  这是皮革在游戏画面里最容易被认出来的一对特征。 */
-function gloveLeatherMaps() {
-  const S = TEX_PX.palm;
-  const cells = lowField(S, (u, v) => 0.6 * vnoise(u * 40, v * 40, 40, 21) + 0.4 * vnoise(u * 80, v * 80, 80, 23), 4);
-  const pebble = new Float32Array(S * S);
-  for (let i = 0; i < pebble.length; i++) pebble[i] = sstep(0.32, 0.68, cells[i]);
-  const micro = lowField(S, (u, v) => vnoise(u * 112, v * 112, 112, 25), 4);
-  const rubbed = lowField(S, (u, v) => sstep(0.50, 0.80, fbm(u, v, 3, 3, 27, 0.55)), 8);
-  const h = new Float32Array(S * S);
-  for (let i = 0; i < h.length; i++) h[i] = pebble[i] * 0.7 + micro[i] * 0.2 - rubbed[i] * 0.1;
-
-  const base = hexLin(PALM);
-  return buildMaps(S, h, 3.0, 0.5,
-    (i, o) => {
-      const p = pebble[i] - 0.5, d = rubbed[i];
-      // 汗渍处颜色更浅、更中性（皮革被磨掉了表层）
-      const l = (1 + 0.12 * p) * (1 - 0.10 * d);
-      o[0] = base[0] * l * (1 + 0.16 * d);
-      o[1] = base[1] * l * (1 + 0.12 * d);
-      o[2] = base[2] * l * (1 + 0.08 * d);
-    },
-    // 磨光处更滑 —— 与「更亮」同向，两者一起才像被摸旧的皮子
-    (i) => 0.62 + 0.06 * (pebble[i] - 0.5) - 0.12 * rubbed[i]);
-}
-
-/** 掌心/虎口那块橡胶垫。只在手背上露出一点点，用最低的预算（256²）。 */
-function glovePadMaps() {
-  const S = TEX_PX.pad;
-  const h = lowField(S, (u, v) => vnoise(u * 90, v * 90, 90, 31) - 0.5, 4);
-  const base = hexLin(PAD);
-  return buildMaps(S, h, 2.2, 0.4,
-    (i, o) => {
-      const k = 1 + 0.16 * h[i];
-      o[0] = base[0] * k; o[1] = base[1] * k; o[2] = base[2] * k;
-    },
-    (i) => 0.90 + 0.06 * h[i]);
-}
-
-/** 袖管：**平织 + ripstop 加固格 + 折痕**的橄榄绿军布。
+ * 把一具蒙皮骨架烘成四块静态几何（手 L/R、前臂 L/R），并**当场量出** `FPS_SRC`
+ * 与 `ELBOW_DIR`。返回 `{ handR, handL, foreR, foreL }`（都是 `BufferGeometry`）。
  *
- *  **折痕那一层是这里唯一真正看得见的东西，别删。** 袖管是第一人称里面积最大的一块
- *  布面，而它同时是一根**光滑的锥管** —— 只有织纹时，1.5mm 的织孔在屏幕上不到 4px，
- *  整条袖子读出来就是一根塑料管（这正是旧版最像假货的地方，实测对比过）。真正让
- *  「布」立住的是 2~4cm 的横向折痕：法线贴上它之后，掠射光下才有起伏的明暗带。
- *  织纹只负责近处的「这是个织物」的读感，折痕才负责远处的体积感。 */
-function sleeveMaps() {
-  const S = TEX_PX.sleeve;
-  const WEAVE = 96;                           // 14cm 一格 → 经/纬各 96 根，织孔 1.5mm
-  const GRID = 20;                            // 加固格 7mm 一道
-  const thread = (t, per) => {
-    // 到最近一根线的距离（环绕），高斯剖面
-    const d = Math.abs(((t * per) % 1) - 0.5);
-    return Math.exp(-(d * d) / (0.0035 * 0.0035));
-  };
-  const weave = sepField(S,
-    (u, A, o) => { A[o] = thread(u, GRID); A[o + 1] = Math.sin(u * Math.PI * 2 * WEAVE); },
-    (v, B, o) => { B[o] = thread(v, GRID); B[o + 1] = Math.sin(v * Math.PI * 2 * WEAVE); },
-    (gu, su, gv, sv) => 0.20 * Math.max(gu, gv) + 0.14 * su * sv);
-  const fibers = lowField(S, (u, v) => vnoise(u * 128, v * 128, 128, 51), 4);
-  const mottle = lowField(S, (u, v) => fbm(u, v, 4, 3, 53), 8);
-  // 折痕：粗噪声取脊（`1-|2n-1|` 的峰在 n=0.5）再三次幂收尖，得到一条条窄而陡的折线。
-  // 用 lowField 的粗网格算（每格约 1/div = 1/6 纹理 = 2.3cm），正好落在要的尺度上。
-  const warp = lowField(S, (u, v) => vnoise(u * 6, v * 3, 6, 61, 3), 7);
-  const crease = new Float32Array(S * S);
-  for (let i = 0; i < crease.length; i++) {
-    const c = 1 - Math.abs(2 * warp[i] - 1);
-    crease[i] = Math.pow(c, 2.5) * (0.45 + 0.55 * mottle[i]);
+ * ## 核心推导：蒙皮矩阵 `M_i` 恰好就是「绕关节点的累积旋转」
+ *
+ * 记 `W0[i] = inverse(IBM[i])`（第 i 根骨在 **bind 姿势**下的世界矩阵），
+ * `W[i]` 为当前姿势、`D[i]` 为叠在骨自身局部空间上的额外旋转，则
+ * `W[i] = W[parent]·(W0[parent]⁻¹·W0[i])·D[i]`。
+ * 令 `A[i] := W[i]·W0[i]⁻¹`，代入得 `A[i] = A[parent]·(W0[i]·D[i]·W0[i]⁻¹)`。
+ * 而蒙皮矩阵是 `M_i = W[i]·IBM[i]`，又因 `W0[i]·IBM[i] = I`：
+ *
+ *     M_i = A[parent] · (W0[i]·D[i]·W0[i]⁻¹) · W0[i] · IBM[i] = A[i]
+ *
+ * 即 **`M_i` 就是 `A[i]`**，而 `A[i]` 的每一项都是「绕该骨的 bind 关节点、按该骨的世界轴
+ * 转一个角」的复合（`W0[i]·D[i]·W0[i]⁻¹` 正是把局部旋转搬到世界系的共轭）。
+ * 于是顶点只要按权重混合 `A[i]·v` —— **连 bind 矩阵都不必碰**，也不需要遍历场景树。
+ *
+ * 这条推导自带一个现成的自检：`curl = 0` 时 `D[i] = I` ⇒ `A[i] = I` ⇒
+ * **输出必须逐点等于原始 `POSITION`**。那是「bind 重构写对了没有」的唯一判据。
+ *
+ * ## 为什么用 bind 姿势而不是节点姿势
+ * `bone.matrixWorld` 是**节点姿势**，实测 46/47 根与 `W0` 不一致、最大差 33.8 ——
+ * 按它烘会得到一副完全不同的架子。而且 bind 姿势左右**严格镜像**（拟合出来的拳左右一致）、
+ * 还是一只干净的放松张开手（握拳的起点）。文件里 0 段动画，直接渲染出来的是节点姿势，
+ * 所以「看起来是那样」**不能**拿来当依据。
+ */
+export function bakeFpsArms(gltf, curl = FPS_CURL) {
+  const root = gltf.scene;
+  let sm = null;
+  root.traverse((n) => { if (n.isSkinnedMesh && !sm) sm = n; });
+  if (!sm || !sm.skeleton || !sm.skeleton.bones.length) throw new Error("fps_arms: 找不到 SkinnedMesh / skeleton");
+  const bones = sm.skeleton.bones, nb = bones.length;
+
+  const W0 = sm.skeleton.boneInverses.map((ibm) => new THREE.Matrix4().copy(ibm).invert());
+  const head = W0.map((m) => new THREE.Vector3().setFromMatrixPosition(m));
+
+  // 父子索引用**骨数组下标**（顶点权重索引的就是这个数组）。实测骨数组是「父先于子」的，
+  // 所以下面一次正序扫描就能把 A[] 递推完；若将来换了模型，这里要改成拓扑序。
+  const idxOf = new Map();
+  bones.forEach((b, i) => idxOf.set(b, i));
+  const parentOf = bones.map((b) => (b.parent && idxOf.has(b.parent) ? idxOf.get(b.parent) : -1));
+
+  // ---- ① 逐骨累积旋转 A[i] = A[parent] · 绕关节点(h[i])、绕世界轴(axis)、转(angle) ----
+  const rots = curlRotations(bones, head, curl);
+  const A = new Array(nb).fill(null);
+  const _rq = new THREE.Quaternion(), _rm = new THREE.Matrix4(), _tm = new THREE.Matrix4();
+  for (let i = 0; i < nb; i++) {
+    const own = new THREE.Matrix4();
+    const r = rots[i];
+    // 关节点落在原点（`_rootJoint` 与十根末节骨）时跳过：绕原点转会把整只手甩出去。
+    if (r && head[i].lengthSq() > 1e-12) {
+      _rq.setFromAxisAngle(r.axis, r.angle);
+      own.makeTranslation(head[i].x, head[i].y, head[i].z);
+      own.multiply(_rm.makeRotationFromQuaternion(_rq));
+      own.multiply(_tm.makeTranslation(-head[i].x, -head[i].y, -head[i].z));
+    } else {
+      own.identity();
+    }
+    const p = parentOf[i];
+    A[i] = own;
+    if (p >= 0 && A[p]) A[i].premultiply(A[p]);   // A[i] = A[p] · own
   }
 
-  const h = new Float32Array(S * S);
-  for (let i = 0; i < h.length; i++) {
-    h[i] = weave[i] + fibers[i] * 0.14 + (mottle[i] - 0.5) * 0.10 - crease[i] * 0.85;
+  // ---- ② 逐顶点：位置与法线一起做 LBS ----
+  const g = sm.geometry;
+  const posA = g.attributes.position, norA = g.attributes.normal;
+  const siA = g.attributes.skinIndex, swA = g.attributes.skinWeight;
+  const uvA = g.attributes.uv, uv1A = g.attributes.uv1;   // uv1 是 aoMap 要的那一套
+  if (!norA || !siA || !swA) throw new Error("fps_arms: 缺 NORMAL / JOINTS_0 / WEIGHTS_0");
+  const N = posA.count;
+
+  const vPart = new Array(N);
+  const bPos = new Float32Array(N * 3), bNor = new Float32Array(N * 3);
+  const p = new THREE.Vector3(), n = new THREE.Vector3();
+  const acc = new THREE.Vector3(), acn = new THREE.Vector3();
+  const vv = new THREE.Vector3(), vn = new THREE.Vector3();
+  const m3 = new THREE.Matrix3();
+  for (let i = 0; i < N; i++) {
+    p.fromBufferAttribute(posA, i);
+    n.fromBufferAttribute(norA, i);
+    acc.set(0, 0, 0); acn.set(0, 0, 0);
+    let best = -1, bw = -1;
+    for (let k = 0; k < 4; k++) {
+      const w = swA.getComponent(i, k);
+      if (w <= 0) continue;
+      const bi = siA.getComponent(i, k);
+      if (w > bw) { bw = w; best = bi; }
+      const a = A[bi];
+      if (!a) continue;
+      acc.addScaledVector(vv.copy(p).applyMatrix4(a), w);
+      // 法线走 A 的**旋转部分**（A 是刚体变换，其正常矩阵就是它的上左 3×3；
+      // 因为 A 是正交阵，用 `setFromMatrix4` 而不是 `getNormalMatrix` 更省也等价）。
+      acn.addScaledVector(vn.copy(n).applyMatrix3(m3.setFromMatrix4(a)), w);
+    }
+    bPos[i * 3] = acc.x; bPos[i * 3 + 1] = acc.y; bPos[i * 3 + 2] = acc.z;
+    // curl = 0 时 Σw = 1 且 A = I，这一步是恒等（连归一化都不改变它）—— 自检就落在这里。
+    if (acn.lengthSq() > 1e-12) acn.normalize();
+    bNor[i * 3] = acn.x; bNor[i * 3 + 1] = acn.y; bNor[i * 3 + 2] = acn.z;
+    vPart[i] = best >= 0 ? fpsPartOf(bones[best].name) : null;
   }
 
-  const base = hexLin(SLEEVE);
-  return buildMaps(S, h, 6.0, 0.95,
-    (i, o) => {
-      const l = (1 + 0.18 * (mottle[i] - 0.5) + 0.12 * (fibers[i] - 0.5) + 0.6 * weave[i])
-        * (1 - 0.26 * crease[i]);          // 折痕里是暗的（自遮挡 + 积灰）
-      o[0] = base[0] * l; o[1] = base[1] * l; o[2] = base[2] * l;
-    },
-    // 布几乎处处发涩：0.88~0.93。**织纹对粗糙度的影响必须写进来**，
-    // 否则掠射光下袖子是一条均匀的塑料管。
-    (i) => 0.90 + 0.25 * weave[i] + 0.02 * (fibers[i] - 0.5) + 0.05 * crease[i]);
+  // ---- ③ 按主导关节切四份 ----
+  const src = g.index;
+  const triCount = (src ? src.count : N) / 3;
+  const bucket = { handR: [], handL: [], foreR: [], foreL: [] };
+  for (let t = 0; t < triCount; t++) {
+    const a = src ? src.getX(t * 3) : t * 3;
+    const b = src ? src.getX(t * 3 + 1) : t * 3 + 1;
+    const c = src ? src.getX(t * 3 + 2) : t * 3 + 2;
+    const q = [vPart[a], vPart[b], vPart[c]];
+    // 跨切缝的三角形**每个部位各收一份**（顶点重复）。这样即使 hr 带了点掰弯，
+    // 缝上也不会露出一条空洞；重复的那一份在 hr = 0 时与另一份的变换完全相同
+    // （见 FPS_SRC 注释里那条焊缝推导），深度与颜色都一致，看不出重叠。
+    for (let s = 0; s < 3; s++) {
+      if (!q[s]) continue;
+      if (s === 1 && q[1] === q[0]) continue;
+      if (s === 2 && (q[2] === q[0] || q[2] === q[1])) continue;
+      bucket[q[s]].push(a, b, c);
+    }
+  }
+
+  // ---- ④ 出四块非索引几何，并统一做「缩放 + 绕 Y 180° + 前臂掰正」 ----
+  // （顺序是 `R_fix · RY · S` —— 均匀缩放与旋转可交换，这里写清楚只是为了别再纠结。）
+  const S = FPS_BAKE_SCALE;
+  const BASE = new THREE.Matrix4().makeRotationY(FPS_BAKE_ROT_Y)
+    .multiply(new THREE.Matrix4().makeScale(S, S, S));
+
+  // 掰正量由**基础旋转之后**的实测前臂轴反推 —— 源数据怎么歪都不必手抄一个角（见 FPS_ARM_DIR）。
+  // 查不到腕骨/肘骨时 `M` 停在纯基础旋转上：**这不影响焊缝**，因为 ELBOW_DIR 是从同一个 M 量的。
+  const M = { R: BASE, L: BASE };
+  {
+    const at0 = fpsBoneFinder(bones);
+    const wi = at0("R", "wrist", 1), ei = at0("R", "elbow", 1);
+    if (wi >= 0 && ei >= 0) {
+      const tgt = new THREE.Vector3().fromArray(FPS_ARM_DIR).normalize();
+      const a = head[ei].clone().applyMatrix4(BASE).sub(head[wi].clone().applyMatrix4(BASE)).normalize();
+      // 先「转向」再「绕新轴拧」：`qRoll · qDir` 作用在向量上就是 qDir 先跑。
+      const qR = new THREE.Quaternion().setFromAxisAngle(tgt, FPS_ARM_ROLL)
+        .multiply(new THREE.Quaternion().setFromUnitVectors(a, tgt));
+      // 左臂取 **x 共轭镜像**（`(x,y,z,w) → (x,-y,-z,w)`）而不是各算各的 setFromUnitVectors：
+      // 两者数值上等价（`M_x·R(u,θ)·M_x = R(M_x·u, -θ)`），但显式镜像保证两只手严格对称。
+      const qL = new THREE.Quaternion(qR.x, -qR.y, -qR.z, qR.w);
+      M.R = new THREE.Matrix4().makeRotationFromQuaternion(qR).multiply(BASE);
+      M.L = new THREE.Matrix4().makeRotationFromQuaternion(qL).multiply(BASE);
+    }
+  }
+  const M_KEY = { handR: "R", handL: "L", foreR: "R", foreL: "L" };
+  const out = {};
+  for (const key of ["handR", "handL", "foreR", "foreL"]) {
+    const tri = bucket[key];
+    if (!tri.length) continue;
+    const cnt = tri.length;
+    const P = new Float32Array(cnt * 3), Nr = new Float32Array(cnt * 3);
+    const U = uvA ? new Float32Array(cnt * 2) : null;
+    const U1 = uv1A ? new Float32Array(cnt * 2) : null;
+    for (let j = 0; j < cnt; j++) {
+      const v = tri[j];
+      P[j * 3] = bPos[v * 3]; P[j * 3 + 1] = bPos[v * 3 + 1]; P[j * 3 + 2] = bPos[v * 3 + 2];
+      Nr[j * 3] = bNor[v * 3]; Nr[j * 3 + 1] = bNor[v * 3 + 1]; Nr[j * 3 + 2] = bNor[v * 3 + 2];
+      if (U) { U[j * 2] = uvA.getX(v); U[j * 2 + 1] = uvA.getY(v); }
+      if (U1) { U1[j * 2] = uv1A.getX(v); U1[j * 2 + 1] = uv1A.getY(v); }
+    }
+    const bg = new THREE.BufferGeometry();
+    bg.setAttribute("position", new THREE.BufferAttribute(P, 3));
+    bg.setAttribute("normal", new THREE.BufferAttribute(Nr, 3));
+    if (U) bg.setAttribute("uv", new THREE.BufferAttribute(U, 2));
+    if (U1) bg.setAttribute("uv1", new THREE.BufferAttribute(U1, 2));
+    // 位置与法线一起变换（法线走 normalMatrix 并自动归一化）。**必须在烘焙之后**：
+    // 先把 M 揉进几何，下面量出来的枢轴/轴才与 `_install` 拿到的是同一个坐标系。
+    bg.applyMatrix4(M[M_KEY[key]]);
+    bg.computeBoundingBox();
+    out[key] = bg;
+  }
+
+  // ---- ⑤ 当场量枢轴（换模型不用重抄数；量的是**烘焙之后**的几何）----
+  const at = fpsBoneFinder(bones);
+  for (const side of ["L", "R"]) {
+    const hand = out["hand" + side];
+    if (hand) FPS_SRC.handPivot[side] = hand.boundingBox.getCenter(new THREE.Vector3()).toArray();
+    // 指根连线（食指掌指关节 → 小指掌指关节）= 拳的**握持轴**。量它的**初衷**是「握竖直
+    // 握把时它应当与握把平行」，好在 `hr`/`hl` 上算出该拧多少 —— 但实测把这条否掉了：
+    // 它与前臂轴近似正交（点积 0.067，这是人体的事实：握杆时杆 ⟂ 小臂），而握把柱离前臂轴
+    // 只有 ~20°，对进通道要拧 ~98°，摊在腕上就是一道骨折级的折角。
+    // **所以 `hr`/`hl` 八把枪全是 0**，这个量现在是「为什么不能拧」的证据，不再是调参依据 ——
+    // 见 `ARM_ANCHORS` 上那段结论。掌指关节本身不随 `curlRotations` 动（转动绕着它们各自的头），
+    // 所以这一步与 curl 无关。
+    {
+      const p1 = at(side, "point", 1), p5 = at(side, "pink", 1);
+      if (p1 >= 0 && p5 >= 0) {
+        const rot = new THREE.Matrix3().setFromMatrix4(M[side]);
+        FPS_SRC.gripAxis[side] = head[p5].clone().sub(head[p1]).applyMatrix3(rot).normalize().toArray();
+      }
+    }
+    const wi = at(side, "wrist", 1), ei = at(side, "elbow", 1);
+    if (wi < 0 || ei < 0) continue;
+    // 逐侧各用自己的 M —— 掰正量左右互为镜像，混用会把一侧的轴量错。
+    const w = head[wi].clone().applyMatrix4(M[side]);
+    const e = head[ei].clone().applyMatrix4(M[side]);
+    FPS_SRC.armWrist[side] = w.toArray();
+    const dir = e.sub(w).normalize();
+    FPS_SRC.armDir[side] = dir.toArray();
+    // **焊缝**：ELBOW_DIR 必须与 armDir 同源，否则手与袖的相对旋转不是单位阵、腕子会裂。
+    if (side === "R") ELBOW_DIR.r = dir.toArray(); else ELBOW_DIR.l = dir.toArray();
+  }
+  return out;
 }
+
+// =====================================================================================
+// 手部材质：把模型自带的贴图**重映射**到本作的调色板
+// =====================================================================================
+//
+// 源材质是 `KHR_materials_pbrSpecularGlossiness`，经 `gltf.js` 之后拿到 `map`（← diffuse），
+// `normalMap` / `aoMap` 是 GLTFLoader 顶层的处理（与那个扩展无关），所以三张都在。
+//
+// 【为什么是「重映射」而不是「另画一套」】见文件头。要点只有一条：**保留 diffuse 的亮度结构**。
+// 那几张 1024² 里写着作者的全部结构信息 —— 手套的织纹、指关节的褶皱、缠布一圈圈的棱线。
+// 我们只做一次逐像素的**亮度 → 配色**映射，把近黑的手套抬到皮革棕 / 橄榄绿，
+// 而肤色手指天然落在 ramp 的亮端：**「戴着半指手套的手」这个对比正是选这条路的理由**，
+// 换成程序化贴图就等于把它整条丢掉。
+//
+// 【窗口 `lo`/`knee`/`hi` 是这一段唯一的旋钮，而且必须**按部位实测**，不能照整张图取】
+// 源片子上手和袖各占几块岛，整图分位会被别的岛带偏。实测（`/tmp/glbview/bake.html` 第 3 节：
+// 把每个部位的顶点 UV 打到贴图上取亮度）：
+//   hand  n=7755  min 0.000  p05 0.000  p50 0.484  p95 0.684  max 0.919   ← 双峰：手套暗簇 + 皮肤亮簇
+//   fore  n=2925  min 0.012  p05 0.031  p50 0.102  p95 0.164  max 0.216   ← 单峰，缠布整体压在底部
+// 两个窗口的宽度因此差三倍多，而且**形状都不一样**：
+// 手的暗簇（0.00~0.20）与亮簇（0.40~0.92）之间那段 0.20~0.40 整张图几乎没有像素（实测空隙），
+// 所以手走两段式、拐点落在空隙里，两簇各吃半个 ramp；袖只有一簇，一条线性就够。
+// 反例（都实测过）：袖用 lo 0.04/hi 0.38 ⇒ 袖布最高只走到 ramp 的 46%，重映射后的直方图
+// 是一根柱子，整条袖子读成一块没有起伏的橄榄色；手用一条线性跨双峰 ⇒ 手套那一簇被压进
+// [0, 0.2] 里，整块手套读成一片没有起伏的深棕。**两端各吃满**才是这条的目的。
+const REMAP = {
+  // 手：双峰，`knee` 落在实测的空隙（0.20~0.40 之间整张图几乎没有像素）上，两簇各吃一半 ramp，
+  //     否则手套那一簇会被压进 [0, 0.2] 里、整块手套读成一片没有起伏的深棕。
+  hand: { dark: PALM, light: GLOVE, lo: 0.02, knee: 0.30, hi: 0.90 },
+  // 袖：单峰，`knee: null` ⇒ 一条普通线性 ramp 就够（数据只占 [0.01, 0.22]）。
+  fore: { dark: SLEEVE_DK, light: SLEEVE, lo: 0.02, knee: null, hi: 0.21 },
+};
+
+/**
+ * 把一张 sRGB 反照率按亮度重映射到 [dark, light]。返回新的 `CanvasTexture`（sRGB）。
+ * 不变的就只有亮度本身 —— 源片子的每一点明暗（织纹、褶皱、AO）都被完整保留下来。
+ */
+function remapAlbedo(srcTex, { dark, light, lo, knee, hi }, size = 1024) {
+  const img = srcTex && srcTex.image;
+  if (!img) return null;
+  const cv = makeCanvas(size);
+  cv.height = size;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, size, size);
+  const px = ctx.getImageData(0, 0, size, size).data;
+  // 两端色**转成线性**再插值：hex 写的是 sRGB 的观感值，而插值必须在线性空间里做，
+  // 否则暗部会被系统性压暗（texturekit 的 lin2srgb 注释讲的就是这一条）。
+  const d = hexLin(dark), l = hexLin(light);
+  const loSpan = Math.max(1e-6, (knee ?? hi) - lo);
+  const hiSpan = knee == null ? 1 : Math.max(1e-6, hi - knee);
+  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  for (let i = 0; i < px.length; i += 4) {
+    // 亮度用 sRGB 字节上的加权：这**正是**「人眼看到的明暗」，也正是我们要保住的那个量。
+    const lum = (px[i] * 0.2126 + px[i + 1] * 0.7152 + px[i + 2] * 0.0722) / 255;
+    // 有 knee 就把 [lo, knee] / [knee, hi] 各映到 ramp 的一半；没有就是一条线性。
+    const t = knee == null
+      ? clamp01((lum - lo) / loSpan)
+      : lum < knee ? 0.5 * clamp01((lum - lo) / loSpan)
+                   : 0.5 + 0.5 * clamp01((lum - knee) / hiSpan);
+    px[i] = lin2srgb(d[0] + (l[0] - d[0]) * t) * 255;
+    px[i + 1] = lin2srgb(d[1] + (l[1] - d[1]) * t) * 255;
+    px[i + 2] = lin2srgb(d[2] + (l[2] - d[2]) * t) * 255;
+    // alpha 原样保留
+  }
+  ctx.putImageData(new ImageData(px, size, size), 0, 0);
+  const out = texFrom(cv, true);        // → SRGBColorSpace + RepeatWrapping
+  // **`flipY` 必须跟着源贴图**：glTF 的 UV 原点在左上，GLTFLoader 给每张贴图都设了
+  // `flipY = false`，而 `CanvasTexture` 默认是 `true` —— 不跟就会把整张贴图上下翻过来
+  // （手上的织纹会倒着长，而且缝的位置全错）。
+  out.flipY = srcTex.flipY;
+  out.wrapS = srcTex.wrapS;
+  out.wrapT = srcTex.wrapT;
+  return out;
+}
+
+/**
+ * 出这对材质。返回 `{ hand, fore }`。
+ *
+ * **不挂 `aoMap`**：AO 本来就有一部分烘在 diffuse 里，而我们的 ramp 是**保亮度**的，
+ * 也就是把它原样搬到了新配色上；再叠一张 aoMap 等于把遮蔽关系平方一次
+ * （折痕会黑成一道沟）。`aoMapIntensity` 那条路留给「源片子没烘 AO」的模型。
+ *
+ * **`color` 必须留白**：颜色已经在重映射后的 albedo 里了，两边都上等于色值平方 ——
+ * 这个坑在 `containerFaceTexture` 与上一版的 `_mat()` 上各踩过一次。
+ *
+ * **`roughness = 0.62` 是必须显式写的**：源文件 `glossinessFactor = 1`，
+ * `gltf.js` 按 `roughness = 1 − glossiness` 转出来是 **0**，也就是一副镜面黑手套
+ * （白昼天空下就是那面天穹的镜像，与 `m4_gold` 的 met 1 / rou 0 同一类）。
+ * 法的起伏交给 normalMap，粗糙度不再挂图。
+ */
+export function fpsArmMaterial(gltf) {
+  let sm = null;
+  gltf.scene.traverse((n) => { if (n.isSkinnedMesh && !sm) sm = n; });
+  const src = sm && (Array.isArray(sm.material) ? sm.material[0] : sm.material);
+  if (!src) throw new Error("fps_arms: 找不到源材质");
+  const maps = { hand: remapAlbedo(src.map, REMAP.hand), fore: remapAlbedo(src.map, REMAP.fore) };
+  // **法线强度两份不同，这是量出来的**：手背在源 diffuse 里是一整片**没有任何细节的亮面**
+  // （dump 出来看过：纹理右半是一块均匀的浅棕），指节、掌纹全在 normalMap 里。
+  // 0.85 时那一块渲染出来就是一个光滑的肉包 —— 用户报的「手不自然」主要是这里。
+  // 前臂反过来：缠布的褶皱 diffuse 里本来就画得很足，法线再顶高会变成搓衣板。
+  const mk = (map, kind) => {
+    const hand = kind === "hand";
+    const m = new THREE.MeshStandardMaterial({
+      color: 0xffffff,             // 见上：颜色在贴图里，这里只能是白的
+      map,
+      metalness: 0.02,
+      roughness: hand ? 0.66 : 0.80,   // 皮革手套带一点光泽，袖布是哑的
+      envMapIntensity: 0.85,
+    });
+    if (src.normalMap) {
+      // **共用、不 clone**：`repeat` 是 (1,1)、UV 是作者为这张图排的，两份材质用同一张正好。
+      m.normalMap = src.normalMap;
+      // 源贴图的 `normalScale` 是它作者的强度（glTF 的 `normalTexture.scale`，默认 1）。
+      // 手取 1.45（把指节的起伏顶出来），前臂 1.05。
+      const ns = hand ? 1.45 : 1.05;
+      m.normalScale = new THREE.Vector2(ns, ns);
+    }
+    return m;
+  };
+  return { hand: mk(maps.hand, "hand"), fore: mk(maps.fore, "fore"), maps };
+}
+
+// ---------- 袖口束带的最小贴图预算 ----------
+// 手套 / 袖布那四套程序化配方已删：手上现在自带 4 张 1024² 作者贴图，走 `fpsArmMaterial()`
+// 的亮度重映射（见文件头与 REMAP）。**只有袖口束带还吃程序化贴图** —— 它是我们现加的
+// 构件，模型里没有对应的一块。所以这里只留它需要的两个数。
+// 目标：一张贴图铺满多少米。袖口 3cm 一格 = 每 3cm 三道棱（见 cuffMaps）。
+const TEX_TILE = { cuff: 0.03 };
+const TEX_PX = { cuff: 256 };
+
 
 /** 袖口束带：**罗纹弹力布**（一圈圈细密的竖棱）。它存在的意义是给「袖子插着一只手」
  *  那个断口一个交代 —— 袖口本来就是收口的、比袖管深一档，这一块是画面里
@@ -474,17 +660,11 @@ function cuffMaps() {
     (i) => 0.78 + 0.10 * fuzz[i]);        // 弹力布比平织滑一点
 }
 
-// 四套贴图全局共用 —— 它们是纯数据、不可变，每个 ViewArms 实例各建一份纯属浪费。
+// 全局共用 —— 纯数据、不可变，每个 ViewArms 实例各建一份纯属浪费。
 let TEX_SETS = null;
 function texSets() {
   if (TEX_SETS) return TEX_SETS;
-  TEX_SETS = {
-    glove: gloveKnitMaps(),
-    palm: gloveLeatherMaps(),
-    pad: glovePadMaps(),
-    sleeve: sleeveMaps(),
-    cuff: cuffMaps(),
-  };
+  TEX_SETS = { cuff: cuffMaps() };
   return TEX_SETS;
 }
 
@@ -528,54 +708,6 @@ function cuffGeo(rad, len, tile) {
   return g;
 }
 
-/**
- * 一件网格的 **UV 密度**：每 1 个 UV 单位对应多少米（u / v 两轴分开量）。
- * 为什么必须实测：CS 那份模型的两条袖管 UV 尺度不一样（ArmR 与 ArmL 差近两倍），
- * 两轴之间也能差 1.7 倍。共用一份 repeat 会让一条袖子的织纹被轴向拉长、另一条被压扁 ——
- * 这是「一眼假」的典型来源，而且从截图上只会看成「贴图有点糊」，很难反推。
- *
- * 量法：遍历全部子网格的**每一条边**，累加 |Δ世界坐标| / Σ|Δuv|（逐轴）。
- * 用边长加权而不是「包围盒 ÷ uv 跨度」——后者在多岛 UV 上会差出好几倍。
- * 网格没有 UV（attributes.uv 缺失）时返回 null，由 _mat() 回退到 repeat(1,1)。
- */
-function uvDensity(root) {
-  const a = new THREE.Vector3(), b = new THREE.Vector3();
-  let du = 0, dv = 0, dw = 0;
-  for (const o of collectMeshes(root)) {
-    const g = o.geometry;
-    const pos = g && g.attributes && g.attributes.position;
-    const uv = g && g.attributes && g.attributes.uv;
-    if (!pos || !uv || !g.index) continue;
-    const idx = g.index;
-    // 每 7 条边取一条：UV 密度在同一块面上是常量，全量遍历纯属浪费（这几万三角形的
-    // 模型在初始化时跑一次，抽稀后耗时从 ~40ms 掉到个位数）。
-    for (let i = 0; i + 2 < idx.count; i += 3) {
-      for (let e = 0; e < 3; e++) {
-        const i0 = idx.getX(i + e), i1 = idx.getX(i + ((e + 1) % 3));
-        if (((i + e) % 7) !== 0) continue;
-        a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1);
-        const d = a.distanceTo(b);
-        du += Math.abs(uv.getX(i1) - uv.getX(i0));
-        dv += Math.abs(uv.getY(i1) - uv.getY(i0));
-        dw += d;
-      }
-    }
-  }
-  if (!(dw > 1e-6) || !(du > 1e-9) || !(dv > 1e-9)) return null;
-  return { u: dw / du, v: dw / dv };
-}
-
-/** 源材质名 → 贴图种类。**唯一的映射点**，_install 与 _cuff 都走它。
- *  CS 那份模型的手只用了三个材质名（`glove` 手背针织 / `glove_palm` 掌心合成革 /
- *  `gun_rubber` 虎口橡胶垫），旧版把它们统统映到一块同色同糙的材质上 —— 手背上
- *  本来该有三种手感的三块面因此糊成一团，这是「一团橡皮泥」的成因之一。
- *  未命中（换手模型）一律回退成手背针织。 */
-function matKind(name) {
-  if (MAT_SLEEVE_NAMES.has(name)) return "sleeve";
-  if (name === "glove_palm") return "palm";
-  if (name === "gun_rubber") return "pad";
-  return "glove";
-}
 
 // ---------- 握持锚点表（武器组局部）----------
 // r = 右手（扣扳机那只）腕点，l = 左手（托举）腕点，null 表示这把枪只用一只手。
@@ -587,9 +719,13 @@ function matKind(name) {
 // z∈[0.112,0.185]、弹匣 Dark_metal y∈[-0.119,0.055] z∈[-0.095,0.043]。
 // M4：护木 Primary y∈[0.017,0.126] z∈[-0.236,0.012]、握把在 Primary z∈[0.009,0.245] 的后段；
 // 手枪 P320 的握把与套筒同在一个 mesh（y 下探到 -0.18），只能按「握把在后下方」估；
-// **匕首是倒着握的**（刀柄在上、刃朝下）：红柄占 y∈[0,0.25]、护手在 y≈0、刃在 y<0，
-// 所以手要落在 y 为正的那一侧 —— 第一版按 AGENTS.md 里"knife_s_1 是刀柄"的说法
-// 去抓下半截，抓的其实是刀刃（实测截图看到手握住金色的刃）。
+// **匕首这一条是跟着 `WEAPON_DEFS.knife.orient` 走的一组值，改朝向就必须重跑一次。**
+// 三个前提**全部换过**，老读数一条都不能用：① 模型从旧的 FBX 双材质刀换成了
+// `models/knife.glb`（单材质 `Knife`）；② 手从 CS 四块换成了 `fps_arms.glb` 烘的那副；
+// ③ `orient` 是新加的（旧 `rotY: 0` 是照更早的方块小刀量的，对新模型是错的）。
+// 现在这一组是**量出来的**：刀柄在组局部沿刃轴从刀尾到护手，握点取柄上 60% 处，
+// 拳宽/柄宽 = 1.07、拳/柄长 = 0.82（捏得住、不埋进柄里），`s` 直接用步枪那个 0.743
+// ——「手的大小与步枪一致」比「刀粗所以缩手」更该是基准，因为手是同一双手。
 // 投掷物是半径 0.11 的球，手从**后下方**托着，掌心必须落进球的下半部才有"握住"的读感。
 //
 // `s` = **整只手（含前臂）的缩放**，绕腕点缩（作用在 grp 上，见 configure）。
@@ -598,14 +734,26 @@ function matKind(name) {
 // 步枪的 0.743 是**推导出来的**：CS 那把 AK 长 1.1036、我们归一化到 0.82 → 0.82/1.1036。
 // 其余几把没有对应关系（CS 没有手枪/投掷物），按「手的绝对尺寸与步枪一致」起步、再目视微调。
 //
-// `hr` / `hl` = 左右手**各自的旋转**（弧度，XYZ）。CS 的手是照着**它那把枪**的握把烘的姿势，
-// 换到我们的枪上角度不完全吻合（尤其手枪的握把倾角差得多），留这两个字段逐把修。
+// `hr` / `hl` = 左右手**各自的旋转**（弧度，XYZ），逐把修手相对枪的朝向。**八把枪目前全是 0**
+// （= 不写这个字段），这不是「还没调」，是量过之后的结论：
+//
+//   · 拳的**握把通道轴** = `FPS_SRC.gripAxis`（四指的指根连线，`curlRotations` 就是绕它弯的）。
+//     实测它与**前臂轴 `armDir` 近似正交**（点积 0.067）—— 这是人体的事实：握杆时杆 ⟂ 小臂。
+//   · 而 AK 的握把柱在组局部里≈ `(0, -0.94, 0.34)`，与前臂轴只差 ~20°。要把它对进拳的通道里
+//     就得把手相对小臂转 ~98°，摊到腕子上就是一道骨折级别的折角（`hr ≠ R_total` 的部分直接撕焊缝）。
+//   · 实测对照：把 `ak_classic` 的 hr 换成那 98° 的六种候选（正负两个符号 × 三档绕前臂滚转），
+//     缩略图上「像不像在握」并不比 0 好，而焊缝上多欠了 _cuff 一整条折角。
+//   · 源模型 bind 姿势的手**本身就是按握东西摆的**（`palm` 不需要修正），所以两边都留 0。
+//
+// 真要单独微调某把枪（比如以后换更细的握把），可用的**自由**方向只有「绕前臂轴滚转」——
+// 那是不撕焊缝的分量，等价于改烘焙期的 `FPS_ARM_ROLL`，但它只能调「掌心朝哪、拇指倒向哪边」，
+// **改不了通道轴的方向**（通道轴躺在 ⊥ 前臂的那个平面里，绕前臂滚只是在平面内转）。
 export const ARM_ANCHORS = {
   ak:     { r: [ 0.006,  0.001,  0.155], l: [-0.025,  0.041, -0.146], s: 0.743 },
   m4:     { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743 },
   awm:    { r: [ 0.018, -0.045,  0.160], l: [-0.025, -0.030, -0.230], s: 0.743 },
   pistol: { r: [-0.028, -0.100,  0.160], l: [-0.048, -0.135,  0.115], s: 0.800, m: [ 0.0, -0.230, 0.140] },
-  knife:  { r: [ 0.000,  0.020,  0.000], s: 0.550, l: null },
+  knife:  { r: [ 0.0369, -0.0946,  0.0638], s: 0.743, l: null },
   frag:   { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
   flash:  { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
   smoke:  { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
@@ -622,6 +770,8 @@ export const ARM_ANCHORS = {
   m4_thor:      { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743, m: [0, -0.155, 0.020] },
   m4_frost:     { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743, m: [0, -0.155, 0.020] },
   m4_bubblegum: { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743, m: [0, -0.155, 0.020] },
+  m4_goldenm4:  { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743, m: [0, -0.155, 0.020] },
+  m4_xuanjin:   { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743, m: [0, -0.155, 0.020] },
   awm_volt:     { r: [ 0.018, -0.045,  0.160], l: [-0.025, -0.030, -0.230], s: 0.743, m: [0, -0.155, 0.020] },
   awm_field:    { r: [ 0.018, -0.045,  0.160], l: [-0.025, -0.030, -0.230], s: 0.743, m: [0, -0.155, 0.020] },
 };
@@ -721,35 +871,38 @@ export class ViewArms {
   }
 
   /**
-   * 把 CS 那份 GLB 里的四块网格装进已经搭好的骨架上。**必须在第一帧之前完成**
-   * （main.js 的 init() 把它并进 Promise.all）—— 否则开局那一帧是「枪浮在空中」。
+   * 装载 `models/fps_arms.glb`：**烘成静态 → 切四块 → 装进已经搭好的骨架**。
+   * **必须在第一帧之前完成**（main.js 的 init() 把它并进 Promise.all）——
+   * 否则开局那一帧是「枪浮在空中」。
    * 失败**不是静默 no-op**：返回 false，由调用方 toast 报错；枪照常显示、只是没有手。
    */
-  load(url = CS_HANDS_URL) {
+  load(url = FPS_ARMS_URL, curl = FPS_CURL) {
     return new Promise((resolve) => {
-      new GLTFLoader().load(
+      makeGLTFLoader().load(
         url,
         (gltf) => {
-          const src = gltf.scene;
-          // **不需要 clone**：四个节点各用一次，直接从源场景里摘过来即可。
-          // 顺带绕开 `Object3D.copy()` 会把 userData 走一遍 JSON 序列化那个坑。
-          const take = (name) => {
-            const o = src.getObjectByName(name) || null;
-            if (o) o.removeFromParent();
-            return o;
-          };
-          const parts = {
-            handR: take("HandR"), armR: take("ArmR"),
-            handL: take("HandL"), armL: take("ArmL"),
-          };
-          if (!parts.handR || !parts.armR) return resolve(false); // 只有右手也认作失败
-          // 装载本身也可能抛（比如源数据的键名/字段对不上）。**必须在这里接住**：
-          // GLTFLoader 的 onLoad 里抛出的异常会被它转给 onError，于是一路退化成「静默无手」，
-          // 控制台之外没有任何痕迹 —— 实测踩到过一次（CS_SRC 用 "R"/"L" 做键、
-          // 而这里传的是 arm.side 那个 ±1 的数字，取到 undefined，排查了三轮）。
+          // 烘焙与装载都可能抛。**必须在这里接住**：GLTFLoader 的 onLoad 里抛出的异常
+          // 会被它转给 onError，于是一路退化成「静默无手」，控制台之外没有任何痕迹 ——
+          // 实测踩到过一次（取表用了 arm.side 那个 ±1 的数字而不是 arm.tag，取到 undefined），
+          // 排查了三轮。现在多了一条更硬的理由：`bakeFpsArms` 里有十来处断言式的 throw。
+          let parts, mat;
           try {
-            this._install(this.armR, parts.handR, parts.armR);
-            if (parts.handL && parts.armL) this._install(this.armL, parts.handL, parts.armL);
+            parts = bakeFpsArms(gltf, curl);
+            mat = fpsArmMaterial(gltf);
+          } catch (err) {
+            console.error("[viewarms] 双手烘焙失败", err);
+            return resolve(false);
+          }
+          if (!parts.handR || !parts.foreR) return resolve(false);   // 只有右手也认作失败
+          // `bakeFpsArms` 出的是**纯几何**（BufferGeometry，便于独立跑数值自检），
+          // 装进场景要在这里包成 Mesh。**别把这层省掉**：`Object3D.add(几何)` 不会抛，
+          // three 只 `console.error` 一句 `object not an instance of THREE.Object3D` 就返回，
+          // 于是手**静默不显示**、`handsReady` 还是 true，`armsPose().loaded` 也是 true ——
+          // 正是 AGENTS.md 反复记的那类「控制台之外无痕迹」的失败。
+          const mesh = (g) => { const m = new THREE.Mesh(g, mat.hand); m.frustumCulled = false; return m; };
+          try {
+            this._install(this.armR, mesh(parts.handR), mesh(parts.foreR), mat);
+            if (parts.handL && parts.foreL) this._install(this.armL, mesh(parts.handL), mesh(parts.foreL), mat);
           } catch (err) {
             console.error("[viewarms] 双手装载失败", err);
             return resolve(false);
@@ -763,18 +916,18 @@ export class ViewArms {
     });
   }
 
-  // 把一对「手 + 袖」挂进一只骨架的手臂上（坐标系与枢轴见文件头与 CS_SRC 注释）
-  _install(arm, handMesh, armMesh) {
-    // **用 arm.tag（"R"/"L"）取表，不是 arm.side（±1）**：CS_SRC / ARM_STRETCH 都以字母为键，
+  // 把一对「手 + 袖」挂进一只骨架的手臂上（坐标系与枢轴见文件头与 FPS_SRC 注释）
+  _install(arm, handMesh, armMesh, mat) {
+    // **用 arm.tag（"R"/"L"）取表，不是 arm.side（±1）**：FPS_SRC / ARM_STRETCH 都以字母为键，
     // 传数字会取到 undefined，紧接着 `hp[0]` 抛异常 —— 而那异常在 GLTFLoader 的 onLoad 里，
     // 会被它吞成 onError，表现是「手静默不显示」而不是报错。
     const side = arm.tag;
     // 手：枢轴 = 手掌包围盒中心，于是它正好落在 ARM_ANCHORS 的 r/l 上
-    const hp = CS_SRC.handPivot[side], aw = CS_SRC.armWrist[side], ad = CS_SRC.armDir[side];
+    const hp = FPS_SRC.handPivot[side], aw = FPS_SRC.armWrist[side], ad = FPS_SRC.armDir[side];
     arm.handWrap.position.set(-hp[0], -hp[1], -hp[2]);
     arm.handWrap.add(handMesh);
 
-    // 前臂：① 转正 —— 把它的**真实主轴**旋到局部 -Y（否则 _aim 会把它指歪，见 CS_SRC 注释）；
+    // 前臂：① 转正 —— 把它的**真实主轴**旋到局部 -Y（否则 _aim 会把它指歪，见 FPS_SRC 注释）；
     //        ② 再把腕端挪到 fore 的原点，于是 fore 的位置就是腕点、_aim 转的就是整根前臂。
     const axis = new THREE.Vector3().fromArray(ad);
     const q = new THREE.Quaternion().setFromUnitVectors(axis, DOWN);
@@ -784,26 +937,30 @@ export class ViewArms {
     // 顶点才会先转正、再沿前臂轴拉伸。挂错一层就退回「沿源空间的歪轴拉」，见 _buildArm 里那段注释。
     arm.armWrap.add(armMesh);
 
-    // 袖管的轴向长度（腕 → 肘）。**从几何实测**，不抄 CS_SRC 里那几个数 ——
-    // 那几个是枢轴用的，和「袖口到底伸到哪」不是同一件事，抄错了会让 armTip() 骗人。
-    const bb = new THREE.Box3().setFromObject(armMesh);
+    // **腕点相对手心的偏移必须在这里写**（不是 _buildArm）：`FPS_SRC` 要等烘焙完才有值，
+    // 而 _buildArm 是在构造函数里跑的（那时模型还没下载）。写在这里两者才同源。
+    arm.fore.position.set(aw[0] - hp[0], aw[1] - hp[1], aw[2] - hp[2]);
+
+    // 袖管的轴向长度（腕 → 肘）。**按顶点沿轴的真实跨度**量：这是非索引几何（烘焙时
+    // 已经把 index 拆成了三角形列表），拿包围盒的 8 个角去点乘轴会在斜轴 + 弯臂上**放大**
+    // 出好十几厘米 —— 于是 armTip() 把「袖口出没出画」判错。
     let mn = Infinity, mx = -Infinity;
-    const corner = new THREE.Vector3();
-    for (let i = 0; i < 8; i++) {
-      corner.set(i & 1 ? bb.max.x : bb.min.x, i & 2 ? bb.max.y : bb.min.y, i & 4 ? bb.max.z : bb.min.z);
-      const d = corner.dot(axis);
-      if (d < mn) mn = d;
-      if (d > mx) mx = d;
+    const v = new THREE.Vector3();
+    for (const o of collectMeshes(armMesh)) {
+      const pos = o.geometry.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const d = v.fromBufferAttribute(pos, i).dot(axis);
+        if (d < mn) mn = d;
+        if (d > mx) mx = d;
+      }
     }
     // axis 是**腕 → 肘**，而腕落在投影小的一端，所以长度就是整个跨度
     arm.armLen = mx - mn;
 
-    // 只借几何、不借材质（CS 的织纹贴图不搬，配色与贴图都是我们自己的，见文件头）。
-    // 材质按**源材质名 + 左右**现建：手背针织 / 掌心合成革 / 虎口橡胶垫三块在手背上
-    // 本来就该是三种手感，同色同粗糙度正是「一团橡皮泥」的成因之一。
-    const handDen = uvDensity(handMesh), armDen = uvDensity(armMesh);
-    for (const o of collectMeshes(handMesh)) o.material = this._mat(matKind(o.material.name), side, handDen);
-    for (const o of collectMeshes(armMesh)) o.material = this._mat(matKind(o.material.name), side, armDen);
+    // 材质是**整副共享**的（`fpsArmMaterial` 只出两份：手一份、前臂一份）——
+    // 源模型全程只有一个材质，四块几何各分到手的/臂的那一份即可。
+    for (const o of collectMeshes(handMesh)) o.material = mat.hand;
+    for (const o of collectMeshes(armMesh)) o.material = mat.fore;
     // 袖口束带：位置与粗细全部由**实测**推出（袖管在腕端的半径 + 袖管本身的长度比例），
     // 不写死数字 —— 换了源模型（换手）它自己就跟着变。
     // **必须在下面那个打标循环之前造出来并挂上**，否则它不进 collectMeshes、拿不到
@@ -843,58 +1000,32 @@ export class ViewArms {
     r90.sort((a, b) => a - b);
     const rad = r90[Math.floor(r90.length * 0.9)];   // 90 分位：不被个别飞点带大
     if (!(rad > 1e-4)) return null;
-    return new THREE.Mesh(cuffGeo(rad, armLen * 0.10, TEX_TILE.cuff), this._mat("cuff", side, null));
+    return new THREE.Mesh(cuffGeo(rad, armLen * 0.10, TEX_TILE.cuff), this._cuffMat());
   }
 
   /**
-   * 取一件手部材质。key = **贴图种类** + 左右 —— **必须按左右分**：两张袖管的 UV 尺度实测
-   * 差近两倍（ArmR 每 UV 单位 0.133m、ArmL 0.129m，v 方向 0.108 / 0.112），
-   * 共用一份贴图会让一条袖子的织纹被轴向拉长、另一条被压扁 —— 这是「一眼假」的典型来源。
+   * 袖口束带的材质。**这是全模块唯一还吃程序化贴图的一件**（它不是模型里的构件）。
    *
-   * `kind` ∈ glove / palm / pad / sleeve / cuff（由 `matKind()` 从源材质名映射）。
-   * `den` 是这条网格实测的 UV 密度（米/UV 单位，u 与 v 分开量），由此把 `repeat`
-   * 反推成「一张贴图铺满 TEX_TILE[kind] 米」：repeat = 密度 / 尺寸。
-   * `den === null` = 网格的 UV 已经烘成格数（袖口束带），repeat 固定 (1,1)。
+   * `repeat` 固定 (1,1)：`cuffGeo` 已经把那圈圆柱的 UV 烘成「**格数**」了
+   * （uv 单位 = 一个 TEX_TILE），再乘一次密度就成了平方。
+   * 全局共用一个材质（不带左右 —— 束带是圆柱、UV 是对称烘的，两侧一模一样）。
    */
-  _mat(kind, side, den) {
-    const key = kind + "|" + side;
-    let m = this._matCache.get(key);
-    if (m) return m;
-
-    const src = texSets()[kind];
-    const tile = TEX_TILE[kind];
-    m = new THREE.MeshStandardMaterial({
-      // **必须是白的**：本色已经烘进 albedo 贴图了（gloveKnitMaps 等用 hexLin(底色) 当基色），
-      // `color` 是**乘**在 map 上的 —— 两边都上等于色值平方，`0x6d563e² ≈ 0x2f1c0f`，
-      // 手套会黑成一块（AGENTS.md 里集装箱那条是同一个坑）。调色改上面那四个常量。
+  _cuffMat() {
+    if (this._matCache.has("cuff")) return this._matCache.get("cuff");
+    const src = texSets().cuff;
+    const m = new THREE.MeshStandardMaterial({
+      // **必须是白的**：本色已经烘进 albedo 了（cuffMaps 用 hexLin(CUFF) 当基色），
+      // 而 `color` 是**乘**在 map 上的 —— 两边都上等于色值平方（`0x3d4231² ≈ 0x0f1109`）。
       color: 0xffffff,
       roughness: 1,          // 完全交给 roughnessMap（roughness 是**乘**在贴图上的倍率）
       metalness: 0.02,
       envMapIntensity: 0.85,
       normalScale: src.normalScale.clone(),
+      map: src.map,
+      normalMap: src.normalMap,
+      roughnessMap: src.roughnessMap,
     });
-    // 贴图 clone() 共享同一份 image（不额外占显存），但 repeat 各自独立。
-    // `den === null` = **这条网格的 UV 已经烘成「格数」了**（袖口束带就是这么造的，
-    // 见 cuffGeo），它要的正是 repeat(1,1) —— 再乘一次 density 就成了平方。
-    const use = (t) => {
-      const c = t.clone();
-      if (den) {
-        let ru = den.u / tile, rv = den.v / tile;
-        // 两轴比超过 3 倍，说明这条网格根本没有 UV（uvDensity 会对齐到守卫值），
-        // 或者 UV 被非等比地摊平了 —— 这时按各向同性走，免得织纹被拉成一条线。
-        const k = ru / rv;
-        if (k > 3 || k < 1 / 3) rv = ru;
-        c.repeat.set(ru, rv);
-      } else {
-        c.repeat.set(1, 1);
-      }
-      c.needsUpdate = true;
-      return c;
-    };
-    m.map = use(src.map);
-    m.normalMap = use(src.normalMap);
-    m.roughnessMap = use(src.roughnessMap);
-    this._matCache.set(key, m);
+    this._matCache.set("cuff", m);
     return m;
   }
 
@@ -914,13 +1045,9 @@ export class ViewArms {
     // 前臂挂在**腕点**（由 _install 把源前臂的腕端挪到这里）。fore 的 quaternion 由 _aim 每帧覆盖，
     // 所以任何「让袖子转个角度」的修正都必须写在里层的 armWrap 上，不能写在这一层。
     const fore = new THREE.Group();
-    // 腕点在「手心坐标系」里的偏移：源数据里前臂腕端相对手掌中心的差，直接搬过来 ——
-    // 这样手和袖是**同一份源数据推出来的两个点**，不会各调各的、最后在腕子上裂一道缝。
-    fore.position.set(
-      CS_SRC.armWrist[tag][0] - CS_SRC.handPivot[tag][0],
-      CS_SRC.armWrist[tag][1] - CS_SRC.handPivot[tag][1],
-      CS_SRC.armWrist[tag][2] - CS_SRC.handPivot[tag][2]
-    );
+    // fore.position（腕点相对手心的偏移）**由 _install 写**，不在这里：它要读 `FPS_SRC`，
+    // 而那是烘焙之后才有的值，_buildArm 是在构造函数里跑的（那时模型还没下载）。
+    // 两边都是「同一份源数据推出来的两个点」，不会各调各的、最后在腕子上裂一道缝。
     // 拉伸层与旋转层的**嵌套顺序是有讲究的，反了会把袖口从腕上掰开**（实测踩到）：
     //   · `armWrap` 自带源模型枪空间的旋转 q（把前臂的真实主轴旋到局部 -Y），
     //     所以它**内层**的坐标是**源模型的枪空间** —— 而源空间里的 Y 根本不是前臂的轴
@@ -994,8 +1121,15 @@ export class ViewArms {
   armTip(side, out = new THREE.Vector3()) {
     const a = side === "l" ? this.armL : this.armR;
     const L = (a.armLen || 0) * (a.armStretch ? a.armStretch.scale.y : 1);
-    // 前臂的伸展方向恒为 fore 的局部 -y（_aim 就是把它转到腕→肘方向上的）
-    return out.set(0, -L, 0).applyQuaternion(a.fore.quaternion).add(a.fore.position);
+    // 前臂的伸展方向恒为 fore 的局部 -y（_aim 就是把它转到腕→肘方向上的）。
+    // **`fore` 是 `grp` 的子节点、而 `grp` 的原点就是腕点**（`_aim` 里 `grp.position = wrist`），
+    // 所以上面这一串天然算的是「相对腕点」的坐标 —— 必须再过一次 `grp.matrix` 才落到
+    // 武器组局部（`root` 恒为单位变换，不必再乘）。少了这一步量到的点就与手上是哪把枪**无关**
+    // （实测：八把枪的 armTip 读数一模一样，因为它只随 ELBOW_DIR 变），
+    // 而 main.js 的 `project()` 收的是武器组局部 ⇒ 那条「袖口出没出画」的判据整条形同虚设。
+    a.grp.updateMatrix();
+    return out.set(0, -L, 0).applyQuaternion(a.fore.quaternion).add(a.fore.position)
+      .applyMatrix4(a.grp.matrix);
   }
 
   // 肘 = 腕 + 方向 × 距离。**方向是固定的、腕点随枪走** —— 见 ELBOW_DIR 的注释。

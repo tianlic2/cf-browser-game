@@ -74,6 +74,10 @@ body {
 }
 .fx-layer .hitmark.head { color: #ff4d4d; }
 .fx-layer .hitmark.kill { color: #ffd24a; }
+/* 黄金爆头那一下：金，并多一圈收拢的环（下面 kill/gold 共用）。
+   用 `outline` + `outline-offset` 而不是再套一个元素 —— 只需要两圈伪元素来画斜线，
+   再多一层环就得改 DOM 结构；outline 会跟着 `border-radius` 走，一圈正好。 */
+.fx-layer .hitmark.gold { color: #ffd24a; }
 .fx-layer .hitmark.show {
   animation: hitmarkAnim 0.24s ease-out forwards;
 }
@@ -97,6 +101,17 @@ body {
 .fx-layer .hitmark::after { transform: translate(-50%, -50%) rotate(-45deg); }
 .fx-layer .hitmark.kill::before,
 .fx-layer .hitmark.kill::after { height: 3px; width: 28px; }
+/* 击杀 / 黄金爆头额外套一圈环。动画是容器自带的 hitmarkAnim（scale 1.3 → 0.85），
+   所以这圈环读作「往准星收拢」而不是「扩散开」—— 收拢更像「这一下定了」。 */
+.fx-layer .hitmark.kill,
+.fx-layer .hitmark.gold {
+  outline: 2px solid currentColor;
+  outline-offset: 5px;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 6px currentColor);
+}
+.fx-layer .hitmark.gold::before,
+.fx-layer .hitmark.gold::after { height: 3px; width: 30px; }
 
 /* ===== 狙击镜（AWM）=====
    整块黑场里抠出一个正圆镜筒，圆内是细十字 + 密位刻度。
@@ -337,6 +352,35 @@ body {
 }
 .rb-limit b { color: #e5e7eb; }
 
+/* ---- 左上：CF 式小地图 ---- */
+/* 与 #killfeed 同一条 top:78px 的水平线（避开顶部居中的比分条），左右分列。
+   尺寸走 --mm-w/--mm-h 两个变量：底图的 backing store 尺寸由 scripts/minimap.js
+   每帧从 clientWidth 现读，所以这里改一档、窄屏断点改一档，它自己就会重新烘图
+   （不需要外部挂 resize 监听）。 */
+.minimap {
+  position: absolute;
+  left: 22px;
+  top: 78px;
+  /* 沿用 .backpack / .chat 那条先例：**永不接受点击**，挡不住准星与开火。 */
+  pointer-events: none;
+  --mm-w: 164px;
+  --mm-h: 279px; /* 40 : 68 —— 与甲板的真实长宽比一致 */
+}
+.minimap canvas {
+  display: block;
+  width: var(--mm-w);
+  height: var(--mm-h);
+}
+
+/* 窄屏降一档尺寸（**不用 transform: scale()** —— 缩放会让 1px 描边发虚，
+   而且缩放后的 backing store 与 CSS 尺寸对不上，小地图会糊成一团）。 */
+@media (max-width: 820px) {
+  .minimap { --mm-w: 124px; --mm-h: 211px; }
+}
+@media (max-width: 480px) {
+  .minimap { left: 14px; top: 66px; --mm-w: 98px; --mm-h: 167px; }
+}
+
 /* ---- 右上：击杀信息条 ---- */
 .killfeed {
   position: absolute;
@@ -365,17 +409,27 @@ body {
 .kf-k { color: #6fb3ff; font-weight: 700; }
 .kf-row.foe .kf-k { color: #ff6b6b; }
 .kf-v { color: #cbd5e1; }
+/* 武器剪影：跟着 `.kf-w` 的琥珀色走（同一个色就是「这是武器名」这条信息的延伸）。
+   `flex-shrink:0` 必需 —— 名字长（「AWM-紫电」）时 flex 会把图标压扁。 */
+.kf-ico {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  color: #fbbf24;
+}
 .kf-w {
   color: #fbbf24;
   font-size: 12px;
   letter-spacing: 1px;
 }
+/* 爆头徽记：与中央图标同一枚骷髅，换成小号红。 */
 .kf-hs {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
   color: #ff4d4d;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 1px;
 }
+.kf-hs.gold { color: #ffd24a; }
 
 /* ===== 战绩面板（按住 TAB，与 CF 一致）===== */
 /* 放在 #hud 内部，所以 z-index 的 5 是相对于 .hud（7）这个层叠上下文的：
@@ -615,19 +669,28 @@ body {
   100% { opacity: 0; }
 }
 
-/* ---- 屏幕中心：击杀图标 ---- */
+/* ---- 屏幕中心：击杀图标（武器剪影 + 爆头徽记）----
+   从「一行文字」改成了内联 SVG（见 scripts/icons.js）：
+   容器只负责居中与动画，图形与配色全在 SVG 里。
+   **`text-shadow` 对 SVG 无效** —— 发光必须走 `filter: drop-shadow()`
+   （同一类坑见 `.menu-title` 那条：`background-clip:text` 不能配 `text-shadow`）。 */
 .killicon {
   position: absolute;
   left: 50%;
   top: calc(50% - 92px);
   transform: translateX(-50%);
-  font-size: 26px;
-  font-weight: 900;
-  letter-spacing: 4px;
-  color: #ffd24a;
-  text-shadow: 0 0 14px rgba(255, 180, 40, 0.85), 0 2px 5px rgba(0, 0, 0, 0.95);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ffd24a;                       /* 剪影的 currentColor */
+  filter: drop-shadow(0 0 12px rgba(255, 180, 40, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95));
   opacity: 0;
 }
+.killicon .ki-gun { width: 84px; height: 84px; }
+.killicon .ki-hs { width: 38px; height: 38px; align-self: flex-start; margin-top: 4px; }
+/* 爆头：红；黄金爆头：金 + 更强的外发光。图形不变，只换色（与 CF 一致）。 */
+.killicon.head { color: #ff4d4d; filter: drop-shadow(0 0 12px rgba(255, 60, 60, 0.85)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
+.killicon.gold { color: #ffd24a; filter: drop-shadow(0 0 18px rgba(255, 200, 60, 1)) drop-shadow(0 0 34px rgba(255, 160, 20, 0.7)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
 .killicon.show { animation: killIconAnim 0.85s ease-out forwards; }
 @keyframes killIconAnim {
   0% { opacity: 0; transform: translateX(-50%) scale(1.5); }
@@ -636,7 +699,12 @@ body {
   100% { opacity: 0; transform: translateX(-50%) scale(0.92); }
 }
 
-/* ---- 受击方向指示：绕屏幕中心旋转的红色弧 ---- */
+/* ---- 受击方向指示：绕屏幕中心旋转的红色弧 ----
+   **弧线走 `::before` 而不是子元素。** 原来它写在 `.hitdir span` 上，而全仓库
+   没有任何 JS 创建过那个 span（`#hitdir` 是个空 div）—— 这个功能从未渲染过。
+   用伪元素就从根上免掉「子节点没建出来」这一整类失败，也不再依赖 index.html 与
+   main.js 的版本一致（缓存旧页面那类混合加载）。
+   `content: ""` 是必需的，少了它伪元素根本不生成。 */
 .hitdir {
   position: absolute;
   left: 50%;
@@ -645,18 +713,19 @@ body {
   height: 0;
   opacity: 0;
 }
-.hitdir.show { animation: hitdirFade 0.9s ease-out forwards; }
-@keyframes hitdirFade {
-  0% { opacity: 1; }
-  100% { opacity: 0; }
-}
-.hitdir span {
+.hitdir::before {
+  content: "";
   position: absolute;
   left: -36px;
   top: -152px;
   width: 72px;
   height: 30px;
   background: radial-gradient(ellipse at 50% 100%, rgba(255, 46, 46, 0.95), rgba(255, 46, 46, 0) 72%);
+}
+.hitdir.show { animation: hitdirFade 0.9s ease-out forwards; }
+@keyframes hitdirFade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* ---- 左下：聊天（压在血条之上，向上生长）---- */
@@ -1405,4 +1474,475 @@ body {
   .death-title { font-size: 18px; letter-spacing: 4px; }
   .death-k { font-size: 15px; }
   .death-bar { width: 150px; }
+}
+
+/* ==========================================================================
+   CF 大厅（全屏四页签）
+   --------------------------------------------------------------------------
+   与 .menu 的关系：本段**只新增** .menu.lobby 与 .lobby-* / .lp-* / .lb-* / .lv-* 这几个
+   作用域，上面那批共用的 .menu / .menu-panel / .menu-title / .menu-sub / .menu-btn /
+   .gameover-stats **一行都没动** —— 它们同时被 #gameover（结算画面）用着，改一条就会
+   顺手改掉结算画面。
+   ⚠️ 唯一必须与 .menu 抢的一条是显示与否：`.menu.hidden` 与本段的 `.menu.lobby` 特异性
+   同为 (0,2,0)，而本段在文件末尾 ⇒ 后者会赢，大厅**永远关不掉**（进战场时 HUD 下面
+   还压着一层大厅）。所以下面显式补了 `.menu.lobby.hidden`（(0,3,0)），那一条不能删。
+   ========================================================================== */
+.menu.lobby {
+  /* 脱掉 .menu 的居中卡片布局：撑满视口、从上往下排 */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  /* 超高兜底仍然保留：整屏内容一旦超过视口，至少整体还能滚（细节见 .lobby-content） */
+  overflow-y: auto;
+  /* 背景**半透明** —— 这是本功能的全部要点：背后那台正在跑的运输船实景要透出来。
+     四层：斜向拉丝 / 左下方暖光（避开右侧内容板）/ 竖向暗角 / 炭黑基底。
+     最下一层不透明度 0.62~0.86：太低会让字压在亮甲板上读不清，太高就看不见船了。 */
+  background:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.02) 0 2px, rgba(255, 255, 255, 0) 2px 9px),
+    radial-gradient(ellipse 62% 70% at 12% 88%, rgba(255, 155, 26, 0.13) 0%, rgba(255, 155, 26, 0) 60%),
+    linear-gradient(180deg, rgba(8, 9, 11, 0.86) 0%, rgba(8, 9, 11, 0.62) 44%, rgba(6, 7, 9, 0.88) 100%);
+}
+/* 见上面那条 ⚠️：没有这一行，`display:flex` 会盖掉 .menu.hidden，大厅关不掉。 */
+.menu.lobby.hidden { display: none; }
+
+/* ---------- 顶栏 ---------- */
+.lobby-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 26px 13px;
+  background: linear-gradient(180deg, rgba(14, 15, 18, 0.94), rgba(10, 11, 13, 0.72));
+  border-bottom: 1px solid rgba(255, 155, 26, 0.3);
+}
+/* 左上角那道橙色斜切标记（CF 大厅左上角那个「◤」的位置） */
+.lobby-mark {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  background: linear-gradient(135deg, #ffb64d, #d97706);
+  clip-path: polygon(0 0, 100% 0, 100% 62%, 62% 100%, 0 100%);
+}
+.lobby-id { flex: 1 1 auto; min-width: 0; }
+.lobby-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 10px;
+  line-height: 1.1;
+  /* 金属渐变字：`background-clip:text` 的写法**不能配 text-shadow**（填充透明时阴影会
+     从字形里透出来，字是糊的），发光只能走 filter 的 drop-shadow。 */
+  background: linear-gradient(180deg, #ffffff 0%, #cfd6de 46%, #8e97a3 54%, #eef2f6 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 10px rgba(255, 155, 26, 0.3));
+}
+.lobby-brand {
+  margin-top: 3px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 10px;
+  letter-spacing: 5px;
+  color: rgba(255, 155, 26, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lobby-chips {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lobby-chip {
+  padding: 5px 11px;
+  background: rgba(24, 25, 29, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  color: #b7bcc4;
+  font-size: 11px;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+}
+.lobby-chip-hl {
+  background: rgba(70, 49, 18, 0.75);
+  border-color: rgba(255, 155, 26, 0.5);
+  color: #ffb64d;
+  font-weight: 700;
+}
+
+/* ---------- 主体：左页签 + 右内容 ---------- */
+.lobby-body {
+  flex: 1 1 auto;
+  /* min-height:0 是这套布局的「超高兜底」：flex 子项默认不肯缩到内容高度以下，
+     少了它，内容一超高就会把 .lobby-top/.lobby-ticker 顶出视口且滚不动。 */
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+.lobby-rail {
+  flex: 0 0 172px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 0 18px 16px;
+  overflow-y: auto;
+}
+.lobby-tab {
+  position: relative;
+  padding: 14px 16px 14px 20px;
+  text-align: left;
+  background: rgba(20, 21, 25, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-left: none;
+  color: #b7bcc4;
+  font-family: inherit;
+  font-size: 14px;
+  letter-spacing: 3px;
+  cursor: pointer;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+/* 左侧那道橙竖条（CF 的选中态）：用 ::before 而不是 border-left —— 斜角会把左边框切掉 */
+.lobby-tab::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: rgba(255, 155, 26, 0.28);
+  transition: background 0.15s;
+}
+.lobby-tab:hover {
+  background: rgba(46, 38, 24, 0.9);
+  border-color: rgba(255, 155, 26, 0.42);
+  color: #ffb64d;
+}
+.lobby-tab:hover::before { background: rgba(255, 155, 26, 0.7); }
+.lobby-tab.active {
+  background: linear-gradient(100deg, rgba(255, 155, 26, 0.96), rgba(217, 119, 6, 0.9));
+  border-color: #ffd08a;
+  color: #17120a;
+  font-weight: 700;
+}
+.lobby-tab.active::before { background: #fff3d6; }
+
+.lobby-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  /* 右侧内容自己滚：这才是「内容再高也点得到『进入战场』」的真正防线
+     （整屏 .menu.lobby 那条 overflow-y 只是最后一道） */
+  overflow-y: auto;
+  padding: 22px 30px 26px;
+}
+.lobby-pane {
+  max-width: 980px;
+}
+/* 仓库里**没有**通用 .hidden 规则（每个容器各写各的）—— 少了这一条，四个页签会同时显示 */
+.lobby-pane.hidden { display: none; }
+
+/* 页签内的标题区（三张只读表也复用） */
+.lp-head { margin-bottom: 18px; }
+.lp-h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: #e7ebf0;
+  padding-left: 12px;
+  border-left: 3px solid #ff9b1a;
+}
+.lp-desc {
+  margin: 9px 0 0 15px;
+  font-size: 12px;
+  line-height: 1.7;
+  letter-spacing: 1px;
+  color: #8b929c;
+}
+
+/* 开始游戏页：左设置 + 右简报 */
+.lp-cols {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) 1fr;
+  gap: 18px;
+  align-items: start;
+}
+/* 覆写 .menu-setup 那套「居中卡片」的定位（那个 max-width:400 + margin auto 是给
+   旧的居中单卡片写的）。作用域限定在 .menu.lobby 内，结算画面不受影响。 */
+.menu.lobby .menu-setup {
+  margin: 0;
+  max-width: none;
+  /* 半透明，免得盖住背后的甲板 */
+  background: linear-gradient(180deg, rgba(32, 33, 38, 0.82), rgba(18, 19, 22, 0.86));
+}
+.lobby-brief {
+  padding: 16px 20px 18px;
+  background: linear-gradient(180deg, rgba(32, 33, 38, 0.82), rgba(18, 19, 22, 0.86));
+  border: 1px solid rgba(255, 155, 26, 0.18);
+  border-left: 3px solid #ff9b1a;
+}
+.lb-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #ff9b1a;
+  margin-bottom: 12px;
+}
+.lb-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.lb-row:last-child { border-bottom: none; }
+.lb-row > span { color: #8b929c; }
+.lb-row > b { color: #e7ebf0; font-weight: 700; }
+/* 大厅里的主按钮：定宽居中，别跟着 .menu-setup 一起被拉长 */
+.menu.lobby .menu-btn {
+  display: block;
+  margin: 26px auto 0;
+  min-width: 260px;
+}
+
+/* ---------- 只读信息表（武器库）---------- */
+.lv-table {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(16, 17, 20, 0.72);
+}
+.lv-tr {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 0.7fr 0.7fr 0.9fr 0.7fr 0.7fr;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 14px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #b7bcc4;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.lv-tr:last-child { border-bottom: none; }
+.lv-tr.lv-th {
+  background: rgba(255, 155, 26, 0.1);
+  border-bottom: 1px solid rgba(255, 155, 26, 0.3);
+  color: #ffb64d;
+  font-weight: 700;
+  letter-spacing: 3px;
+}
+.lv-tr > .lv-name { color: #e7ebf0; font-weight: 700; letter-spacing: 2px; }
+.lv-tr.lv-th > .lv-name { color: #ffb64d; }
+.lv-tr > .lv-num { font-family: "Consolas", "Courier New", monospace; }
+
+/* ---------- 作战手册的键位表 ---------- */
+.lv-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 8px 14px;
+}
+.lv-key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(16, 17, 20, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #b7bcc4;
+}
+.lv-key-row > .lv-key-cap { flex: 0 0 auto; display: flex; gap: 4px; align-items: center; }
+.lv-key-row > .lv-key-txt { flex: 1 1 auto; min-width: 0; }
+/* 键帽：抄 .bp-idx / .bp-hint kbd 那套。**必须是键帽而不是纯文本** —— `[` `]` 在 11px
+   Consolas 下各只有 6.6px 宽，写成纯文本会被读成「按 / 换皮肤」（实测用户报过）。 */
+.lv-key-row kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 3px 6px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 2px;
+  color: #e7ebf0;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: center;
+  /* letter-spacing 必须在键帽里归零，否则单个字符被推开、不像一个键 */
+  letter-spacing: 0;
+}
+.lv-key-plus { color: #6b727c; font-size: 10px; }
+.lv-hint {
+  margin-top: 16px;
+  font-size: 11px;
+  line-height: 1.9;
+  letter-spacing: 1px;
+  color: #7c828b;
+}
+.lv-hint b { color: #ffb64d; font-weight: 700; }
+
+/* ---------- 个人仓库 ---------- */
+.lv-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  gap: 12px;
+}
+.lv-card {
+  padding: 13px 15px 14px;
+  background: linear-gradient(180deg, rgba(30, 31, 36, 0.86), rgba(15, 16, 19, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+.lv-card.lv-cur { border-color: rgba(255, 155, 26, 0.62); }
+.lv-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.lv-card-slot {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: #8b929c;
+}
+.lv-card-slot em {
+  font-style: normal;
+  color: #ff9b1a;
+  font-weight: 700;
+}
+.lv-card-gun {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #e7ebf0;
+}
+.lv-card-skin {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.7;
+  letter-spacing: 1px;
+  color: #b7bcc4;
+}
+.lv-card-skin.is-stock { color: #7c828b; }
+/* 「模型」徽章：抄背包面板的 .bp-model */
+.lv-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 155, 26, 0.6);
+  color: #ffb64d;
+  font-size: 10px;
+  letter-spacing: 1px;
+  vertical-align: 1px;
+}
+
+/* ---------- 底栏：滚动公告 ---------- */
+.lobby-ticker {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 22px;
+  background: linear-gradient(180deg, rgba(12, 13, 16, 0.78), rgba(8, 9, 11, 0.94));
+  border-top: 1px solid rgba(255, 155, 26, 0.28);
+}
+.lobby-ticker-tag {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  background: rgba(70, 49, 18, 0.85);
+  border: 1px solid rgba(255, 155, 26, 0.5);
+  color: #ffb64d;
+  font-size: 10px;
+  letter-spacing: 3px;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+}
+.lobby-ticker-view {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* 跑马灯：内容由 lobby.js 写**两遍**，动画平移 -50% 正好是一份的宽度 ⇒ 无缝循环。
+   用 CSS 动画而不是 rAF —— 它不受 __tactical.pause() 影响，但那对本条无害
+   （纯装饰，没有测试会断言它的相位）。 */
+.lobby-ticker-run {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: lobbyTickerScroll 30s linear infinite;
+  will-change: transform;
+}
+.lobby-ticker-run > span {
+  padding-right: 70px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #9aa1ab;
+}
+.lobby-ticker-run > span b { color: #ffb64d; font-weight: 700; }
+@keyframes lobbyTickerScroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lobby-ticker-run { animation: none; }
+  .lobby-ticker-view { overflow-x: auto; }
+}
+
+/* ---------- 大厅的窄屏适配 ----------
+   注意：上面 @media (max-width:480px) 里那条 `.menu { padding: 16px 12px }` 是**单类**，
+   而 `.menu.lobby` 是**双类**，后者在媒体查询里照样赢 —— 所以大厅的窄屏规则必须另起
+   一段写在这里，不能指望复用上面那几条。
+   同样不许用 transform: scale()：斜切角与描边会发虚，可点区域也会一起缩。 */
+@media (max-width: 820px) {
+  .lobby-top { padding: 11px 16px 10px; }
+  .lobby-title { font-size: 21px; letter-spacing: 7px; }
+  .lobby-chips { display: none; }
+  .lobby-rail { flex: 0 0 136px; padding: 14px 0 14px 10px; }
+  .lobby-tab { padding: 12px 12px 12px 16px; font-size: 13px; letter-spacing: 2px; }
+  .lobby-content { padding: 16px 16px 20px; }
+  .lp-cols { grid-template-columns: 1fr; }
+  /* 武器库七列在窄屏挤成一团：这里先砍掉「类型」与「皮肤」两列（剩 5 列） */
+  .lv-tr { grid-template-columns: 1.3fr 0.7fr 0.7fr 0.7fr 0.9fr; }
+  .lv-tr > .lv-c-kind,
+  .lv-tr > .lv-c-skin { display: none; }
+}
+@media (max-width: 480px) {
+  .lobby-title { font-size: 17px; letter-spacing: 4px; }
+  .lobby-brand { letter-spacing: 2px; }
+  .lobby-mark { width: 22px; height: 22px; }
+  /* 页签栏从竖排转成横排（可横向滑） */
+  .lobby-body { flex-direction: column; }
+  .lobby-rail {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 10px 10px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .lobby-tab {
+    flex: 0 0 auto;
+    padding: 10px 12px;
+    font-size: 12px;
+    letter-spacing: 1px;
+    /* 横排时左边那道橙条改成**下边**一道，否则四个页签会各顶一条竖杠 */
+    clip-path: none;
+  }
+  .lobby-tab::before { top: auto; bottom: 0; left: 0; right: 0; width: auto; height: 3px; }
+  .lobby-content { padding: 12px 12px 16px; }
+  .lp-h2 { font-size: 16px; letter-spacing: 3px; }
+  .lp-desc { margin-left: 0; }
+  /* 480 下再砍「弹匣」与「换弹」，只剩 武器 / 伤害 / 备弹 三列 */
+  .lv-tr { grid-template-columns: 1.2fr 0.8fr 0.8fr; padding: 8px 10px; }
+  .lv-tr > .lv-c-mag,
+  .lv-tr > .lv-c-reload { display: none; }
+  .lv-keys { grid-template-columns: 1fr; }
+  .lv-cards { grid-template-columns: 1fr; }
+  .menu.lobby .menu-btn { min-width: 0; width: 100%; }
+  .lobby-ticker { padding: 8px 12px; }
 }

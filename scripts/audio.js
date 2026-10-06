@@ -619,6 +619,87 @@ export class SFX {
     tick.stop(t + 0.21);
   }
 
+  // 收枪（武器下沉出画）：一段向下滑的机械摩擦 + 收到底那声闷响（磕到装备带）。
+  // 为什么把切枪拆成两个声音：时间线现在是「收 → 出」两段，一个声音落在中间就没有
+  // 「先收后出」的听感了。旧的 switchWeapon() 保留给 selectSkin 那类原地重挂用。
+  // **注意别加同名的实例字段** —— `this.holster = ...` 会盖掉这个方法（audio.js 历史上
+  // 因为 `this.muffle` 盖掉 `muffle()` 让死亡流程整个冻住，见 AGENTS.md）。
+  holster(type) {
+    if (!this.ready()) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(200, t);
+    osc.frequency.exponentialRampToValueAtTime(120, t + 0.16);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+    const f = ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = 1100;
+    osc.connect(f).connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.18);
+    const thud = ctx.createOscillator();
+    thud.type = "sine";
+    thud.frequency.setValueAtTime(140, t + 0.14);
+    thud.frequency.exponentialRampToValueAtTime(80, t + 0.22);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0001, t + 0.14);
+    g2.gain.exponentialRampToValueAtTime(0.22, t + 0.152);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    thud.connect(g2).connect(this.master);
+    thud.start(t + 0.14);
+    thud.stop(t + 0.25);
+  }
+
+  // 出枪（武器升起入画）：一段向上滑的机械声 + 清脆的入位卡扣。
+  // 狙击多两声拉栓刮擦（`type === "sniper"`）—— 与动画里那个 sin 单峰位移同源。
+  deploy(type) {
+    if (!this.ready()) return;
+    const ctx = this.ctx, t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(300, t + 0.14);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.17, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+    const f = ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = 1500;
+    osc.connect(f).connect(g).connect(this.master);
+    osc.start(t);
+    osc.stop(t + 0.16);
+    const tick = ctx.createOscillator();
+    tick.type = "square";
+    tick.frequency.value = 1050;
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.0001, t + 0.13);
+    g2.gain.exponentialRampToValueAtTime(0.19, t + 0.136);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
+    tick.connect(g2).connect(this.master);
+    tick.start(t + 0.13);
+    tick.stop(t + 0.2);
+    if (type === "sniper") {
+      for (let i = 0; i < 2; i++) {
+        const b = ctx.createOscillator();
+        b.type = "square";
+        b.frequency.value = i ? 620 : 420;
+        const bg = ctx.createGain();
+        const t0 = t + 0.16 + i * 0.09;
+        bg.gain.setValueAtTime(0.0001, t0);
+        bg.gain.exponentialRampToValueAtTime(0.13, t0 + 0.012);
+        bg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
+        b.connect(bg).connect(this.master);
+        b.start(t0);
+        b.stop(t0 + 0.08);
+      }
+    }
+  }
+
   // AWM 开镜 / 退镜：镜筒贴脸的短促「咔」+ 一层很轻的金属共鸣
   scopeIn() { this.scopeClick(760, 0.05, 0.14); }
   scopeOut() { this.scopeClick(520, 0.045, 0.11); }

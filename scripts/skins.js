@@ -2,16 +2,16 @@
 //
 // 一款皮肤 = 三件事：
 //   1. `slots` —— 按 GLB 里的**原始材质名**分部位上漆（AK 的 Wood/Metal/Dark_metal、
-//      M4 的 Primary/Secondary/Highlight、匕首的 knife_s_1/knife_s_2）。
-//      只有这几把枪的材质是**按部位命名**的，所以能做出 CF 那种「枪身红、枪管金」的分色。
+//      M4 的 Primary/Secondary/Highlight）。只有这几把枪的材质是**按部位命名**的，
+//      所以能做出 CF 那种「枪身红、枪管金」的分色。
 //      AWM 是单网格单材质、USP 是 16 网格共用一个材质 —— 这两把只能整枪染色。
 //   2. `pulse` —— emissiveIntensity 上叠加的正弦呼吸（CF 英雄级武器的招牌）。
-//      没有 pulse 的皮肤（无影）就是恒定，克制是它自己的风格。
+//      没有 pulse 的皮肤就是恒定，克制是它自己的风格。
 //   3. `muzzle` —— 专属枪口焰/枪口光颜色。
 //
 // 坑：**AWM 与 USP 的材质带贴图，皮肤只能「染」（改 material.color），不能像
 // 旧版 AWM 那样整个换掉材质** —— 换掉就等于把 GLB 自带的贴图丢了，只剩一块平涂色，
-// 那样既做不出无影/极光，视觉上也比原厂更差。
+// 那样视觉上比原厂更差。
 //
 //   4. `model` —— **模型皮肤**：这款皮肤自带一棵 GLB，选中它时替换实际模型（而不是只改材质）。
 //      描述符 `{ file, rotY, targetLen, anchorKey, muzzleY? }`：
@@ -35,39 +35,27 @@
 // 原厂（不上漆）的统一 id。slots 为空 = 全部还原成载入时记录的 base 值。
 export const STOCK = "stock";
 
+// ⚠️ 这份表里**只有两类条目**，加新皮肤时必须落在其中一类里：
+//   1. 原厂（`STOCK`）——「不上漆」本身，也是唯一保证 `skinsFor(id)` **永不为空**的那一条。
+//   2. **模型皮肤** —— 带 `model` 字段、自带一棵 GLB。面板上会因此渲染出「模型」徽章。
+// 曾经的 10 款**纯改色皮肤**（火麒麟/黑武士/黄金AK/黑龙/死神/无影/极光/黄金AWM/修罗/天神）
+// 已全部删除：它们只是把基础低模染个色，在「换整把模型」这件事面前没有任何辨识度，
+// 面板里和原厂挤在一起、只靠一行色块区分，读起来像一份没做完的调色板。
+// **原厂必须留着**：删掉它 `skinsFor("pistol")` / `skinsFor("knife")` 会变成空数组，
+// 而 `findSkin` 的兜底正是 `list[0] || null` —— 一个空表会让它返回 null，
+// 于是 `paintSkin` 返回 null、`applySkinTo` 变成空转，`guncatalog` 里那把枪**整个从世界目录消失**
+// （掉落的手枪再也刷不出来，而且没有任何报错）。原厂对应的是基础枪自己的 GLB，
+// 「有对应模型」这句话对它是成立的。
 export const SKINS = {
   ak: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
     {
-      id: "firekirin", name: "火麒麟", slots: {
-        Dark_metal: { color: 0x6b0f12, metalness: 0.55, roughness: 0.48 },
-        Metal: { color: 0xd4a72c, metalness: 0.85, roughness: 0.24, emissive: 0xff4a0e, emissiveIntensity: 0.18 },
-        Wood: { color: 0x8e1a12, metalness: 0.4, roughness: 0.60 },
-      },
-      pulse: { amp: 0.10, speed: 2.0 }, muzzle: 0xff7a20, accent: 0xff4a0e,
-    },
-    {
-      // 「黑武士」的金色必须放在 Dark_metal（弹匣/枪机/保险等小件）上，
-      // 不能放 Metal —— Metal 覆盖枪管与机匣这一大片，金色放那儿就是一把黄枪
-      // 配个黑枪托，跟「哑光黑 + 金线」完全不是一回事（第一版实测如此）。
-      id: "blacksamurai", name: "黑武士", slots: {
-        Metal: { color: 0x121215, metalness: 0.45, roughness: 0.58 },
-        Dark_metal: { color: 0xb08a28, metalness: 0.72, roughness: 0.30, emissive: 0xd4a72c, emissiveIntensity: 0.10 },
-        Wood: { color: 0x1b1a1e, metalness: 0.40, roughness: 0.60 },
-      },
-      pulse: { amp: 0.06, speed: 1.6 }, muzzle: 0xffc24a, accent: 0xb08a28,
-    },
-    {
-      id: "goldenak", name: "黄金AK", slots: {
-        Dark_metal: { color: 0xc9a02c, metalness: 0.72, roughness: 0.26 },
-        Metal: { color: 0xd8b03a, metalness: 0.78, roughness: 0.24, emissive: 0x3a2a06, emissiveIntensity: 0.16 },
-        Wood: { color: 0xc9a02c, metalness: 0.72, roughness: 0.28 },
-      },
-      pulse: { amp: 0.08, speed: 1.4 }, muzzle: 0xffd070, accent: 0xd8b03a,
-    },
-    {
       // 「老兵」= 木托经典 AK 的模型皮肤。没有 pulse —— 一把用旧了的钢木枪不该发光，
-      // 克制是它自己的风格（与「无影」同一路数）。
+      // 克制是它自己的风格。
+      // 分部位上漆的教训留在这一款上（它的 `slots` 就是给敌人/掉落物那份基础低模用的）：
+      // **大面积部件决定主色观感** —— AK 的 `Metal` 覆盖枪管与机匣一大片、`Dark_metal`
+      // 只是弹匣/枪机/保险那些小件。想要「哑光黑 + 金线」就得把金放在 Dark_metal；
+      // 放 Metal 会得到一把黄枪配黑枪托（第一版实测如此）。以后加 AK 的改色皮肤别再踩。
       id: "classic", name: "老兵", slots: {
         Metal: { color: 0x6c7076, metalness: 0.72, roughness: 0.40 },
         Dark_metal: { color: 0x4a4d52, metalness: 0.66, roughness: 0.44 },
@@ -99,27 +87,19 @@ export const SKINS = {
       },
     },
     {
-      id: "blackdragon", name: "黑龙", slots: {
-        Primary: { color: 0x131316, metalness: 0.45, roughness: 0.58 },
-        Secondary: { color: 0x2c1215, metalness: 0.70, roughness: 0.45 },
-        Highlight: { color: 0x8a1116, metalness: 0.80, roughness: 0.30, emissive: 0xff2a1a, emissiveIntensity: 0.16 },
-      },
-      pulse: { amp: 0.10, speed: 1.9 }, muzzle: 0xff3a20, accent: 0xff2a1a,
-    },
-    {
-      id: "deathgod", name: "死神", slots: {
-        Primary: { color: 0x17131f, metalness: 0.45, roughness: 0.54 },
-        Secondary: { color: 0x2a1f3d, metalness: 0.70, roughness: 0.42 },
-        Highlight: { color: 0x5b2a8c, metalness: 0.80, roughness: 0.30, emissive: 0xa855f7, emissiveIntensity: 0.20 },
-      },
-      pulse: { amp: 0.11, speed: 2.3 }, muzzle: 0xb066ff, accent: 0xa855f7,
-    },
-    {
       // 「霜白」：冷白涂层。基础低模这一版是**给敌人/掉落物**用的平涂配色。
       id: "frost", name: "霜白", slots: {
         Primary: { color: 0xe6ecf2, metalness: 0.42, roughness: 0.38 },
         Secondary: { color: 0xb4c0cc, metalness: 0.50, roughness: 0.42 },
         Highlight: { color: 0x9fb8d0, metalness: 0.58, roughness: 0.32, emissive: 0xcfe4ff, emissiveIntensity: 0.10 },
+        // `phongE1SG` 是**模型皮肤那把 GLB 自己的**材质名（models/skins/m4_frost.glb）。
+        // 上面三个槽位是基础低模 M4 的名字，选中这款皮肤时模型整把换掉、那三个一个都匹配不上，
+        // 而 `m4_frost.glb` 本身**一点颜色都没有**（无 baseColorFactor、0 张图、无 COLOR_0 顶点色，
+        // 实测确认），于是整枪渲染成纯白哑光 —— 就是「颜色没显示出来」。
+        // 模型皮肤可以额外点名自己 GLB 的材质名（`slots` 是按**实际材质名**查表的，
+        // 加不加这一条都不影响基础低模那条路），取主体色 + 一层很淡的冰蓝自发光，
+        // 让 `pulse` 的呼吸在这把单材质模型上也有效果。
+        phongE1SG: { color: 0xe6ecf2, metalness: 0.42, roughness: 0.38, emissive: 0xcfe4ff, emissiveIntensity: 0.06 },
       },
       pulse: { amp: 0.07, speed: 1.7 }, muzzle: 0xcfe4ff, accent: 0xdfe8f0,
       model: {
@@ -140,29 +120,58 @@ export const SKINS = {
         targetLen: 0.82, anchorKey: "m4_bubblegum",
       },
     },
+    {
+      // 「黄金M4」= 落到 models/skins/m4_gold.glb 的那把金色模型。
+      // 上面三个槽位面向**基础低模**（敌人手里那把与地面掉落物拿的就是它）。
+      // 模型自己的材质名是 `matM4_1` / `matM4_2` / `matM4_3`，**单独点名**了 ——
+      // 与「雷神」的取舍不同，这里是有理由的：那把 GLB 的三个材质是
+      // metalness 1 / roughness 0 的**纯镜面**，颜色全在 `baseColorFactor` 里
+      // （线性 `[0.823 0.609 0]` / `[1 0.691 0]` / `[0.622 0.430 0]`），没有 baseColorTexture。
+      // 颜色本身是对的（不存在「显示不出来」），但 rou 0 + met 1 在白昼天空下整把枪
+      // 是那面天穹的镜像，读出来是一块**荧光黄绿**而不是金（截图对比过：
+      // 原值实拍 vs 降到 ~0.8/0.25 实拍，后者才像 黄金AK）。
+      // 所以这三条**只改光泽度、不写 color** —— 颜色仍取模型自带的出厂值，
+      // 只把镜面压到 黄金AK 那一档（met 0.72~0.88 / rou 0.20~0.32），三档明暗关系照模型原意。
+      id: "goldenm4", name: "黄金M4", slots: {
+        Primary: { color: 0xeacd00, metalness: 0.86, roughness: 0.26 },
+        Secondary: { color: 0xb8901c, metalness: 0.80, roughness: 0.34 },
+        Highlight: { color: 0xffd900, metalness: 0.92, roughness: 0.20, emissive: 0x4a3800, emissiveIntensity: 0.18 },
+        matM4_1: { metalness: 0.78, roughness: 0.26 },
+        matM4_2: { metalness: 0.88, roughness: 0.20 },
+        matM4_3: { metalness: 0.72, roughness: 0.32 },
+      },
+      pulse: { amp: 0.08, speed: 1.5 }, muzzle: 0xffd070, accent: 0xeacd00,
+      model: {
+        // rotY = 0：muzzle 本来就在模型局部 −z（渲染核对过，不是照抄基础枪的 −π/2）。
+        file: "./models/skins/m4_gold.glb", rotY: 0,
+        targetLen: 0.82, anchorKey: "m4_goldenm4",
+      },
+    },
+    {
+      // 「炫金」：白描金纹的华丽 M4（7 个网格、13 张贴图、18406 顶点）。
+      // 与「雷神」同一路数 —— 槽位只面向**基础低模**（敌人那把与地面掉落物），
+      // 模型自己的材质名是 `mat_15.001` / `mat_26`~`mat_31`、一个都对不上，
+      // 于是挂上模型时**没有任何字段被覆盖**，显示出厂贴图。
+      // 这把**不需要**像 goldenm4 那样压光泽度：它出厂就是 met 0 / rou 0.5 的普通 PBR，
+      // 颜色全在贴图里（`baseColorFactor` 是白的乘数）。所以这里只写基础低模那三个槽位。
+      id: "xuanjin", name: "炫金", slots: {
+        Primary: { color: 0xe8dcc0, metalness: 0.72, roughness: 0.26 },
+        Secondary: { color: 0xb8892c, metalness: 0.82, roughness: 0.22 },
+        Highlight: { color: 0xffe9a8, metalness: 0.88, roughness: 0.18, emissive: 0x6a4f10, emissiveIntensity: 0.14 },
+      },
+      pulse: { amp: 0.07, speed: 1.6 }, muzzle: 0xffe09a, accent: 0xd8b03a,
+      model: {
+        // rotY = π：muzzle 在模型局部 **+z**（从 ±x 各拍一张核对的 —— 屏幕右分别是世界 −z / +z，
+        // 两次都看到枪口在 +z 那一侧）。不是 0、更不是基础枪的 −π/2。
+        file: "./models/skins/m4_xuanjin.glb", rotY: Math.PI,
+        targetLen: 0.82, anchorKey: "m4_xuanjin",
+      },
+    },
   ],
 
   // AWM 单网格单材质且带贴图 —— 整枪染色，贴图细节保留
   awm: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
-    {
-      id: "shadowless", name: "无影", slots: {
-        "Material.001": { color: 0xd8dee4, metalness: 0.55, roughness: 0.34 },
-      },
-      muzzle: 0xdfe8f0, accent: 0xd8dee4,
-    },
-    {
-      id: "aurora", name: "极光", slots: {
-        "Material.001": { color: 0x113830, metalness: 0.62, roughness: 0.36, emissive: 0x35ffa8, emissiveIntensity: 0.13 },
-      },
-      pulse: { amp: 0.10, speed: 1.5 }, muzzle: 0x50ffb0, accent: 0x35ffa8,
-    },
-    {
-      id: "goldawm", name: "黄金AWM", slots: {
-        "Material.001": { color: 0xd9a92f, metalness: 0.78, roughness: 0.22, emissive: 0x2a1d05, emissiveIntensity: 0.18 },
-      },
-      pulse: { amp: 0.06, speed: 1.2 }, muzzle: 0xffd070, accent: 0xd9a92f,
-    },
     {
       // 「紫电」：紫光放电。模型（AWM_1）自带的三个材质里 `light`/`light_2` **本身带 emissive**，
       // 所以额外给这两个名字写槽位（只改发光、`color` 保持纯白不动贴图）——
@@ -192,49 +201,27 @@ export const SKINS = {
     },
   ],
 
+  // 手枪没有模型皮肤 —— 只剩原厂。
   pistol: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
-    {
-      id: "shura", name: "修罗", slots: {
-        "P320_mat.001": { color: 0x4e0a0d, metalness: 0.55, roughness: 0.42, emissive: 0xff1a1a, emissiveIntensity: 0.12 },
-      },
-      pulse: { amp: 0.09, speed: 2.4 }, muzzle: 0xff2a2a, accent: 0xff1a1a,
-    },
-    {
-      id: "deity", name: "天神", slots: {
-        "P320_mat.001": { color: 0xa8871f, metalness: 0.75, roughness: 0.28, emissive: 0x3a2c08, emissiveIntensity: 0.13 },
-      },
-      pulse: { amp: 0.07, speed: 1.5 }, muzzle: 0xffe090, accent: 0xd4b04a,
-    },
   ],
 
-  // 匕首的部位映射是**实测**出来的，别照名字猜：
-  // knife_s_1 = 刀柄（底部短的一截），knife_s_2 = 刀身（长的那条）。
-  // 一开始按名字反着上了色，结果「屠龙」成了一柄金刃红柄的怪东西。
+  // 匕首也只有原厂。曾经的两款（「屠龙」「龙啸」）点的槽位是 `knife_s_1` / `knife_s_2`，
+  // 那是**换刀之前**那把 knife.glb 的材质名；现在 models/knife.glb 是 3 个网格共用
+  // **一个** `Knife` 材质，这两个名字在整个仓库里一个 GLB 都对应不上，选中时画面纹丝不动。
+  // 新刀的材质名是 `Knife`，本身带贴图（蓝钢刀身），原厂即正确外观。
   knife: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
-    {
-      id: "dragonslayer", name: "屠龙", slots: {
-        knife_s_1: { color: 0xc8a02c, metalness: 0.80, roughness: 0.30 },
-        knife_s_2: { color: 0xa81015, metalness: 0.85, roughness: 0.22, emissive: 0xff2a10, emissiveIntensity: 0.16 },
-      },
-      pulse: { amp: 0.10, speed: 2.2 }, muzzle: 0xff2a10, accent: 0xff2a10,
-    },
-    {
-      id: "dragonroar", name: "龙啸", slots: {
-        knife_s_1: { color: 0x141210, metalness: 0.80, roughness: 0.40 },
-        knife_s_2: { color: 0xd8b03a, metalness: 0.85, roughness: 0.20, emissive: 0xd8b03a, emissiveIntensity: 0.12 },
-      },
-      pulse: { amp: 0.08, speed: 1.8 }, muzzle: 0xd8b03a, accent: 0xd8b03a,
-    },
   ],
 };
 
 // 每把武器**默认带**的皮肤：进战场就是它，换主武器时也回退到它。
-// 刻意不是原厂 —— 这套皮肤是游戏的门面，默认穿上比默认裸枪更能体现它值。
-// 想要「进战场就是原厂」只需把这里全改成 STOCK，其余逻辑无需改动。
+// 有模型皮肤的那三把都默认穿模型皮肤（它是游戏的门面），手枪与匕首只有原厂。
+// **这里的每个 id 都必须在上面的表里真实存在** —— `skinForGun` 的回退是
+// `DEFAULT_SKIN[gunId] || STOCK`，一旦指向一个被删掉的 id，`findSkin` 会静静地回退成原厂，
+// 表现为「默认皮肤莫名其妙没了」。
 export const DEFAULT_SKIN = {
-  ak: "firekirin", m4: "thor", awm: "shadowless", pistol: "shura", knife: "dragonslayer",
+  ak: "classic", m4: "thor", awm: "volt", pistol: STOCK, knife: STOCK,
 };
 
 // 枪口焰没上皮肤时的原色（与 muzzleShot / muzzleLight 的构造值一致）
@@ -302,22 +289,29 @@ export function paintSkin(root, weaponId, skinId) {
     if (base.roughness !== undefined) m.roughness = base.roughness;
     if (base.emissiveIntensity !== undefined) m.emissiveIntensity = base.emissiveIntensity;
     if (base.envMapIntensity !== undefined) m.envMapIntensity = base.envMapIntensity;
+    // 2) 皮肤覆盖项（按 GLB 原始材质名对号入座）。必须在下面判 map 之前取出来 ——
+    // 有没有这一项决定了「丢不丢贴图」，见 want 的第四个来源。
+    const ov = slots[o.userData.matName];
     if (m.map !== undefined) {
       // material.color 是**乘在 map 上**的，所以带贴图的枪（AWM/USP）非原厂皮肤一律丢贴图；
       // 而「原厂」必须把迷彩贴图还原回来。切 map 的 null/非 null 会改变着色器的 USE_MAP
       // 分支，所以必须同时 needsUpdate。
-      // 「保留贴图」有三个来源：原厂、皮肤自己声明（`keepMap`，给基础低模用）、
-      // 以及**网格自己带的烘焙贴图**（`userData.keepMap`，由 prepareGunMeshes 在加载
-      // 模型皮肤时打上）。第三条不能省：模型皮肤若被当成普通皮肤处理，
-      // 模型自有贴图会被这一行整个抹掉，只剩一片平涂色。
-      const want = (skin.id === STOCK || skin.keepMap || o.userData.keepMap) ? base.map : null;
+      // 「保留贴图」有四个来源：① 原厂；② 皮肤自己声明（`keepMap`，给基础低模用）；
+      // ③ **网格自己带的烘焙贴图**（`userData.keepMap`，由 prepareGunMeshes 在加载
+      // 模型皮肤时打上）—— 模型皮肤若被当成普通皮肤处理，模型自有贴图会被这一行整个抹掉，
+      // 只剩一片平涂色；④ **这款皮肤根本没有匹配到这个材质名**（`!ov`）。
+      // ④ 是「用户导入的 GLB 变白」那半个症结：皮肤是按**旧模型的材质名**写的槽位表
+      // （匕首是 `knife_s_1`/`knife_s_2`），换掉模型文件之后新材质名（`Knife`）一个都对不上，
+      // 于是整把枪既没上色、又因为这一行把自带的 1024² 贴图丢了 —— 双重落空，渲染成纯白。
+      // 没被皮肤点名的材质就是「这款皮肤不管它」，那它就该原样保留自己的贴图；
+      // 皮肤只管自己写了槽位的那些部位。
+      const want = (skin.id === STOCK || skin.keepMap || o.userData.keepMap || !ov) ? base.map : null;
       if (m.map !== want) {
         m.map = want;
         m.needsUpdate = true;
       }
     }
-    // 2) 叠皮肤覆盖项（按 GLB 原始材质名对号入座）
-    const ov = slots[o.userData.matName];
+    // 没被这款皮肤点名 → 只还原出厂值，不动它
     if (!ov) return;
     if (ov.color !== undefined && m.color) m.color.setHex(ov.color);
     if (ov.emissive !== undefined && m.emissive) m.emissive.setHex(ov.emissive);

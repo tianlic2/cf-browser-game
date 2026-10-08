@@ -21,7 +21,7 @@
  *
  * 它**故意不自动生成**：键位在代码里是一堆带状态守卫的 `if (e.code === …)` 分支，
  * 同一个物理键在不同状态下语义不同（`Digit1` 在背包面板开着时是「选第 N 个背包」、
- * 否则是「切到主武器」；`[` `]` 只在面板开着时生效；`Space`/方向键在死亡态被吞掉）。
+ * 否则是「切到主武器」；`Space`/方向键在死亡态被吞掉）。
  * 拿代码生成出来的是一张会撒谎的表。
  */
 const KEYBINDS = [
@@ -38,8 +38,7 @@ const KEYBINDS = [
   { keys: ["3"], label: "切换到军刀" },
   { keys: ["4"], label: "循环切换手雷 / 闪光弹 / 烟雾弹" },
   { keys: ["Q"], label: "主武器 ⇄ 副武器 快速切换" },
-  { keys: ["B"], label: "背包面板（再用 1 / 2 / 3 选背包）" },
-  { keys: ["[", "]"], label: "切换皮肤（背包面板打开时）" },
+  { keys: ["B"], label: "背包面板（再用 1 / 2 / 3 选，选完自动收起）" },
   { keys: ["G"], label: "丢弃当前武器" },
   { keys: ["Tab"], label: "按住查看战绩" },
   { keys: ["Enter"], label: "聊天（再按一次发送）" },
@@ -65,6 +64,9 @@ export class Lobby {
    *   tickerEl  #lobbyTicker（跑马灯内容容器）
    *   startBtn  #startBtn（mid-match 回大厅时要换文案）
    *   getData   () => ({ ticker, arsenal, storage, match })
+   *   onUiSound (kind) 可选。页签被**玩家点击**时回调一次（kind 目前只有 "switch"）。
+   *            走注入而不是让本模块 import `scripts/audio.js`：这个模块的纪律是
+   *            「不 import THREE、不碰游戏状态」，音频对象显然属于游戏状态那一侧。
    */
   constructor(opts = {}) {
     this._root = opts.root || null;
@@ -72,6 +74,7 @@ export class Lobby {
     this._tickerEl = opts.tickerEl || null;
     this._startBtn = opts.startBtn || null;
     this._getData = typeof opts.getData === "function" ? opts.getData : null;
+    this._onUiSound = typeof opts.onUiSound === "function" ? opts.onUiSound : null;
 
     this._tab = "play";
     this._panes = new Map(); // data-pane -> element
@@ -88,7 +91,9 @@ export class Lobby {
       const name = b.dataset.tab;
       if (!TAB_NAMES[name]) continue;
       this._tabs.set(name, b);
-      b.addEventListener("click", () => this.show(name));
+      // ⚠️ 声音**只挂在这个 click 上**，绝不能放进 `show()`：`refresh()` 会调 `show()`，
+      // 而 `refresh()` 在每次指针锁定/失锁回大厅时都触发 —— 放进去就变成「每次回大厅都叮一声」。
+      b.addEventListener("click", () => { if (this._onUiSound) this._onUiSound("switch"); this.show(name); });
     }
     for (const p of this._root.querySelectorAll("[data-pane]")) {
       this._panes.set(p.dataset.pane, p);
@@ -112,7 +117,7 @@ export class Lobby {
     for (const [name, pane] of this._panes) {
       pane.classList.toggle("hidden", name !== tab);
     }
-    // 每次切到某页都重渲染那一页：个人仓库要反映捡枪/换皮肤之后的最新配装。
+    // 每次切到某页都重渲染那一页：个人仓库要反映捡枪（以及程序化的 setSkin）之后的最新配装。
     this._renderPane(tab);
   }
 

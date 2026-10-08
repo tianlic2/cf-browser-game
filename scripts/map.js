@@ -1527,8 +1527,8 @@ export async function buildMap(scene) {
   // 的前提下把窗户画对的写法（真实玻璃是介质、F0 只有 4%，正面看就是暗的；但这
   // 些窗背后没有房间，照物理来只会得到一片黑）。
   //
-  // `envLock` 是给 `main.js` 那个全局去蓝遍历的豁免牌：玻璃**必须**吃满 IBL，
-  // 否则「映着天光」这件事直接被降掉七成（见 main.js 的 tameWorldEnv）。
+  // `envLock` 是给那个全局去蓝遍历的豁免牌：玻璃**必须**吃满 IBL，
+  // 否则「映着天光」这件事直接被降掉七成（规则见 scripts/envtame.js）。
   const glassMat = new THREE.MeshStandardMaterial({
     color: 0x46586a, roughness: 0.10, metalness: 0.9, envMapIntensity: 1.5,
   });

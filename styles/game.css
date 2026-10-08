@@ -112,6 +112,16 @@ body {
 }
 .fx-layer .hitmark.gold::before,
 .fx-layer .hitmark.gold::after { height: 3px; width: 30px; }
+/* 击杀那一下的四斜线**砸得比普通命中狠**：起手 1.9 倍（普通命中是 1.3），落点更小（0.72）。
+   方向与屏幕上的冲击波相反 —— 这个是往准星里收（「定了」），冲击波是往外炸（「爆了」），
+   两下叠起来才有体量。跟 ring 一起放大也顺带说明：`outline` 自己会跟着 scale 走。 */
+.fx-layer .hitmark.kill.show,
+.fx-layer .hitmark.gold.show { animation: hitmarkKillAnim 0.32s cubic-bezier(0.2, 0.9, 0.25, 1) forwards; }
+@keyframes hitmarkKillAnim {
+  0% { opacity: 1; transform: scale(1.9); }
+  32% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.72); }
+}
 
 /* ===== 狙击镜（AWM）=====
    整块黑场里抠出一个正圆镜筒，圆内是细十字 + 密位刻度。
@@ -669,6 +679,104 @@ body {
   100% { opacity: 0; }
 }
 
+/* ---- 击杀冲击波（#killBurst，由 showKillIcon 与击杀图标一起点亮）----
+   一个节点承载三个动画，分别挂在**元素本身 + 两个伪元素**上：
+     元素本身 = 主冲击环（最锐、收得最快；靠 box-shadow 撑成一根发光的管子）
+     ::before  = 放射速度线（repeating-conic-gradient 出条 + radial-gradient 当遮罩）
+     ::after   = 向外扫过的光带（一整圈柔光，三层里铺得最开的一层）
+   **中心必须留空**：速度线那条 mask 的 `transparent 30%` 就是干这个的 —— 520px 的锥形条
+   若一直铺到中心，准星正下方会糊成一片，开镜（fov 7.5°）时尤其难看。光环同理（它只有
+   一圈 border）、光带的渐变中心本来就透。
+   三档只换 `color` 与 `--kb`（强度倍率）：同一套 keyframes 吃 calc() 出来的数字，
+   不复制三份动画（复制就一定会漂）。配色沿用杀伤反馈的金/红 —— 这是 DESIGN.md
+   「避免大面积高饱和」那条的既有例外，不是新开的颜色。
+
+   **「一圈细线」在白昼甲板上一眼就没了**（实测第一版：4px 的环 + 0.9deg 的射线，
+   冻结帧上读作几道淡米色的斜杠，区域亮度只涨了 2.8/255）。三处补偿都是从这条来的：
+     ① 环加 `box-shadow` 双层外发光。**这里能安全用 box-shadow** —— 与 .menu-panel
+        那条「clip-path 会连 box-shadow 一起裁掉」不同，本元素没有 clip-path。
+     ② 射线加宽到 1.4deg，且两段的**间距做成不等**（7.2deg / 11deg，见 ::before 的色标）——
+        等距密排的细线读起来是一把伞骨，「宽窄不一 + 疏密不一」才像炸开。
+     ③ `::after` 从「一圈模糊的边」改成**一整条向外扫的光带**：它的实际半径 =
+        母元素 scale × 自身 scale × 280px，两个 scale 都在涨 ⇒ 单调外扩。
+
+   ⚠️ **尺度上限定在「准星周围的一记爆发」，不是「糊满全屏的一层光」。** 上面那三处补偿
+   曾经把三层同时推得过大（父 scale 3.4、射线/光带的自身 scale 又各乘一遍 `--kb`
+   ⇒ 合成尺度是 kb 的**平方**），实测最坏帧（`/tmp/cfkbsweep2.mjs before`）：
+   **屏幕外圈 30.9% 被糊到、全屏 36.2% 的像素被点亮、准星 ±28 方框 Δ25.69（峰值 209.63）**，
+   用户报的「过于浮夸、挡视野」就是这一帧。
+   收敛的办法（判据与量法见 AGENTS.md「击杀冲击波」一节，脚本 `/tmp/cfkbsweep2.mjs`）：
+     · `--kb` **只乘父元素的 scale 一处**（不再是父子各乘一遍）⇒ 三档的差距回到线性；
+     · 父 scale 上限 3.4 → 1.6（gold 2.4），射线 1.25 → 0.62、光带 2 → 0.62；
+     · 峰值不透明度 0.95/1/0.5 → 0.80/0.55/0.28（射线与光带是「铺开」的那两层，先压它们）；
+     · 外发光收一档、时长各缩 ~0.1s（糊在屏幕上的总时长也一起降）。
+   收敛后同一套量法（`cfkbsweep2.mjs final`，只开冲击波那一档 `burst`）：
+   **屏幕外圈 ≤0.1%（已到采样噪声地板）、全屏 1.6%、准星 ±28 Δ1.51（峰值 22.3）** —— 瞄准点那一格基本回到
+   静息水平。三层结构与中心留空一个字没动，它仍然是一记「砸在准星上的爆」，只是不再盖住视野。
+   （图标那一侧还单独收过两轮 —— 见下面 `.killicon` 上方那段注释，那里有两轮各自的读数。）
+   ⚠️ 伪元素**同时吃母元素的 `transform` 与 `opacity`**（它们是母元素的子树）——
+   所以 kbRing 的 opacity 不能太早归零，否则光带会被一起掐掉（现在 62% 还留 0.42）。 */
+.fx-layer .killburst {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 200px;
+  height: 200px;
+  margin: -100px 0 0 -100px;
+  border: 4px solid currentColor;
+  border-radius: 50%;
+  box-shadow: 0 0 12px 1px currentColor, 0 0 30px 6px currentColor;
+  color: #ffd24a;            /* 普通击杀：金（与 .killicon.hit 同色） */
+  --kb: 1;                   /* 强度倍率，只被下面两档改写 */
+  opacity: 0;
+}
+.fx-layer .killburst.head { color: #ff4d4d; --kb: 1.2; }
+.fx-layer .killburst.gold { color: #ffe9a0; --kb: 1.5; }   /* 黄金爆头：更亮、最大 */
+.fx-layer .killburst::before {
+  content: "";
+  position: absolute;
+  left: -260px;
+  top: -260px;
+  width: 520px;
+  height: 520px;
+  background: repeating-conic-gradient(from 0deg,
+    currentColor 0deg 1.4deg, transparent 1.4deg 8.6deg,
+    currentColor 8.6deg 10deg, transparent 10deg 21deg);
+  -webkit-mask-image: radial-gradient(closest-side, transparent 30%, #000 46%, #000 72%, transparent 96%);
+  mask-image: radial-gradient(closest-side, transparent 30%, #000 46%, #000 72%, transparent 96%);
+  opacity: 0;
+}
+.fx-layer .killburst::after {
+  content: "";
+  position: absolute;
+  left: -180px;
+  top: -180px;
+  width: 560px;
+  height: 560px;
+  background: radial-gradient(closest-side, transparent 30%, currentColor 46%, transparent 74%);
+  opacity: 0;
+}
+.fx-layer .killburst.show { animation: kbRing 0.5s cubic-bezier(0.15, 0.75, 0.25, 1) forwards; }
+.fx-layer .killburst.show::before { animation: kbRays 0.42s ease-out forwards; }
+.fx-layer .killburst.show::after { animation: kbHalo 0.46s ease-out forwards; }
+@keyframes kbRing {
+  0% { opacity: 0.80; transform: scale(0.16); }
+  62% { opacity: 0.42; }
+  100% { opacity: 0; transform: scale(calc(1.6 * var(--kb))); }
+}
+/* 射线与光带的自身 scale **不带 `--kb`**：kb 已经在母元素的 scale 里乘过一次，
+   这里再乘一遍等于把三档的差距平方（gold 曾经是 hit 的 2.25 倍面积）。 */
+@keyframes kbRays {
+  0% { opacity: 0; transform: scale(0.34) rotate(-7deg); }
+  14% { opacity: 0.55; }
+  100% { opacity: 0; transform: scale(0.62) rotate(5deg); }
+}
+@keyframes kbHalo {
+  0% { opacity: 0; transform: scale(0.24); }
+  14% { opacity: 0.28; }
+  100% { opacity: 0; transform: scale(0.62); }
+}
+
 /* ---- 屏幕中心：击杀图标（武器剪影 + 爆头徽记）----
    从「一行文字」改成了内联 SVG（见 scripts/icons.js）：
    容器只负责居中与动画，图形与配色全在 SVG 里。
@@ -683,20 +791,78 @@ body {
   align-items: center;
   gap: 8px;
   color: #ffd24a;                       /* 剪影的 currentColor */
-  filter: drop-shadow(0 0 12px rgba(255, 180, 40, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95));
+  filter: drop-shadow(0 0 7px rgba(255, 180, 40, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95));
   opacity: 0;
 }
-.killicon .ki-gun { width: 84px; height: 84px; }
-.killicon .ki-hs { width: 38px; height: 38px; align-self: flex-start; margin-top: 4px; }
-/* 爆头：红；黄金爆头：金 + 更强的外发光。图形不变，只换色（与 CF 一致）。 */
-.killicon.head { color: #ff4d4d; filter: drop-shadow(0 0 12px rgba(255, 60, 60, 0.85)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
-.killicon.gold { color: #ffd24a; filter: drop-shadow(0 0 18px rgba(255, 200, 60, 1)) drop-shadow(0 0 34px rgba(255, 160, 20, 0.7)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
-.killicon.show { animation: killIconAnim 0.85s ease-out forwards; }
+/* 尺寸与外发光一共收过两档（84→72→62 / 12px→10px→7px 光晕）。
+   起因是「击杀特效挡视野」：`killicon` 的 top 锚在准星正上方 92px，高度一涨、光晕一糊，
+   它的**下缘就探进准星**。两轮都是照 `/tmp/cfkbsweep2.mjs` 那个准星方框（±28）的读数收的：
+     · 第一轮（84→72、0% 缩放 2.3→1.7）之后，准星 ±28 方框里最坏 Δ13.33 / 峰值 206.2（@t=0.32），
+       而**同一时刻**冲击波自己只贡献 Δ0.10 / 峰值 3.07 —— 也就是说那一格全是图标
+       （grep `/tmp/kb-after/rows.json` 的 `t=0.32` 三行即可自证）。别把冲击波**自己**的最坏帧
+       （Δ1.51 / 峰值 22.3 @t=0.08）搬到这一句里：两者的最坏帧不在同一时刻，混着比就是错的。
+     · 本轮（72→62、光晕 10→7px、0% 缩放 1.7→1.4、时长 0.92→0.80s）把下缘从
+       `cy-20` 推到 `cy-30`：准星方框是 ±28，收完图标就不再压住瞄准点。
+   **`top: calc(50% - 92px)` 不能再往上挪** —— 再高就与连杀计时条（`calc(24% + 56px)`，
+   713px 高下约 227px）撞上，两者的间隙只剩约 10px。要再收只能继续缩图形与光晕。 */
+.killicon .ki-gun { width: 62px; height: 62px; }
+.killicon .ki-hs { width: 29px; height: 29px; align-self: flex-start; margin-top: 4px; }
+/* 爆头：红；黄金爆头：金 + 更强的外发光。图形不变，只换色（与 CF 一致）。
+   `.gold` 那两层辉光（14px / 24px）是全场最糊的一处，收成 10px / 18px —— 它铺得最开，
+   最容易被读成「一晃眼白了一片」，而色相本身已经足够把黄金爆头与普通爆头分开。 */
+.killicon.head { color: #ff4d4d; filter: drop-shadow(0 0 7px rgba(255, 60, 60, 0.85)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
+.killicon.gold { color: #ffd24a; filter: drop-shadow(0 0 10px rgba(255, 200, 60, 1)) drop-shadow(0 0 18px rgba(255, 160, 20, 0.7)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
+/* 扫光带：一条斜的白 → 透明 → 白，从左扫到右。
+   **它必须夹在 `.ki-clip` 这个 overflow:hidden 的裁剪盒里** —— 渐变本身贯穿整块，
+   不裁就会横扫整个屏幕。而裁剪盒不能直接做在 .killicon 上：那会连它自己那圈
+   `filter: drop-shadow()` 一起裁掉（发光画在盒子外面），击杀图标会突然变成没有光的
+   一个平面图形。裁剪盒是绝对定位的兄弟节点，不参与 flex 排布，图标居中不受影响。 */
+.killicon .ki-clip {
+  position: absolute;
+  inset: -10px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.killicon .ki-shine {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 34%;
+  background: linear-gradient(100deg,
+    rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 50%, rgba(255, 255, 255, 0) 100%);
+  transform: translateX(-190%) skewX(-16deg);
+}
+.killicon.show .ki-shine { animation: kiSweep 0.46s 0.14s ease-out forwards; }
+@keyframes kiSweep {
+  0% { transform: translateX(-190%) skewX(-16deg); }
+  100% { transform: translateX(420%) skewX(-16deg); }
+}
+/* 入场：从大得多的位置**过冲**砸下来（1.4 → 0.86 → 1.08 → 1.0），带一点回正的角度，
+   最后一边放大一边上浮淡出。`cubic-bezier(0.16,1,0.3,1)` 是「快出慢收」那条，
+   与线性/`ease-out` 的区别就在前 26% 那一下够狠 —— 平稳的 scale 曲线读起来是
+   「淡入的一张图」，过冲才读成「砸出来的一下」。**过冲幅度是准星约束、不是口味旋钮**：
+   2.3 时下缘越过准星、1.7 时贴住（实测 t=0.03 盒子底边 371 > 准星 357），现压到 1.4。
+   时长同步从 0.92s 收到 0.80s —— 图小了一圈还留同样的驻留时间，读起来就成了「挂得久」。
+   `translateX(-50%)` 是居中用的，**每一帧都得带着**（漏了图标就会每帧横跳半个身位）。 */
+.killicon.show { animation: killIconAnim 0.80s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 @keyframes killIconAnim {
-  0% { opacity: 0; transform: translateX(-50%) scale(1.5); }
-  18% { opacity: 1; transform: translateX(-50%) scale(1); }
-  60% { opacity: 1; }
-  100% { opacity: 0; transform: translateX(-50%) scale(0.92); }
+  0% { opacity: 0; transform: translateX(-50%) scale(1.4) rotate(-11deg); }
+  26% { opacity: 1; transform: translateX(-50%) scale(0.86) rotate(3deg); }
+  38% { transform: translateX(-50%) scale(1.08) rotate(-1deg); }
+  50% { transform: translateX(-50%) scale(0.98) rotate(0deg); }
+  62% { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.18) translateY(-8px); }
+}
+
+/* 「减少动态」下这些装饰性的一次性全屏动效只留最短的一闪：它们是体感，不是信息 ——
+   真正不可省的击杀反馈（图标本身、命中信息条、连杀播报）一个都没有被去掉。 */
+@media (prefers-reduced-motion: reduce) {
+  .fx-layer .killburst.show { animation-duration: 0.16s; }
+  .fx-layer .killburst.show::before,
+  .fx-layer .killburst.show::after { animation: none; }
+  .killicon.show { animation-duration: 0.4s; }
+  .killicon.show .ki-shine { animation: none; }
 }
 
 /* ---- 受击方向指示：绕屏幕中心旋转的红色弧 ----
@@ -1209,58 +1375,9 @@ body {
   border-color: rgba(74, 222, 128, 0.8);
   color: #4ade80;
 }
-/* 面板里的分区（现在是「背包」与「皮肤」两段）：与上一段之间拉一条分隔线，
-   免得皮肤行看起来像是第 4 个背包。 */
-.bp-sec {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-.bp-sec-title {
-  margin-bottom: 10px;
-  font-size: 12px;
-  letter-spacing: 3px;
-  color: #9ca3af;
-}
-.bp-sec-title::before {
-  content: "";
-  display: inline-block;
-  width: 3px;
-  height: 11px;
-  margin-right: 8px;
-  vertical-align: -1px;
-  background: #4ade80;
-}
-/* 皮肤行横向铺开、按需换行：一款枪 4~6 个皮肤，竖着排会把面板撑得很高 */
-.bp-list.bp-skins {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.bp-skin-row {
-  flex: 1 1 auto;
-  min-width: 92px;
-  justify-content: center;
-  gap: 7px;
-  padding: 9px 12px;
-}
-.bp-skin-row .bp-name {
-  font-size: 14px;
-  letter-spacing: 0.5px;
-}
-/* 「模型」标记：这一款换的是整把枪的模型，不只是配色 */
-.bp-model {
-  padding: 1px 5px;
-  border: 1px solid rgba(255, 155, 26, 0.55);
-  color: #ff9b1a;
-  font-size: 10px;
-  letter-spacing: 1px;
-  flex: none;
-}
-.bp-item.active .bp-model {
-  border-color: rgba(255, 155, 26, 0.9);
-  background: rgba(255, 155, 26, 0.14);
-}
+/* 面板里的分区样式（.bp-sec / .bp-sec-title / .bp-list.bp-skins / .bp-skin-row /
+   .bp-model）已随「选皮肤」功能一起删除 —— 面板现在只有背包一段。
+   `.bp-title` 里那句小字已经写明「选完自动收起」。 */
 .bp-hint {
   margin-top: 16px;
   padding-top: 12px;
@@ -1271,9 +1388,10 @@ body {
   color: #9ca3af;
   text-align: center;
 }
-/* 按键提示做成键帽。**不能退回纯文本 `[ / ]`**：括号只有 6.6px 宽、笔画极细，混在
-   11px 灰字里与相邻的真斜杠糊成一体，整句会被读成「按 `/` 换皮肤」（用户实测报的正是这
-   条）。样式抄 `.bp-idx` 那套方角键帽，尺寸收小一号。注意 `.bp-hint` 上的 letter-spacing
+/* 按键提示做成键帽、**不退回纯文本**。这条是「按 `/` 换皮肤」那次误读留下的：`[` `]`
+   只有 6.6px 宽、笔画极细，混在 11px 灰字里与相邻的真斜杠糊成一体，整句会被读成
+   「按 `/` 换皮肤」（用户实测报的正是这条）。那两个键的提示已经删了，键帽留给 `1` `2` `3`。
+   样式抄 `.bp-idx` 那套方角键帽，尺寸收小一号。注意 `.bp-hint` 上的 letter-spacing
    必须在这里归零，否则键帽里的单个字符会被推开、看起来不像一个键。 */
 .bp-hint-keys {
   display: flex;
@@ -1302,11 +1420,8 @@ body {
   letter-spacing: 0;
   text-align: center;
 }
-.bp-hint-sep {
-  color: #9ca3af;
-  opacity: 0.5;
-}
-/* 只有「换背包被拦」那条染警示黄：皮肤那条仍然可用，整句染黄会误导。 */
+/* （`.bp-hint-sep` 那个「·」分隔符已删：面板里只剩「换背包」一条提示，没有要分隔的第二段。） */
+/* 「换背包被拦」那条染警示黄（面板里现在只有这一条提示，染黄的就是它）。 */
 .bp-hint-item.warn { color: #fbbf24; }
 /* 槽位图例与这个面板的操作无关，另起一行压暗 —— 混在同一行会把上面的按键提示淹掉 */
 .bp-hint-legend {
@@ -1759,8 +1874,9 @@ body {
 }
 .lv-key-row > .lv-key-cap { flex: 0 0 auto; display: flex; gap: 4px; align-items: center; }
 .lv-key-row > .lv-key-txt { flex: 1 1 auto; min-width: 0; }
-/* 键帽：抄 .bp-idx / .bp-hint kbd 那套。**必须是键帽而不是纯文本** —— `[` `]` 在 11px
-   Consolas 下各只有 6.6px 宽，写成纯文本会被读成「按 / 换皮肤」（实测用户报过）。 */
+/* 键帽：抄 .bp-idx / .bp-hint kbd 那套。**必须是键帽而不是纯文本** —— 这条最早是给
+   `[` `]` 那两个键立的（6.6px 宽、笔画极细，混在 11px 灰字里会被读成「按 / 换皮肤」，
+   实测用户报过）；键位表里现在是 `+` `−` 这类符号键，同样只有键帽才认得出来。 */
 .lv-key-row kbd {
   display: inline-block;
   min-width: 20px;

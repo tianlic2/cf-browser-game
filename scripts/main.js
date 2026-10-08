@@ -12,6 +12,8 @@ import {
 import { buildGunCatalog, worldModel, enemyModel, randomGunRoll } from "./guncatalog.js";
 import { Chat } from "./chat.js";
 import { makeBlobShadow } from "./blobshadow.js";
+// IBL 去蓝的唯一实现（规则、推导与**实测的剂量–反应**都在 envtame.js 的文件头）
+import { tameEnvIntensity as tameWorldEnv } from "./envtame.js";
 import { weaponIconSvg, headshotBadgeSvg } from "./icons.js";
 import { Minimap, mmVisible } from "./minimap.js";
 import { Lobby } from "./lobby.js";
@@ -44,6 +46,7 @@ const streakTimerNumEl = document.getElementById("streakTimerNum");
 const streakTimerFillEl = document.getElementById("streakTimerFill");
 const streakFlashEl = document.getElementById("streakFlash");
 const killIconEl = document.getElementById("killIcon");
+const killBurstEl = document.getElementById("killBurst");
 const hitdir = document.getElementById("hitdir");
 const flashOverlay = document.getElementById("flashOverlay");
 const scopeEl = document.getElementById("scope");
@@ -152,7 +155,7 @@ vmScene.add(vmHemi, vmSun, vmFill, vmRim, vmCamera);
 // 全被埋掉）。所以天光既要给够**能量**、又要是**接近中性**的色：
 // 真实的天空辐照度本来就是很淡的蓝，`0x0d3f86` 那种天顶色的蓝度（线性 B/R ≈ 55）
 // 属于把「天空的观感颜色」当成了「天空的照明颜色」，两者差得很远。
-// 强度 0.62 → 1.15 是配合 `tameWorldEnv()` 把 IBL 砍到 0.40 之后补回来的：净填充量
+// 强度 0.62 → 1.25 是配合 `tameWorldEnv()` 把介质 IBL 砍到 0.35 之后补回来的：净填充量
 // 与改动前相当（甚至略高），但色相从「蓝」换成了「暖白」，压在最上面的高对比
 // 依旧是「太阳 3.05 对填充 ≈1.2」这个比值给的，不是靠把阴影压死给的。
 scene.add(new THREE.HemisphereLight(0xe0dcd2, 0x726a5a, 1.25));
@@ -170,46 +173,15 @@ sun.shadow.bias = -0.0004;
 if ("intensity" in sun.shadow) sun.shadow.intensity = 1.0;
 scene.add(sun);
 
-// ---------- 世界 IBL 去蓝：整幅画面「发灰发冷」的真正根因 ----------
-//
-// **这一条是量出来的，不是调出来的。** 用 /tmp/pngpx.mjs 对四个机位截图做像素统计，
-// 暖冷指数 (R−B) 分别是 −23 / −31 / −36 / −31 —— 整幅画面在每个机位上都严重偏蓝，
-// 而太阳光 (0xfff4e0) 明明是暖的。原因不在配色，在**能量占比**：
-//
-//   天顶色 `#0d3f86` 转成线性是 (0.0043, 0.0508, 0.2377) —— **B/R ≈ 55**。
-//   这张贴图同时是 `scene.background` 与 `scene.environment`，而后者作为 IBL
-//   给**每一个** `MeshStandardMaterial` 提供漫反射辐照度：半球积分以天顶权重最大，
-//   于是那片极蓝的天顶把整个下半球都染蓝了。
-//
-// 太阳只在**正对它的那些面**上压得住这层蓝，所以受光面尚可、背光面与地面全是蓝的。
-// 单纯调 `PAL.*` 是治不好的 —— 那是拿一个有限的反照率去乘一个无限灌进来的蓝色辐照。
-//
-// 做法：按金属度分档降 `envMapIntensity`（IBL 的**唯一**总开关）。
-//   · 介质（metalness ≈ 0）的 IBL 里**漫反射项占绝对多数**，而漫反射项正是蓝色污染的
-//     来源 —— 砍到 0.40 等于把蓝灌进来的量减掉六成，天空的直射与半球光原封不动。
-//   · 金属（metalness 高）的 IBL **只有镜面项**，那就是金属的本色（AGENTS.md 记过：
-//     AWM 金皮 metalness 0.78，没有 IBL 会渲成一块黑铁）。所以它必须保住，只降一档。
-// 注意这里只遍历主场景：视模（`vmScene`）的枪与手**不能**碰，它们靠同一个环境贴图
-// 出金属感，而且本来就是画面正确的一部分。
-//
-// 豁免：材质上打了 `userData.envLock` 的不动。目前只有舷窗玻璃用这张牌 ——
-// 它靠「反射天空」来读作玻璃，砍掉 IBL 就退回一块黑（见 map.js 的 glassMat）。
-function tameWorldEnv(root) {
-  const seen = new Set();
-  let n = 0;
-  root.traverse((o) => {
-    const m = o.material;
-    if (!m) return;
-    for (const mm of Array.isArray(m) ? m : [m]) {
-      if (seen.has(mm.uuid) || !mm.isMeshStandardMaterial) continue;
-      if (mm.userData && mm.userData.envLock) continue;
-      seen.add(mm.uuid);
-      mm.envMapIntensity = (mm.metalness ?? 0) > 0.5 ? 0.85 : 0.35;
-      n++;
-    }
-  });
-  return n;
-}
+// ---------- 世界 IBL 去蓝 ----------
+// 规则本身、根因推导与**实测的剂量–反应**都在 `scripts/envtame.js`（**唯一的实现**）。
+// 这里只记两条调用纪律：
+//   ① **只遍历主场景**，绝不碰 `vmScene` —— 视模的枪与手靠同一个环境贴图出金属感，
+//      而且它本来就是画面正确的一部分。
+//   ② 枪械目录（敌人手持 + 地面掉落）与敌人本体**刻意不走这一趟**。这不是漏的：
+//      冻结姿势 A/B 实测过，它们吃满 IBL 时的色偏本来就是中性的（敌人躯干 R−B = −3），
+//      接上这一趟只会让敌人整体暗 26% / 枪暗 10%，冷暖差一个点都看不出来。
+//      数字在 envtame.js 的文件头，别再把「掉在地上的枪发蓝」记在这条账上。
 
 // ---------- 地图 ----------
 let gameReady = false;
@@ -911,7 +883,7 @@ let fireEnabled = false;
 let strideAcc = 0;
 let curFov = BASE_FOV;
 let sbAcc = 0; // 战绩面板的刷新节流
-let bpAcc = 0; // 背包面板**提示行**的刷新节流（列表不动，只在换背包/换皮肤时重建）
+let bpAcc = 0; // 背包面板**提示行**的刷新节流（列表不动，只在换背包时重建）
 
 // 团队竞技参数
 const TDM_LIMIT = 40;
@@ -1145,6 +1117,9 @@ function onEnemyDeath(enemy, headshot, weaponName, golden) {
   // 掉枪挂在这里：它是三条伤害路径（手雷 / 近战 / 子弹）唯一的汇合点，
   // 也正是「一次阵亡只记一次」的那个函数 —— 挂别处会走漏其中一条路径。
   dropEnemyGun(enemy);
+  // 一具身体砸在钢甲板上（替代「击杀只有一声音调」）。坐标**必须读 `enemy.group.position`**
+  // —— `enemy.root` 只是内层模型，位置是零（见 AGENTS.md 的敌人四层结构）。
+  sfx.enemyDeath(enemy.group.position.x, enemy.group.position.z, headshot);
   onKill(headshot, enemy.name, weaponName, golden);
 }
 
@@ -1313,12 +1288,41 @@ function updateStreakHud() {
 // 重触发沿用既有的 `remove → 强制回流 → add` 惯用法（同 `.streak` / `#streakFlash`）。
 function showKillIcon(headshot, weaponId, golden) {
   if (!killIconEl) return;
-  killIconEl.className = "killicon " + (!headshot ? "hit" : golden ? "gold" : "head");
+  const kind = !headshot ? "hit" : golden ? "gold" : "head";
+  killIconEl.className = "killicon " + kind;
+  // 扫光带（.ki-shine）**必须夹在一个 overflow:hidden 的裁剪盒里**：它是贯穿整块的斜向
+  // 渐变，不裁就会横扫整个屏幕。而裁剪盒又不能直接做在 .killicon 上 —— 那会把它自己那圈
+  // `filter: drop-shadow()` 一起裁掉（发光是画在盒子外面的）。裁剪盒是绝对定位的兄弟节点、
+  // 不参与 flex 排布，所以图标居中不受影响。
   killIconEl.innerHTML =
+    '<span class="ki-clip"><span class="ki-shine"></span></span>' +
     weaponIconSvg(weaponId || currentId, "ki-gun") +
     (headshot ? headshotBadgeSvg(golden, "ki-hs") : "");
   void killIconEl.offsetWidth;
   killIconEl.classList.add("show");
+  // 图标与冲击波**同源触发**（都在这里），所以任何"击杀发生了"的路径都必然两个都亮，
+  // 不会出现"图标闪了但屏幕没炸"这种半截状态。
+  spawnKillBurst(kind);
+}
+
+// 击杀冲击波：从屏幕中心向外扩散的光环 + 放射速度线。三档强度递增（hit < head < gold）。
+//
+// 为什么另开一层、而不是把 `.hitmark.kill` 做大：两者的读法**方向相反** ——
+// 准星上的四斜线是「收拢」（scale 1.9 → 0.72，读作「这一下定了」），屏幕级的爆发是
+// 「扩散」。收拢与扩散叠在一起才有「打爆了」的体量；把 hitmark 改成扩散会把准星那一下
+// 的安定感弄丢（CF 的四斜线本来就是收的）。所以这里是**加一层**，不是改那一层。
+//
+// 强度分档是刻意的：**每一次击杀都来一发满屏是最容易腻的做法**。普通击杀是中等金环，
+// 黄金爆头才顶到满屏。它与连杀辉光（`#streakFlash`，r3 起）是两条独立的强度轴 ——
+// 「单发的质量」×「连续的数量」—— 所以两者叠加时不会互相淹没。
+//
+// 重触发沿用既有的 `重写类名 → 强制回流 → 加 show` 惯用法（同 `.streak` / `#streakFlash`）。
+// 一个节点复用，不做 createElement/remove：连杀时高频触发的就是它，别让 DOM 抖动。
+function spawnKillBurst(kind) {
+  if (!killBurstEl) return;
+  killBurstEl.className = "killburst " + (kind || "hit");
+  void killBurstEl.offsetWidth;
+  killBurstEl.classList.add("show");
 }
 
 // ---------- 死亡界面 ----------
@@ -1447,7 +1451,7 @@ function applySkinTo(id, skinId) {
 
 // 当前该用哪张手臂锚点表：模型皮肤各有一张自己的（`ARM_ANCHORS[anchorKey]`），
 // 没有 `model` 或没有 `anchorKey` 就用武器 id 自己那张。
-// 单独抽出来是因为它有三个调用点（switchWeapon / 模型加载完成 / 换皮肤），必须同源。
+// 单独抽出来是因为它有两个调用点（switchWeapon / 模型加载完成），必须同源。
 function armAnchorKey(id) {
   const m = modelOf(id, activeSkinId(id));
   return m && m.anchorKey ? m.anchorKey : id;
@@ -1639,6 +1643,10 @@ function commitWeaponVisual(id) {
 function resetSwitchState() {
   switchState = null;
   switchHoldP = null;
+  // 时间线被整体丢弃 ⇒ 任何还挂在未来时刻的换弹/拉栓 foley 也一并作废
+  // （respawn / gameStart / endTDM 都从这里过，一处覆盖三个入口）。
+  sfx.cancelReload();
+  sfx.cancelBolt();
   if (owned[currentId]) {
     for (const k in owned) owned[k].group.visible = k === currentId;
     switchVisible = currentId;
@@ -1725,17 +1733,42 @@ function switchWeapon(id, force, opts) {
   // 后坐偏移是**当前武器 aimPunch 的派生量**，切枪必须立刻重算 —— 否则会带着上一把枪的
   // 抬枪角去瞄（AWM 打一枪切 AK，AK 的准星会莫名其妙地高 3°）。见 syncRecoil 的注释。
   syncRecoil();
-  // 换枪一律退镜，避免端着镜子换到没镜的枪
-  scoped = false;
-  scopeEl.classList.add("hidden");
-  cross.classList.remove("hidden");
+  // 换枪一律退镜，避免端着镜子换到没镜的枪。
+  // **必须走 applyScope(0)，不能退回「只写 scoped = false」那三行**：`fov` 与鼠标灵敏度
+  // 读的都是 `scopeStage`（updateCamera 的 `scopeStage === 2 ? SCOPE_FOV2 : scoped ? …`、
+  // mousemove 的 `scopeStage === 2 ? 10/90 : scoped ? 40/90 : 1`），只清布尔量会让二级镜的
+  // 7.5° 与 10/90 灵敏度**跟着玩家走到下一把枪上** —— 实测切到手枪/AK 后 `fov` 仍停在 7.5、
+  // `scopeStage` 仍是 2，画面上就是「切了枪人还在开镜」（准星与镜筒 overlay 倒是没了，
+  // 所以只剩「世界被放大 + 鼠标变慢」这两个症状，很容易被当成别的问题）。
+  // applyScope(0) 把 scopeStage 一起归零，并照常补回准星/镜筒 overlay 与枪模可见性。
+  applyScope(0);
   // 切枪打断换弹（与 CF 一致：切开就等于放弃这次换弹，切回来要重新按 R）。
   // **必须打断「旧枪」那一把** —— 否则收枪段里它会一边换弹一边下沉，两套姿势互相打架；
   // 而且在动画中途清掉时间线（resetSwitchState）也才不会有半截换弹残留。
+  // 只清 reloading/reloadT、**不补子弹**：`updateReload()` 的结算段（把 mag 补满、
+  // reserve 扣掉）只在 reloadT 走满 reloadDur 时才跑，清掉计时器等于这次换弹作废。
   if (prev && prev.state.reloading) {
     prev.state.reloading = false;
     prev.state.reloadT = 0;
     showToast("");
+    // 音频那一侧也要取消：换弹的另外两段 foley 是**预排程**在未来的（见 audio.js 的 reload），
+    // 不取消的话「弹匣入井 / 拉栓」会在切到别的枪之后照常响 —— 而逻辑上这次换弹已经作废了。
+    sfx.cancelReload();
+  }
+  // 快切取消拉栓（CF 的经典技巧）：AWM 打完一枪正在拉栓时换枪 = 主动放弃这次拉栓。
+  // 三件事一起做，缺一件这个技巧就不成立：
+  //   ① `boltT = 0` —— 拉栓没了，切回来不用再等它走完（`fire()` 与 `applyScope()` 都门在它上面）；
+  //   ② `reScope = false` —— 否则拉栓走完还会**自动回镜**，等于切回来又端起了镜子
+  //      （与上面「切枪一律退镜」直接冲突）；
+  //   ③ `nextFireAt = 0` —— 放开 CS 的射速闸门（AWM 的 `interval` 是 1.4548s，比 `boltTime`
+  //      1.2s 还长，不放它的话快切省下来的时间会被这 1.4548s 全部吃掉，快切等于白做）。
+  // 只在「拉栓真的在走」时生效：拉栓已完成、单纯在等 `interval` 的那种等待不给捷径，
+  // 免得「打一枪切一下枪」变成绕开射速限制的万能解。
+  if (prev && prev.state.boltT > 0) {
+    prev.state.boltT = 0;
+    prev.state.reScope = false;
+    prev.state.nextFireAt = 0;
+    sfx.cancelBolt();   // 拉栓声同理：快切把它取消掉，否则切走之后还在响
   }
   updateAmmoHud();
   // ---- 视觉层：交给时间线 ----
@@ -1782,6 +1815,9 @@ function switchToSecondary() {
   switchWeapon(id);
 }
 // B + 数字键（或点击面板）切换背包。不可切换时给出具体原因，不要静默失败。
+// **它只管数据，不碰面板的显隐** —— 「选完自动收起」由两条调用路径各自去调 `closeBackpack()`
+// （keydown 的数字键、`updateBackpack` 的行点击）。收在这儿的话 `__tactical.switchBackpack`
+// 这个程序化入口也会顺手把面板收掉，而它在测试里是拿来改状态的、不该带 UI 副作用。
 function switchBackpack(i) {
   if (!BACKPACKS[i]) return false;
   if (!canSwapBackpack()) {
@@ -1810,69 +1846,43 @@ function switchNade() {
   switchWeapon(list[(idx + 1) % list.length] || list[0]);
 }
 function toggleBackpack() {
+  // 收起面板要顺手把提示语清掉（那句「按 1 / 2 / 3 切换背包」在面板关着时没有意义），
+  // 而「选完背包自动收起」那条路不能清 —— 那时调用方刚写了「切换至背包 2」。
+  // 所以清提示留在这一层，`closeBackpack()` 只做显隐。
+  if (closeBackpack()) { showToast(""); return; }
   const b = document.getElementById("backpack");
-  const isOpen = !b.classList.contains("hidden");
-  b.classList.toggle("hidden", isOpen);
+  b.classList.remove("hidden");
+  sfx.ui("open");
   updateBackpack();
-  if (!isOpen) showToast(canSwapBackpack() ? "按 1 / 2 / 3 切换背包" : "");
-  else showToast("");
+  showToast(canSwapBackpack() ? "按 1 / 2 / 3 切换背包" : "");
+}
+// 收起背包面板。**只做显隐**（不动 toast、不判闸门）。
+// 两个调用点：toggleBackpack 的关面板那一半、以及「数字键/点击选完背包」——
+// 后者只在 `switchBackpack()` 返回 true 时才调：被规则拦下时不收面板，
+// 玩家才看得见那句原因（toast）与面板上转黄的提示（见 updateBpHint）。
+function closeBackpack() {
+  const b = document.getElementById("backpack");
+  if (!b || b.classList.contains("hidden")) return false;
+  b.classList.add("hidden");
+  sfx.ui("close");
+  updateBackpack();
+  return true;
 }
 function backpackOpen() {
   const b = document.getElementById("backpack");
   return !!b && !b.classList.contains("hidden");
 }
-// 换**皮肤**的门槛比换背包低得多，这是有意的：皮肤纯粹是外观，不影响伤害/弹药/移速，
-// 所以不需要「复活点 + 本回合未行动」那条（那条是为「战斗中换武器」这种有实战收益的操作设的）。
-// 只要求在对局中且没死 —— 否则「进战场看看我的新枪」这件事本身就被挡住了。
-function canSwapSkin() {
-  return state === "playing" && !dead;
-}
-// 在当前背包的主武器上选一款皮肤。
-// **皮肤选择是「配置」，不是「本局临时」**（用户已确认的语义）：同时写 `BACKPACKS` 与
-// `LOADOUT_DEFAULT`，于是重开一局仍然是它；而捡到的枪只写 `BACKPACKS`（走 pickUpItem），
-// 所以下一局照样还原成配置值。两者语义不同，别顺手合并。
-function selectSkin(skinId) {
-  const id = BACKPACKS[curBp].primary;
-  if (!skinsFor(id).some((s) => s.id === skinId)) return false;
-  if (!canSwapSkin()) { sfx.empty(); showToast("对局中才能更换皮肤", true); return false; }
-  if (BACKPACKS[curBp].skin === skinId) return true;
-  BACKPACKS[curBp].skin = skinId;
-  LOADOUT_DEFAULT.packs[curBp].skin = skinId;
-  // 手上正好是这把枪才需要重挂/重刷；否则下次切到它时 switchWeapon 会处理。
-  // 顺序与 switchWeapon 一致：先定模型，再挂枪口火光/手臂，最后上漆。
-  // `!switchState`：切枪动画在飞的时候不重挂 —— 那半秒里画面上的枪可能是另一把，
-  // 重挂会把手臂/枪口火光从它身上抢走；而时间线跨过 holster 时 commitWeaponVisual
-  // 本来就会带着新的 activeSkinId 完整挂一次，落不到空。
-  if (currentId === id && !switchState) {
-    mountGunModel(id, skinId);
-    attachMuzzleTo(id);
-    viewArms.configure(armAnchorKey(id));
-    applySkinTo(id, skinId);
-  }
-  sfx.switchWeapon();
-  showToast(gunDisplayName(id, skinId));
-  // 右下角的枪名（「M4A1-霜白」）由 updateAmmoHud 写，而它只在切枪/换弹/开火那几处被调 ——
-  // 漏了这一句，换完皮肤 HUD 上还印着上一款的枪名（得等下次切枪才刷新），
-  // 看着就像「皮肤没换成功」。手上不是这把枪时它写的是手上那把的名字，无副作用。
-  updateAmmoHud();
-  return true;
-}
-// 在当前背包主武器上循环皮肤（`[` 上一款 / `]` 下一款）。
-// 顺序就是 skins.js 里数组的顺序、也就是面板上从上到下的顺序 —— 两者必须同源，
-// 否则按键走的方向与眼睛看到的对不上。
-function cycleSkin(dir) {
-  const id = BACKPACKS[curBp].primary;
-  const list = skinsFor(id);
-  if (!list.length) return false;
-  const cur = list.findIndex((s) => s.id === BACKPACKS[curBp].skin);
-  const n = list.length;
-  const next = list[(((cur < 0 ? 0 : cur) + dir) % n + n) % n];
-  if (!next || !selectSkin(next.id)) return false;
-  updateBackpack();
-  return true;
-}
+// ---- 皮肤：**已经没有用户可见的入口** ----
+// 面板里那一行皮肤按钮与 `[` / `]` 快捷键已按用户要求取消，于是 `selectSkin()` /
+// `cycleSkin()` / `canSwapSkin()` 一并删除 —— 它们三个的调用点全部只在这条 UI 路径上
+// （面板按钮、方括号、`__tactical.selectSkin` / `skinCycle`）。留一个「零调用点的换皮肤
+// 函数」只会让人以为还有入口（同 `stats.recoil` 那条死数据的先例）。
+// **皮肤机制本身一个字没动**：`BACKPACKS[i].skin` / `GEAR_SKIN` / `activeSkinId()` /
+// `applySkinTo()` / `skinForGun()` 全部照旧，三个背包的默认皮肤（老兵 / 雷神 / 紫电）照常挂上、
+// 捡到的枪也照常带着敌人的皮肤。程序化入口只剩 `__tactical.setSkin`（它本来就不写
+// `LOADOUT_DEFAULT`，与「捡来的枪只活一局」的边界一致）。
 // 面板是「查看 + 切换」用的，改配装在开始菜单里（等价于 CF 在仓库里配好再进战场）。
-// 指针锁定时没有光标，所以这里的鼠标点击实际点不到，主路径是键盘 B + 数字键 / `[` `]`。
+// 指针锁定时没有光标，所以这里的鼠标点击实际点不到，主路径是键盘 B + 数字键。
 function updateBackpack() {
   const list = document.getElementById("bpList");
   if (!list) return;
@@ -1887,60 +1897,30 @@ function updateBackpack() {
     row.innerHTML =
       '<span class="bp-idx">' + (i + 1) + "</span>" +
       '<span class="bp-name">' + WEAPON_DEFS[bp.primary].name + "</span>" + skTag;
-    // 与键盘那条路径同源：选完背包**不关面板**（皮肤行就在下面，关掉就点不到了）。
-    // 实际上指针锁定时没有光标、失锁时整个 #hud 又是 display:none，所以这一行
-    // 只影响带光标调试的场景 —— 但那正是它会与键盘行为漂移的地方，故保持一致。
-    row.onclick = () => { switchBackpack(i); };
+    // 与键盘那条路径同源：**选完就收起面板**（DESIGN.md 一直这么写，实现漂移到了
+    // 「不关」那一侧）。面板里现在只有背包这一项，选完就该回战场。
+    // 被规则拦下时 switchBackpack 返回 false，面板保持打开 + toast 给原因。
+    // （指针锁定时没有光标、失锁时整个 #hud 又是 display:none，所以这一行实际只在带光标的
+    //   调试场景里跑到；留它是为了不让「点」与「键盘」两条路漂移。）
+    row.onclick = () => { sfx.ui("click"); if (switchBackpack(i)) closeBackpack(); };
     list.appendChild(row);
   });
-  // ---- 皮肤行：只针对**当前背包的主武器** ----
-  // 副武器/近战是全局一份 GEAR_SKIN、不按背包分（AGENTS.md 的既有决定），所以不给它们行。
-  const curPrimary = BACKPACKS[curBp].primary;
-  const skinList = skinsFor(curPrimary);
-  if (skinList.length) {
-    const sec = document.createElement("div");
-    sec.className = "bp-sec";
-    const title = document.createElement("div");
-    title.className = "bp-sec-title";
-    title.textContent = WEAPON_DEFS[curPrimary].name + " 皮肤";
-    sec.appendChild(title);
-    const rowBox = document.createElement("div");
-    rowBox.className = "bp-list bp-skins";
-    const activeSkin = BACKPACKS[curBp].skin;
-    // 皮肤名来自我们自己的常量表（不是用户输入），和上面几行一样可以走 innerHTML
-    skinList.forEach((s) => {
-      const b = document.createElement("button");
-      b.className = "bp-item bp-skin-row" + (s.id === activeSkin ? " active" : "");
-      b.dataset.skin = s.id;
-      const mid = s.model ? '<span class="bp-model">模型</span>' : "";
-      b.innerHTML = '<span class="bp-name">' + s.name + "</span>" + mid;
-      b.onclick = () => { if (selectSkin(s.id)) updateBackpack(); };
-      rowBox.appendChild(b);
-    });
-    sec.appendChild(rowBox);
-    list.appendChild(sec);
-  }
   updateBpHint();
 }
 // 面板底下那行提示。**单独拆出来**是因为它会随时间自己变（走出安全区、开一枪都会改
-// 那两道闸门），而皮肤列表不会 —— 主循环按 0.25s 节流只重算这一行，不重建整个列表。
+// 那道闸门），而背包列表不会 —— 主循环按 0.25s 节流只重算这一行，不重建整个列表。
 //
-// **键名一律做成 <kbd> 键帽，绝不写成纯文本 `[ / ]`。** 曾经那行是
-// 「1 / 2 / 3 换背包 · [ / ] 换皮肤 · …」，括号在 11px 灰字里只有 6.6px 宽、笔画细到几乎
-// 看不见，前面又刚好有三个真斜杠，于是整句被读成「按 `/` 换皮肤」（用户实测报的正是这条）。
-// 有边框和底色的键帽才能让人一眼认出「这是键盘上的那个键」。
+// **键名一律做成 <kbd> 键帽，绝不写成纯文本。** 这条是「按 `/` 换皮肤」那次误读留下的：
+// `[` `]` 在 11px 灰字里只有 6.6px 宽、笔画细到几乎看不见，而前面又刚好有三个真斜杠，
+// 于是整句被读成「按 `/` 换皮肤」（用户实测报的正是这条）。那两条提示已随选皮肤功能删除，
+// 键帽样式留给 `1` `2` `3` —— 面板里现在只剩这一项操作，它更需要读得准。
 let bpHintKey = ""; // 上一次渲染的闸门状态，用来跳过无变化的重建
 function updateBpHint() {
   const hint = document.getElementById("bpHint");
   if (!hint) return;
-  // 两条提示分别挂在**各自那道闸门**上，不能共用一句三元表达式：
-  // 换皮肤的门槛（`canSwapSkin`：在对局中、没死）比换背包那条（复活点 + 本回合未行动）
-  // 宽得多，合成一句就会在「本回合已开火」时把「[ ] 换皮肤」一起藏掉 ——
-  // 而那时候皮肤**明明还能换**，玩家只会得出「皮肤换不了」的结论。
   const canBp = canSwapBackpack();
-  const canSkin = canSwapSkin();
   // 主循环每 0.25s 调一次，状态没变就别反复 createElement
-  const stateKey = (canBp ? "ok" : swapBlockReason()) + "|" + canSkin;
+  const stateKey = canBp ? "ok" : swapBlockReason();
   if (stateKey === bpHintKey) return;
   bpHintKey = stateKey;
 
@@ -1961,19 +1941,9 @@ function updateBpHint() {
     box.appendChild(document.createTextNode(text));
     return box;
   };
-  const sep = () => {
-    const s = document.createElement("span");
-    s.className = "bp-hint-sep";
-    s.textContent = "·";
-    return s;
-  };
 
-  if (canBp) keysLine.appendChild(item(["1", "2", "3"], " 换背包"));
-  else keysLine.appendChild(item([], swapBlockReason(), true)); // 只有这条染警示黄：皮肤仍然可用
-  if (canSkin) {
-    keysLine.appendChild(sep());
-    keysLine.appendChild(item(["[", "]"], " 换皮肤"));
-  }
+  if (canBp) keysLine.appendChild(item(["1", "2", "3"], " 换背包（选完自动收起）"));
+  else keysLine.appendChild(item([], swapBlockReason(), true));
 
   // 槽位图例另起一行压暗：它和这个面板的操作无关，混在同一行会把上面两条按键提示淹掉。
   const legend = document.createElement("div");
@@ -1982,7 +1952,8 @@ function updateBpHint() {
   hint.appendChild(legend);
 }
 // ---------- 地面掉落武器（敌人掉的枪 / 玩家按 G 丢的枪）----------
-// 数据形状：{ id, skin, slotKind, root, t, baseY, armed, x, z }
+// 数据形状：{ id, skin, slotKind, root, t, baseY, armed, x, z, mag, reserve }
+// `mag`/`reserve` 是**这把枪自己**的子弹数快照，捡起来时写回武器状态 —— 见 spawnGroundGun。
 // `slotKind` 决定捡起来进哪个槽位 —— 敌人掉的永远是 primary，玩家丢手枪才产生 secondary。
 const groundItems = [];
 // 「这个槽位被丢空了」。**必须独立于 BACKPACKS 记账**：主武器槽的配置在 BACKPACKS[curBp].primary
@@ -2007,9 +1978,23 @@ function slotEmptyHint(slot) {
 // 在地上生成一把枪。
 //   armed —— 是否立即可拾取。敌人掉的传 true（它本来就该躺在那儿等人来拿），
 //   玩家自己丢的必须传 false，理由见 updateGroundItems 里的防抖说明。
-function spawnGroundGun(id, skin, slotKind, x, z, deckY, armed) {
+//   ammo  —— 可选 `{ mag, reserve }`：这把枪**自己**的子弹数快照，捡起来时按它写回
+//   武器状态。不传就是满弹。**这一项是「敌人掉的枪有几发就是几发、与玩家手上同型号那把
+//   无关」的实现** —— 武器的弹药记在 `owned[id].state` 里、是**按枪型**一份的，玩家若
+//   本来就有同型号的枪（它掉在地上、或被丢过），捡起来会直接沿用玩家那串数字。
+//    两类掉落物的口径不同，两边都有理由：
+//      · 敌人掉的：敌人本身不记弹药（它有无限子弹、只按节奏点射），所以给它一把**满弹**
+//        的枪才是「这是一把新枪」的语义；
+//      · 玩家按 G 丢的：必须把**丢的那一刻**的 mag/reserve 传进来，否则「丢枪 → 原地
+//        捡回来」就成了一次免费补弹（本作唯一的补弹途径必须还是 R）。
+function spawnGroundGun(id, skin, slotKind, x, z, deckY, armed, ammo) {
   const tpl = worldModel(id, skin);
   if (!tpl) return null;
+  const d = WEAPON_DEFS[id];
+  // 没给快照就满弹（见上面的口径）。`count`（投掷物）不走这条路 —— 掉落物只有枪，
+  // 刀与投掷物没有「地上的枪」这个表示（见 dropWeapon 的槽位守卫）。
+  const mag = ammo && Number.isFinite(ammo.mag) ? ammo.mag : (d.stats.magSize ?? 0);
+  const reserve = ammo && Number.isFinite(ammo.reserve) ? ammo.reserve : (d.stats.reserve ?? 0);
   // 三层容器，缺一层都不行：
   //   root —— 世界位置（落点）+ 每帧自转
   //   tier —— 侧躺
@@ -2044,7 +2029,11 @@ function spawnGroundGun(id, skin, slotKind, x, z, deckY, armed) {
 
   scene.add(root);
 
-  const item = { id, skin, slotKind, root, blob, blobBaseY, t: Math.random() * 6.283, baseY, armed: !!armed, x, z };
+  const item = {
+    id, skin, slotKind, root, blob, blobBaseY, t: Math.random() * 6.283, baseY,
+    armed: !!armed, x, z,
+    mag, reserve,   // 自带弹药（见函数头）；pickUpItem 按它写回 owned[id].state
+  };
   groundItems.push(item);
   while (groundItems.length > GROUND_MAX) scene.remove(groundItems.shift().root);
   return item;
@@ -2061,6 +2050,10 @@ function dropWeapon() {
   }
   const id = currentId;
   const skin = activeSkinId(id);
+  // 丢下去的枪带走**此刻**的子弹数（见 spawnGroundGun 的 ammo 那条）：
+  // 否则「丢 → 捡」就是免费补弹。
+  const st = owned[id].state;
+  const ammo = { mag: st.mag, reserve: st.reserve };
   // 落点 = 玩家正前方 0.9m（与射击同源的 yaw 约定：前向量 = (-sin, -cos)）。
   // 贴着集装箱/箱堆时（blockedBy 非空）退回自己脚下，免得枪掉进掩体里再也走不到。
   let px = player.pos.x - Math.sin(player.yaw) * 0.9;
@@ -2072,7 +2065,7 @@ function dropWeapon() {
   // （`slotWeapon()` 会一直返回 null，按 1 / Q 都是空槽提示，那把枪再也回不来）。
   // 今天目录对每一款可持有的皮肤都非 null，所以这条是防御性的；但它必须在这里，
   // 因为 `spawnGroundGun` 的 null 分支一旦被走到就是**静默**的。
-  if (!spawnGroundGun(id, skin, slot, px, pz, supportAt(px, pz, player.pos.y), false)) {
+  if (!spawnGroundGun(id, skin, slot, px, pz, supportAt(px, pz, player.pos.y), false, ammo)) {
     sfx.empty();
     showToast("暂时无法丢下这把枪", true);
     return false;
@@ -2097,6 +2090,21 @@ function pickUpItem(it, idx) {
   } else {
     GEAR_SKIN.pistol = it.skin; // 副武器只有 USP 一个型号，皮肤是全局一份
   }
+  // 弹药按**这把掉落的枪自带的那份**写回武器状态（见 spawnGroundGun 的 ammo 那条）。
+  // 少了这一步，捡到的枪会沿用玩家手上同型号那把的剩弹 —— 也就是「敌人掉的枪有几发，
+  // 取决于我自己那把还剩几发」。换弹/拉栓/射速闸门一起清掉：捡起来的是一把**新枪**，
+  // 不该背着上一任的换弹中途或拉栓计时（后坐与准星一并归零，理由同 respawnPlayer 的循环）。
+  const st = owned[it.id].state;
+  st.mag = it.mag;
+  st.reserve = it.reserve;
+  st.reloading = false;
+  st.reloadT = 0;
+  st.boltT = 0;
+  st.nextFireAt = 0;
+  st.recoilIdx = 0;
+  st.aimPunch.x = 0;
+  st.aimPunch.y = 0;
+  st.sinceShot = 99;
   groundItems.splice(idx, 1);
   scene.remove(it.root); // 只移出场景，不 dispose（共享材质，见 spawnGroundGun）
   // force=true 必须传：currentId 恰好就是这把枪时（同型号同皮肤再捡一把的情况）
@@ -2151,6 +2159,7 @@ function dropEnemyGun(e) {
   if (!e || !e.gunId) return;
   const p = e.group.position;
   // 可能死在集装箱顶/舷侧走道上，落点高度按脚下实际台面取（不能抄 player.groundY）
+  // **不传 ammo** ⇒ 掉下来的是一把满弹的枪（敌人不记弹药，见 spawnGroundGun）。
   spawnGroundGun(e.gunId, e.gunSkin, "primary", p.x, p.z, supportAt(p.x, p.z, p.y), true);
 }
 
@@ -2188,7 +2197,7 @@ function buildMenuMatch() {
       btn.className = "ml-seg-btn";
       btn.dataset.diff = d.id;
       btn.textContent = d.name;
-      btn.onclick = () => { difficultyId = d.id; buildMenuMatch(); };
+      btn.onclick = () => { sfx.ui("click"); difficultyId = d.id; buildMenuMatch(); };
       box.appendChild(btn);
     }
   }
@@ -2392,6 +2401,7 @@ function updateSmokes(dt) {
 // 线段-球相交：射线被烟团挡住就返回 true。每帧最多 8 敌人 × 3 团，成本可忽略
 const _seg = new THREE.Vector3();
 const _mz = new THREE.Vector3();   // 敌人枪口（_seg 被 smokeBlocks 占用，别混用）
+const _whiz = new THREE.Vector3(); // 打偏的弹道掠耳点（enemiesShoot 专用）
 function smokeBlocks(ax, ay, az, bx, by, bz) {
   if (!smokes.length) return false;
   _seg.set(bx - ax, by - ay, bz - az);
@@ -2614,9 +2624,13 @@ function meleeAttack(heavy) {
         spawnBlood(h.point);
         if (enemy.takeDamage(dmg)) onEnemyDeath(enemy, head, "军用匕首", golden);
         else { addHitMark(head ? "head" : backstab ? "kill" : "hit", { golden: golden }); head ? sfx.headshot() : sfx.hit(); enemy.setFlash(); }
+        // 刀入肉：`sfx.melee()`（挥风）在上面**开火之前**就发了，那时还不知道砍没砍中 ——
+        // 所以「砍中什么」只能在这里补。两者是**两段独立的声音**，不是二选一。
+        sfx.impact(h.point, "knife_flesh");
       }
     } else {
       spawnSparks(h.point);
+      sfx.impact(h.point, "knife_wall");
     }
   }
 }
@@ -2657,7 +2671,9 @@ function fire() {
   WEAPON_STATE.mag--;
   actedThisLife = true; // 本回合已行动 → 锁定背包切换（CF 规则）
   WEAPON_STATE.cooldown = 0.07;
-  sfx.shoot(def.type);
+  // 第二个参数是**武器 id**：`def.type` 对 AK 与 M4 都是 "rifle"，只有 id 能区分两者
+  // （AK 原速、M4 变调 + 收短窗口 + 叠一层更高的机匣爆音，见 audio.js 的 GUN 表）。
+  sfx.shoot(def.type, def.id);
 
   triggerKick(currentId);
   // 连发惩罚（**只喂准星张开**）。上限对齐 CS 的 `_baseInaccuracy` 在做完整梭时的量级。
@@ -2695,6 +2711,9 @@ function fire() {
         const dmg = head ? enemy.maxHealth : damageAt(def, h.distance);
         enemy.combatAt = time;   // 挨打即暴露（小地图），见 enemiesShoot 那条
         spawnBlood(h.point);
+        // 子弹入肉的闷响。与 `sfx.hit()/headshot()` 那两声音调**并存**：音调是奖励反馈、
+        // 采样是世界反馈，CF 的手感正是这两层叠出来的（见 audio.js 的 hit() 注释）。
+        sfx.impact(h.point, "flesh");
         if (enemy.takeDamage(dmg)) onEnemyDeath(enemy, head, def.name, golden);
         else {
           addHitMark(head ? "head" : "hit", { golden: golden });
@@ -2703,6 +2722,9 @@ function fire() {
       }
     } else {
       spawnSparks(h.point);
+      // 打在掩体上的实心撞击；`impact()` 内部有 30% 概率把这段换成跳弹（`ricochet`）。
+      // 位置给 `h.point` 而不是玩家：撞击声来自子弹落点，`out3d` 会按玩家朝向给它方向。
+      sfx.impact(h.point, "wall");
     }
   }
 
@@ -2721,6 +2743,10 @@ function fire() {
     WEAPON_STATE.boltT = def.stats.boltTime ?? 0;
     WEAPON_STATE.reScope = scoped; // 本来在镜里 → 拉完自动回镜（CS 的手感）
     if (scoped) setScoped(false);
+    // 拉栓声**延后 0.20 s**（audio.js 的 bolt() 内部定）：枪声（1.31 s 采样）的起音先出来，
+    // 拉栓才落在它上面 —— 同帧发两段只会糊成一坨。`bolt()` 自己是可取消的排程，
+    // 切枪时由 `sfx.cancelBolt()` 收掉（AWM 快切的经典手感就建立在「拉栓能被切枪取消」上）。
+    sfx.bolt();
   }
 
   updateAmmoHud();
@@ -2817,7 +2843,9 @@ function startReload() {
   if (WEAPON_STATE.reloading || WEAPON_STATE.mag === WEAPON_STATE.magSize || WEAPON_STATE.reserve <= 0) return;
   WEAPON_STATE.reloading = true;
   WEAPON_STATE.reloadT = 0;
-  sfx.reload();
+  // 三段 foley（弹匣出 / 入 / 拉栓）按 `reloadDur` **等比排程** —— 绝不拉伸采样
+  // （0.7 s 的段落拉到 2.4 s 就是 0.29× 慢放，像卡带）。AK 2.43s → 0.39/1.41/1.94。
+  sfx.reload({ id: currentId, dur: WEAPON_STATE.reloadDur });
   showToast("换弹中");
 }
 function updateReload(dt) {
@@ -2935,6 +2963,15 @@ function enemiesShoot() {
     const hitProb = Math.max(0.05, Math.min(0.95,
       Math.max(0.12, 0.72 - dist / 46) * Math.max(0.5, 1 - pSpeed * 0.05) * ENEMY_TUNING.acc));
     if (Math.random() < hitProb) damagePlayer(e.damage, true, e);
+    else {
+      // 打偏：子弹从耳边掠过。取「玩家眼睛沿弹道反向那一点」再**横向挪开**——
+      // 正贴着耳朵反而是「打中了」的听感，挪开半米才是「擦过去」。
+      // 水平面的垂直方向 `(-dz, dx)` 是 `dir` 在 xz 平面上的法向。
+      const ox = -dir.z, oz = dir.x;
+      const off = (Math.random() < 0.5 ? -1 : 1) * (0.35 + Math.random() * 0.55);
+      _whiz.set(eye.x + ox * off, eye.y + (Math.random() - 0.5) * 0.5, eye.z + oz * off);
+      sfx.whiz(_whiz.x, _whiz.y, _whiz.z);
+    }
   }
 }
 
@@ -2987,6 +3024,10 @@ function beginDeath(killer, byEnemy = true) {
   fireEnabled = false; // 握着左键被打死时 mouseup 不一定来，别让它复活后自己续火
   setScoped(false);    // 死亡一律退镜（狙击镜筒会挡住「谁杀了我」）
   clearFlash();
+  // 死在换弹/拉栓中途：那两串是预排程的未来 foley，尸体会带着它们继续响。
+  // 复活走 respawnPlayer → resetSwitchState 也会清一遍，但那是 3 秒之后 —— 这里必须也堵一次。
+  sfx.cancelReload();
+  sfx.cancelBolt();
 
   // 转向目标：以死亡瞬间的朝向为起点，最短弧转到击杀者方向
   const eye = new THREE.Vector3(player.pos.x, player.pos.y + player.eyeH, player.pos.z);
@@ -3130,7 +3171,7 @@ function respawnPlayer() {
 // ⚠️ **改键位时要同时改 `scripts/lobby.js` 顶上那张 `KEYBINDS` 表**（大厅「作战手册」页
 // 展示的就是它）。那张表是**手写的、故意不自动生成** —— 这里的键位是一堆带状态守卫的
 // `if (e.code === …)` 分支，同一个物理键在不同状态下语义不同（`Digit1` 在背包面板开着时
-// 是「选第几个背包」、否则是「切到主武器」；`[` `]` 只在面板开着时生效；`Space` 与方向键
+// 是「选第几个背包」、否则是「切到主武器」；`Space` 与方向键
 // 在死亡态被吞掉），照代码生成出来的必然是一张会撒谎的表。
 document.addEventListener("keydown", (e) => {
   // 聊天输入态在**这里**整体短路 —— 必须是第一条语句、且在 `keys[e.code] = true` 之前：
@@ -3143,7 +3184,15 @@ document.addEventListener("keydown", (e) => {
   // Tab 是浏览器的焦点切换键，不管在不在游戏里都要挡掉，否则按住会把焦点移走
   if (e.code === "Tab") {
     e.preventDefault();
-    if (state === "playing") showScoreboard(true);
+    if (state === "playing") {
+      // 这是**按住不放**显示的战绩面板（keyup 那条才收），所以按住期间系统会持续补发
+      // keydown。判据只能用**状态跃迁**（此刻是关着的才算「刚打开」）——
+      // `e.repeat` 不可靠：CDP/合成输入下它恒为 false（见 Ctrl 那一段同一条教训）。
+      // 反面约束：**三条收起路径（keyup / blur / pointerlockchange）都不发声**——
+      // 它们不是玩家主动的动作，跟着响只会变成噪声。
+      if (scoreboardEl.classList.contains("hidden")) sfx.ui("open");
+      showScoreboard(true);
+    }
     return;
   }
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") keys[IS_SNEAK] = true;
@@ -3172,10 +3221,11 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") {
     if (backpackOpen()) {
       // 面板打开时，数字键选的是「第几个背包」（CF 的 B + 数字键）。
-      // **选完不关面板**：皮肤行就渲染在同一个面板里（见 updateBackpack），一关面板
-      // 紧接着按 `[`/`]` 就会因为 `backpackOpen()` 为假而静默失效 —— 用户实测报的
-      // 「能换背包、换不了皮肤」正是这条。关闭面板仍然只有 B 一个入口，标题里写着。
-      switchBackpack(+e.code[5] - 1);
+      // **选完自动收起面板**（DESIGN.md 一直这么写、实现漂移到了「不关」那一侧）：
+      // 面板里现在只有背包这一项，选完就该回战场，不必再按一次 B。
+      // 被规则拦下时 switchBackpack 返回 false —— 那时**不收面板**，玩家才看得见
+      // 那句原因与转黄的提示。同号背包（已经是它）返回 true，照收。
+      if (switchBackpack(+e.code[5] - 1)) closeBackpack();
       return;
     }
   }
@@ -3185,17 +3235,8 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "Digit4") switchNade();
   if (e.code === "KeyQ") quickSwitch();
   if (e.code === "KeyB") toggleBackpack();
-  // `[` / `]` = 在**面板打开时**循环当前背包主武器的皮肤。
-  // 键盘是主路径：指针锁定时没有光标，面板里那些按钮其实点不到（见 updateBackpack 的注释）。
-  // 要求面板打开是有意的 —— 免得战斗中误触一个方括号就把枪换了皮。
-  // （打字时天然安全：`chat.handleKey` 是 keydown 的第一条语句，输入态整体短路）
-  if (e.code === "BracketLeft" || e.code === "BracketRight") {
-    if (backpackOpen()) {
-      e.preventDefault();
-      cycleSkin(e.code === "BracketLeft" ? -1 : 1);
-    }
-    return;
-  }
+  // （`[` / `]` 那条「面板打开时循环皮肤」的分支已随选皮肤功能一起删除，
+  //   `chat.handleKey` 仍是 keydown 的第一条语句、输入态整体短路，这一点不受影响。）
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
 });
 document.addEventListener("keyup", (e) => {
@@ -3212,8 +3253,8 @@ document.addEventListener("keyup", (e) => {
 window.addEventListener("blur", () => { showScoreboard(false); chat.cancel(); });
 
 function requestLock() { viewport.requestPointerLock(); }
-document.getElementById("startBtn").addEventListener("click", () => { sfx.ensure(); requestLock(); });
-document.getElementById("restartBtn").addEventListener("click", () => { sfx.ensure(); requestLock(); });
+document.getElementById("startBtn").addEventListener("click", () => { sfx.ensure(); sfx.ui("click"); requestLock(); });
+document.getElementById("restartBtn").addEventListener("click", () => { sfx.ensure(); sfx.ui("click"); requestLock(); });
 
 document.addEventListener("pointerlockchange", () => {
   locked = document.pointerLockElement === viewport;
@@ -3415,7 +3456,9 @@ function gameStart() {
   updateScoreHud();
   updateTimerHud();
   showToast("团队竞技开始");
-  sfx.roundStart();
+  // 开局这里**故意没有音效**：曾有一记 `sfx.roundStart()`（船笛，`match_start` 采样），
+  // 那是一段 0.97s / 基频 ≈150Hz 的持续低鸣，用户听起来就是「水牛的叫声」，已整个删除。
+  // 按钮那一下仍有 `ui("click")`，所以「进入战场」不是无声的。**别再往这里加音效。**
   refillEnemies();
 }
 
@@ -4084,6 +4127,16 @@ function loop(now) {
     // 「复活后枪不见了」的残留。跳过渲染是每帧重新求值的无状态做法。
     // 代价：`vmState().renders` 在大厅里不涨（这是**正确**语义，不是回归）。
     const lobbyCover = !!(menu && !menu.classList.contains("hidden"));
+    // 大厅背景音乐：**大厅盖住实景时放，进战场自动淡出**。
+    //   · 判据与下一行的视模跳过**同源**（都读 menu 的 hidden 类），所以「画面里有没有实景」
+    //     与「听不听得到 BGM」永远一致。**绝不能用 `state`** —— `state` 永远不会回到 "menu"
+    //     （只有 gameStart 置 "playing"、endTDM 置 "over"），拿它当判据音乐会在大厅里静音、
+    //     而且中途按 Esc 回大厅时也不恢复。
+    //   · setMusic 内部幂等（状态没变直接 return），所以每帧调一次是零成本的。
+    //   · ctx 还没建起来（用户还没点过任何东西）时它只记下「意愿」，
+    //     等 `ensure()` 或 preload 完成时补触发 —— 见 audio.js 里那两句。
+    // 注意方向：lobbyCover 为真是「大厅在遮挡」，那时**要**音乐，所以直接传它，别取反。
+    sfx.setMusic(lobbyCover);
     if (!lobbyCover) {
       renderer.clearDepth();
       renderer.render(vmScene, vmCamera);
@@ -4115,6 +4168,11 @@ function syncVmLighting() {
 
 // ---------- 初始化 ----------
 async function init() {
+  // 音效素材（`audio/` 下的 CC0 录音）**不 await**：它是纯下载 + 解码的副作用，
+  // 拖住开局只会让菜单晚出现。preload() 内部幂等、每个文件独立 try/catch、**永不 reject**
+  // （异步 reject 会绕过 `__errs` 与 `loopErrors()`，所以那条兜底必须写在 audio.js 里面）。
+  // `ensure()` 里也补触发一次（它可能是被「进入战场」那个 click 先叫起来的），两处谁先到都行。
+  sfx.preload();
   // 大厅必须在 `buildMenuMatch()` **之前**建好 —— 后者（下一句）会调 `lobby.setMatch()`
   // 写顶栏徽章，晚一步那一句就是空转（`lobby` 还是 null），要等到第一次点难度才显示。
   // 模块脚本在 `</body>` 之前执行，所以这里查 DOM 是安全的（四个页签都已在文档里）。
@@ -4124,6 +4182,9 @@ async function init() {
     tickerEl: document.getElementById("lobbyTicker"),
     startBtn: document.getElementById("startBtn"),
     getData: lobbyData,
+    // 大厅页签的切换声走**注入**（与 getData 同一套风格）—— 见 lobby.js 构造函数那条：
+    // 那个模块不许 import 音频对象，而且声音只许挂在页签的 click 上、不许进 show()。
+    onUiSound: (kind) => sfx.ui(kind),
   });
   buildMenuMatch();
   // 敌人数量步进器（菜单里没有指针锁定，这是**唯一**能点选的地方）。
@@ -4131,8 +4192,8 @@ async function init() {
   // 回到菜单也看得到，反之亦然。
   const minus = document.getElementById("enemyMinus");
   const plus = document.getElementById("enemyPlus");
-  if (minus) minus.onclick = () => { setEnemyTarget(enemyTarget - 1); buildMenuMatch(); };
-  if (plus) plus.onclick = () => { setEnemyTarget(enemyTarget + 1); buildMenuMatch(); };
+  if (minus) minus.onclick = () => { sfx.ui("click"); setEnemyTarget(enemyTarget - 1); buildMenuMatch(); };
+  if (plus) plus.onclick = () => { sfx.ui("click"); setEnemyTarget(enemyTarget + 1); buildMenuMatch(); };
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -4303,6 +4364,13 @@ async function init() {
       }),
       lobbyData: () => lobbyData(),
       lobbyShow: (tab) => { if (lobby) lobby.show(tab); },
+      // ---- 音效（scripts/audio.js）----
+      // `lastAttempt` 是「这条音效到底走了采样还是合成回退」的**唯一**判据：
+      // 采样全挂、全靠合成时听感同样正常，没有它就测不出「混合式」是不是真的。
+      // `music` 是「大厅 BGM 有没有真的在响」的判据 —— `on` 是意图、`playing` 才是有声源在跑
+      // （ctx 没解锁 / 素材没载完时 `on:true` 而 `playing:false`，这正是上一版的故障形态）。
+      audioState: () => sfx.audioState(),
+      sfx,
       // ---- 切枪（收枪 → 出枪）----
       // switchState() 恒返回同一个形状（没在飞时 active:false），省得测试到处判 null。
       switchState: () => ({
@@ -4355,9 +4423,10 @@ async function init() {
         name: document.getElementById("weaponName").textContent,
       }),
       setSkin: (weaponId, skinId) => {
-        // 测试与调试入口：直接改配装再刷漆。
-        // **注意它不写 LOADOUT_DEFAULT**（与面板里的 selectSkin 不同）—— 这是刻意的：
-        // 这样「先 beginGame() 再 setSkin()」的既有测试写法才不会被 resetLoadout 的语义搅乱。
+        // 测试与调试入口：直接改配装再刷漆。**换皮肤现在只剩这一条程序化路径**
+        // （面板里的皮肤行与 `[` / `]` 已按用户要求删除，见 updateBackpack 上方那段注释）。
+        // **注意它不写 LOADOUT_DEFAULT** —— 这是刻意的：这样「先 beginGame() 再 setSkin()」
+        // 的既有测试写法才不会被 resetLoadout 的语义搅乱，也与「捡来的枪只活一局」同一边。
         const bpIdx = BACKPACKS.findIndex((b) => b.primary === weaponId);
         if (bpIdx >= 0) BACKPACKS[bpIdx].skin = skinId;
         else GEAR_SKIN[weaponId] = skinId;
@@ -4368,7 +4437,7 @@ async function init() {
           attachMuzzleTo(weaponId);
           viewArms.configure(armAnchorKey(weaponId));
           applySkinTo(weaponId, skinId);
-          // 与 selectSkin 那条路对齐：右下角枪名（「M4A1-霜白」）由 updateAmmoHud 写。
+          // 右下角枪名（「M4A1-霜白」）由 updateAmmoHud 写。
           // 少了这一句，调试截图会**顶着上一款的枪名**显示新皮肤（实测踩到，很容易误判成皮肤没换）。
           updateAmmoHud();
         }
@@ -4411,8 +4480,7 @@ async function init() {
         const c = e.gun.userData.fitCenter;
         return Math.hypot(c[0], c[1], c[2]);
       },
-      skinCycle: (dir) => cycleSkin(dir >= 0 ? 1 : -1),
-      selectSkin: (skinId) => selectSkin(skinId),
+      // （`skinCycle` / `selectSkin` 两个读口已随选皮肤 UI 删除；程序化换皮肤走上面的 `setSkin`。）
       backpackOpen,
       // 挂载诊断：一次给全「模型在武器组局部系里的包围盒 + 有效可见性 + 枪口火光挂在谁身上」。
       // 全是可 JSON 序列化的纯数据（Object3D 过不了 CDP 的 returnByValue）。
@@ -4676,6 +4744,34 @@ async function init() {
           animating: killIconEl.classList.contains("show"),
         };
       },
+      // 击杀冲击波：与 killIcon **同源触发**（都在 showKillIcon 里），但**分开读** ——
+      // 两边的 class 各自独立，只断 killIcon 证明不了爆发层真的被点亮、是哪个档
+      // （一个"忘了调 spawnKillBurst"的实现能让 killIcon 全绿）。
+      // 三层里有两层是**伪元素**（DOM 里没有子节点可数，同 .hitdir 那条），所以真值只能
+      // 从 computed style 取：`ringW` 非 0（主环画出来了）、`rayMask` 为真（速度线带遮罩、
+      // 不会糊住准星）、`haloBg` 非 none（外层扫光带画出来了）。`ringLevel` 读的是
+      // CSS 自定义属性 `--kb` —— 它是三档强度的**唯一**旋钮，读它才能证明 hit/head/gold
+      // 真的不同（只读 kind 证明的是 class 字符串，不是画出来的东西）。
+      killBurst: () => {
+        if (!killBurstEl) return { ok: false };
+        const ring = getComputedStyle(killBurstEl);
+        const rays = getComputedStyle(killBurstEl, "::before");
+        const halo = getComputedStyle(killBurstEl, "::after");
+        return {
+          ok: true,
+          kind: killBurstEl.classList.contains("gold") ? "gold"
+              : killBurstEl.classList.contains("head") ? "head"
+              : killBurstEl.classList.contains("hit") ? "hit" : null,
+          animating: killBurstEl.classList.contains("show"),
+          ringW: ring.borderTopWidth,
+          ringBox: ring.width,
+          ringLevel: (ring.getPropertyValue("--kb") || "").trim(),
+          rayW: rays.width,
+          rayMask: rays.maskImage !== "none",
+          haloW: halo.width,
+          haloBg: halo.backgroundImage !== "none",
+        };
+      },
       // 每一行给 `{ killer, weapon, victim, foe, hasWeaponIcon, hasBadge, badgeGold }`。
       // 顺序就是 DOM 顺序（最旧的在前），与玩家看到的一致。
       killFeed: () => {
@@ -4921,6 +5017,9 @@ async function init() {
         id: it.id, skin: it.skin, slotKind: it.slotKind,
         x: +it.x.toFixed(3), y: +it.baseY.toFixed(3), z: +it.z.toFixed(3),
         armed: it.armed,
+        // 这把枪自带的弹药快照（见 spawnGroundGun 的 ammo 那条）。
+        // 「捡起来的枪有几发」这条断言就靠它：捡之前读一次、捡之后读 `getAmmo()`。
+        mag: it.mag, reserve: it.reserve,
         inScene: it.root.parent === scene,
         meshes: (() => { let n = 0; it.root.traverse((o) => { if (o.isMesh) n++; }); return n; })(),
       })),

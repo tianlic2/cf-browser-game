@@ -1,0 +1,113 @@
+音频素材署名 / Audio asset credits
+=================================
+
+本目录下的音频文件分三类，全部允许商用、允许修改、无需署名（但我们照做）。
+
+所有文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
+  <stem>.ogg  —— Ogg Vorbis。Chrome / Firefox / Edge 走这一份。
+  <stem>.m4a  —— MP4 容器 + AAC。Safari 走这一份（Chrome/Firefox 也认）。
+  **ui/ 与 sw/ 下的 14 个 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
+  afconvert 只写 m4af / WAVE / AIFF / CAF / ADTS），这些不是从参考项目搬来的
+  ogg，而是我们自己从 wav 编的。加载器对它们直接走第二个候选，不产生 404
+  （见 scripts/audio.js 的 M4A_ONLY，按**stem 路径**列）。
+
+
+------------------------------------------------------------
+一、CC0 真实录音（Freesound）
+------------------------------------------------------------
+来源：CC0 1.0 Universal (Public Domain Dedication)
+      https://creativecommons.org/publicdomain/zero/1.0/
+
+搬运路径有两条：
+  (a) counter-strike-in-browser-main/public/audio/（本地参考项目，MIT，其素材为
+      CC0）。该目录的成品单发是用 tools/slice_audio.py 从 assets_src/audio_raw/*.mp3
+      里按 RMS 包络做 onset 切片、峰值归一化到 0.95、加淡入淡出后渲染出来的。
+      下面记录的是**原始录音**的出处，括号里是它在 slice_audio.py 里的原始文件名。
+  (b) 后面第一至三节末尾那批（sw/ 与 ui/），是从 freesound 的预览 mp3 直接取的 ——
+      用 /tmp/cfsfx/build.py 按包络自动定窗（走到该次瞬态两侧的真静音为止）、去直流、
+      可选高通、升余弦收尾、峰值归一化，再经 afconvert 编成 AAC。这几条不经过
+      参考项目，所以括号里是 freesound 的原始标题。
+
+weapons/ak47_fire            <- freesound.org/s/404560/  (AssaultRifle3.wav by SuperPhat)  CC0   [ak_a.mp3]
+weapons/ak47_distant_a       <- freesound.org/s/404560/  (同上；由 ak47_fire 的核加低通反射尾渲染) CC0
+weapons/ak47_distant_b       <- freesound.org/s/404560/  (同上，另一组回声时点) CC0
+weapons/awp_fire             <- freesound.org/s/816114/  (FPS Sniper Shot by qubodup)  CC0   [awp_a.mp3]
+weapons/awp_bolt_1           <- freesound.org/s/370345/  (Mosin Nagant Bolt Action Cycle by Zott820)  CC0  [bolt.mp3]
+weapons/awp_bolt_2           <- freesound.org/s/370345/  (同上，第二次拉栓)  CC0
+weapons/ak47_reload_1..3     <- freesound.org/s/674742/  (AK-47 Assault Rifle being unloaded and reloaded by serøutōnin--deprivəd)  CC0  [ak_reload_seq.mp3]
+
+melee/knife_swing            <- freesound.org/s/389690/  (Small Knife Whoosh.wav by Shamewap)  CC0  [knife_whoosh.mp3]
+melee/knife_wall             <- freesound.org/s/259547/  (Knife jab to steel.wav by nicktermer)  CC0  [knife_steel.mp3]
+melee/knife_flesh_1..3       <- freesound.org/s/635049/  (Flesh Stabs and Slashes 2 by sillygrizzlies)  CC0  [knife_flesh.mp3]
+
+footsteps/step_concrete_1..6 <- freesound.org/s/459964/  (Footsteps on concrete by florianreichelt)  CC0  [steps_concrete.mp3]
+
+impacts/impact_concrete_1..6 <- freesound.org/s/144444/  (bullet impacts by pushkin)  CC0  [impacts_misc.mp3]
+impacts/impact_flesh_1..3    <- freesound.org/s/423301/  (VisceralBulletImpacts.wav by u1769092)  CC0  [impacts_flesh.mp3]
+impacts/ricochet_1..2        <- freesound.org/s/30932/   (bullet ricochet.wav by aust_paul)  CC0  [ricochet.mp3]
+impacts/headshot             <- freesound.org/s/660769/  (Headshot sound by MadPanCake)  CC0  [headshot_a.mp3]
+impacts/hurt                 <- freesound.org/s/547209/  (Voice_AdultMale_PainGrunts_09.wav by MrFossy)  CC0  [grunts.mp3]
+impacts/brass_1..5           <- freesound.org/s/210102/  (Brass bullet shell casing drop onto concrete, multiple takes by GrayJoy)  CC0  [brass.mp3]
+impacts/whiz                 <- freesound.org/s/855248/  (Real Bullet Flyby Sound by qubodup)  CC0  [flyby.mp3]
+
+foley/bodyfall               <- freesound.org/s/504626/  (BODY FALL - V HVY - DIRT by leonelmail)  CC0  [bodyfall.mp3]
+foley/c4_explode             <- freesound.org/s/482993/  (large explosion 1 by V-ktor)  CC0  [explosion_a.mp3]
+
+
+------------------------------------------------------------
+二、UI / 手上动作（真实录音，Freesound CC0）
+------------------------------------------------------------
+**这一节整体替换掉了旧的 Kenney UI Audio 合成 blip**（原来那四个 ui_* 是 35~68 ms
+的方波扫频，用户的反馈是"偏卡通"）。现在同一条分界线上的一切——按钮、页签、面板
+开合、切枪收/出、空枪干击、开镜退镜——都是真实录音，音色靠**谱心**分开：
+大按键脆 6.4k / 页签亮 6.1k / 开面板 5.6k / 关面板钝 3.1k；长枪出 5.2k、收 2.6k；
+手枪出 4.6k、收 3.2k；**刀出 7.2k、收 4.9k**（最亮的一对）。方向感（升/降）由**调用期的
+rate** 给，不烘进文件。
+
+sw/deploy                    <- freesound.org/s/725397/  (An M16 Rifle being reloaded while empty; full sequence by serøutōnin--deprivəd)  CC0
+sw/holster                   <- freesound.org/s/725403/  (A rifle being moved around and handled w/ magazine removals by serøutōnin--deprivəd)  CC0
+sw/scope_in                  <- freesound.org/s/725403/  (同上，另一处被静音包围的极轻握持摩擦)  CC0
+sw/scope_out                 <- freesound.org/s/725403/  (同上，第三次)  CC0
+sw/deploy_pistol             <- freesound.org/s/725400/  (A pistol being moved around and handled w/ foley by serøutōnin--deprivəd)  CC0
+sw/holster_pistol            <- freesound.org/s/725400/  (同上，另一处)  CC0
+sw/dryfire                   <- freesound.org/s/725402/  (A rifle being dry fired once by serøutōnin--deprivəd)  CC0
+sw/deploy_knife              <- freesound.org/s/462579/  (pulling out a sword or knife and putting it back by JoeDoe22)  CC0
+sw/holster_knife             <- freesound.org/s/107590/  (sheath_sword.wav by Qat)  CC0
+ui/ui_click                  <- freesound.org/s/700985/  (Button Switch Toggle Operation Click by DustyWind)  CC0
+ui/ui_panel_close            <- freesound.org/s/700985/  (同上，另一处)  CC0
+ui/ui_switch                 <- freesound.org/s/831411/  (Button Click Jacket Metal by Sheyvan)  CC0
+ui/ui_panel_open             <- freesound.org/s/831411/  (同上，另一处)  CC0
+选片依据：开关类只取**被真静音前后包围**的孤立瞬态（725403 里大量小件的其余部分、
+700985 的另外三下、831411 的其它响件都未采用），建完之后逐条复核"一次动作听起
+来是几下"（60 ms 合并的独立事件数必须为 1；`holster_pistol` 是 2 但次峰只 0.35，
+在感知上仍是一下）。
+
+**刀那两条是后加的，理由值得记一笔**：`WEAPON_DEFS.knife` 的 `type` 是 `"melee"`，
+而 `holster()` / `deploy()` 原先只分 `pistol` 与"其余"，于是刀**静默落到了长枪那两条**
+上 —— 而 725397 / 725403 本来就是「M16 换弹全程」/「步枪摆弄」，收出刀听起来就是
+子弹上膛（用户报的正是这一条）。刀要的是金属，所以另取两条：
+  出刀 462579 @6.600：同一文件里 0.760 / 6.600 / 16.225 是同一次动作的三个 take
+    （三条的频段分布逐项一致），取 6.600 是因为它两侧是真静音。3~12k 占 73%。
+  收刀 107590 @0.482：素材本身就是「入鞘」这个动作（sheath_sword.wav），不存在
+    用错动作的风险。3~12k 占 59%。
+两条都走 `auto_window` 自动定窗（不是手写窗口），出事判据与既有 12 条同一套：
+`events` 都是 1、`endenv` 0.04 / 0.01。出/收谱心比 7.2k/4.9k = 1.47，与手枪那对
+（4.6k/3.2k = 1.44）、长枪那对（5.2k/2.6k = 1.62）同档 ——「出亮收钝」除了调用期的
+rate 之外，素材自己也给了一层。
+
+**已删除：`ui/match_start`**（freesound.org/s/468846/，35_Bocina_barco.wav by
+ChristianAnd，CC0）—— 它是开局那一下的船笛，0.97 s、基频 ≈150 Hz 的持续低鸣，
+用户听成"水牛的叫声"，所以连同文件、槽位与 `SFX.roundStart()` / `_hornSynth()`
+一起删掉了。**这条记录保留是为了留下出处**，仓库里已经没有文件引用它了。
+
+⚠️ 旧的 **Kenney UI Audio**（kenney.nl，CC0，分发 github.com/Calinou/kenney-ui-audio）
+已**全部下线**，不再有文件引用；上面四个 ui_* 是同名替换。
+
+
+------------------------------------------------------------
+三、大厅背景音乐（用户提供）
+------------------------------------------------------------
+ui/lobby_theme               <- 用户提供的「大厅音效.wav」（仓库根，本地留档、未入库）
+原始规格 2 ch / 11025 Hz / Int16 / 28.34 s。处理：峰值 0.511 → 归一化到 0.90，
+重采样到 22050 Hz（11 kHz 是电话级，提采样不增加信息量，只是为了让 AAC 编码器
+接受这个采样率），AAC 64 kbps 立体声。

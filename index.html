@@ -25,6 +25,10 @@
       <div class="flash-overlay" id="flashOverlay"></div>
       <!-- 高档连杀的全屏边缘辉光（一次性 CSS 动画，重触发靠 classList 移除/回流/加回） -->
       <div class="streak-flash" id="streakFlash"></div>
+      <!-- 击杀冲击波（同 .streak-flash 的重触发惯用法）。同一个节点复用：元素本身 =
+           主冲击环、::before = 放射速度线、::after = 向外扫过的光带，见 styles/game.css。
+           class 由 showKillIcon 按击杀档位写成 hit / head / gold（三档只换 color 与 --kb）。 -->
+      <div class="killburst" id="killBurst"></div>
     </div>
 
     <!-- 狙击镜（AWM 右键开镜；再按一次升到二级变倍） -->
@@ -118,9 +122,9 @@
         <div class="hud-bar"><div class="hud-bar-fill" id="ammoFill"></div></div>
       </div>
 
-      <!-- 背包面板（B 打开/关闭，再用数字键 1/2/3 选背包） -->
+      <!-- 背包面板（B 开合；再用数字键 1/2/3 选背包，选完自动收起） -->
       <div id="backpack" class="backpack hidden">
-        <div class="bp-title">背包选择<small>（B 打开 / 关闭 · 限复活点安全区）</small></div>
+        <div class="bp-title">背包选择<small>（B 打开 · 选完自动收起 · 限复活点安全区）</small></div>
         <div id="bpList" class="bp-list"></div>
         <div class="bp-hint" id="bpHint"></div>
       </div>

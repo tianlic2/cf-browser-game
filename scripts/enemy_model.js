@@ -13,6 +13,7 @@
 //   朝下的骨（四肢）：  rotation.x > 0 → 末端往 -z 摆 = **向后摆**
 // 所以「腿往前抬」是负的 rotation.x，「上身前倾」是正的 rotation.x。
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 // ---------- 骨架尺寸（身高 ≈ 1.82，与旧 GLB 的 1.8 同量级，命中体积不变）----------
 // 骨盆静止高度：必须让「髋(0.95-0.04) → 踝(0.10)」的距离接近腿长(0.82)，否则站立时
@@ -31,29 +32,61 @@ const SHOULDER_Y = 0.22; // 肩相对胸腔中心 → 离地 1.46
 const NECK_Y = 0.50;     // 脊椎 → 颈
 // 上臂/前臂：真人 1.8m 的肩→肘 ≈0.32、肘→腕 ≈0.29（臂展 0.61）。
 // **这两个值不是纯造型参数，而是 IK 的硬约束**：支撑手要按在护木上，
-// 0.58 的臂展配「枪心在胸前三四十厘米」会让左臂被拉成一条直线（见 HANDGUARD 注释）。
+// **臂展是 0.61（= UPPER + FORE）**，不是 0.58 —— 旧注释写错了两处，已于本次改正；
+// 引它之前先按 `UPPER + FORE` 现算一遍，别再抄。臂展配「枪心在胸前三四十厘米」
+// 会让左臂被拉成一条直线（见 `RIFLE_ANCHORS` 上方那条 HANDGUARD 约束）。
 const UPPER = 0.32;      // 上臂
 const FORE = 0.29;       // 前臂
 const LEG_REACH = THIGH + SHIN;
 
 // ---------- 配色（CF 潜伏者：深橄榄制服 + 黑战术装具 + 红队标）----------
-const C = {
-  cloth: 0x4c5138,
-  cloth2: 0x3b4030,
-  gear: 0x24262a,
-  pouch: 0x6a6147,
-  glove: 0x1c1e21,
-  boot: 0x2b2d32,
-  skin: 0xa8815c,
-  mask: 0x1a1c1f,
-  lens: 0x3a5a63,
-  team: 0xa8342f,
-};
+//
+// 三档涂装轮排（`PALETTES`），肤色两档交错（`SKINS`）—— 8 具骨架一眼分得出谁是谁，
+// 但仍读作同一支「潜伏者」部队。**只改颜色值、一件几何都不动**，所以逐敌配色是零调用代价的。
+// 面具 / 镜片 / 队标三色**逐具固定**（那是装备规格，不是涂装；队标红色是全队的识别色）。
+const PALETTES = [
+  //  制服主色   深色件     装具     辅袋     靴       手套
+  { cloth: 0x4c5138, cloth2: 0x3b4030, gear: 0x24262a, pouch: 0x6a6147, boot: 0x2b2d32, glove: 0x5c4d36 },
+  { cloth: 0x8a7a56, cloth2: 0x6d6044, gear: 0x3a3226, pouch: 0x9c8a63, boot: 0x40382a, glove: 0x2e2b26 },
+  { cloth: 0x55604e, cloth2: 0x434c3e, gear: 0x2e3237, pouch: 0x6f7566, boot: 0x33373a, glove: 0x6b5a41 },
+  { cloth: 0x3f4430, cloth2: 0x31362a, gear: 0x22242a, pouch: 0x5c5540, boot: 0x282a2d, glove: 0x4a3f2f },
+];
+const SKINS = [0xa8815c, 0x8a6743];
+// 面具 / 镜片 / 队标：逐具不变
+const C_FIXED = { mask: 0x1a1c1f, lens: 0x3a5a63, team: 0xa8342f };
 
-// ---------- 几何体全局共享（所有敌人共用同一批 BufferGeometry，只克隆材质）----------
-let GEO = null;
-function geo() {
-  if (GEO) return GEO;
+// 兜底：`C` 保留成「第 0 组」快照，供少数静态引用（如文件头注释里的色值）对照。
+const C = Object.assign({}, PALETTES[0], C_FIXED, { skin: SKINS[0] });
+
+// ---------- 三档装备构型（决定**剪影**）----------
+//
+// 与配色正交：构型管「身上挂着哪几件装具」，配色管「涂装」，两者相乘就是每具骨架的身份。
+// 8 具按模块计数器 `SRIG_N` 轮排（见 `SoldierRig` 构造函数）。
+//
+// ⚠️ **每个构型合批后必须恰好 22 块**、且**每个桶在每个构型里都非空**。块数一旦随构型变，
+// `cfdraw` / `cfhit` 那些 `find(e => !e.dead)` 取到的骨架形状就会漂，断言看起来全绿而其实
+// 每轮量的不是同一具。
+const KITS = {
+  //           前后护板  肩带  背包  肩垫  大腿袋
+  light: { plate: false, straps: false, pack: false, pauldron: false, thigh: false },
+  std:   { plate: true,  straps: true,  pack: true,  pauldron: false, thigh: false },
+  heavy: { plate: true,  straps: true,  pack: true,  pauldron: true,  thigh: true  },
+};
+const KIT_ORDER = ["light", "std", "heavy"];
+
+// ---------- 几何体全局共享（同构型的敌人共用同一批 BufferGeometry，只克隆材质）----------
+// 按**构型**缓存：`buildGeo(kit)` 每个构型只跑一次，8 具骨架共享同一批几何（不会 ×8 份）。
+//
+// ⚠️ 每个构型必须**恰好 22 块**、且**每个桶在每个构型里都非空** —— 否则块数会随构型变，
+// 测试里 `find(!dead)` 取到的骨架形状会漂（cfdraw / cfhit 的断言全靠这个数）。
+const GEO_CACHE = new Map();
+export function geo(kit = 0) {
+  let G = GEO_CACHE.get(kit);
+  if (!G) { G = buildGeo(kit); GEO_CACHE.set(kit, G); }
+  return G;
+}
+
+function buildGeo(kit) {
   const box = (w, h, d, tx = 0, ty = 0, tz = 0) => {
     const g = new THREE.BoxGeometry(w, h, d);
     g.translate(tx, ty, tz);
@@ -65,18 +98,105 @@ function geo() {
     g.translate(0, -len / 2, 0);
     return g;
   };
-  GEO = {
+  const K = KITS[KIT_ORDER[kit]] || KITS.std;
+
+  // ---------- 躯干/护甲 ----------
+  //
+  // 旧版只有 `vest` + `pouch` + `backPack` 三块，实测三个缺陷（贴脸特写 `/tmp/close-front.png`）：
+  //   ① 背心 z ∈ [-0.12, 0.10] 被 `torso` 的 z ∈ [-0.125, 0.125] **完整包住** —— 正面只剩
+  //      两侧各 2cm 黑边，胸口是一块没有细节的橄榄色平板。
+  //   ② `pouch` z ∈ [0.14, 0.20] 比躯干前表面 0.125 还前出 7.5cm，**悬空**在胸前
+  //      （旧 `vest` 厚度从 0.30 收到 0.22 时漏改了它的 tz）。
+  //   ③ 右手被胸甲埋住 —— 见 `MOUNT_CARRY` 那条。
+  //
+  // 现在按**真实防弹背心的语汇**拆开：前后两块护板 + 侧腰围 + 两条肩带与肩带扣 + 过肩段 +
+  // 拖拽提把 + 背包。弹匣袋**分三格排在腹前**（y ≈ -0.13），z 区间与前胸板重叠 2.2cm
+  // ⇒ 贴死在板上、不再悬空。
+  //
+  // **弹匣袋必须让开中轴**：右手握点在胸腔系的 y ≈ +0.04、x ∈ [-0.04, 0.04]。
+  // 三个弹匣袋排在 y ∈ [-0.19, -0.07] 是**握点以下**（正面看手在袋口之上），左胸那块
+  // admin 小袋刻意偏到 x = -0.108 避开握点那条 x 带。改这块之前先看 `MOUNT_CARRY` 的注释。
+  const gearParts = [
+    // 轻装只剩一块薄胸挂基板 —— **这个桶在每个构型里都必须非空**
+    K.plate ? box(0.34, 0.34, 0.026, 0, 0.005, 0.122)
+            : box(0.36, 0.30, 0.030, 0, 0.010, 0.126),
+  ];
+  if (K.plate) {
+    gearParts.push(
+      box(0.31, 0.31, 0.024, 0, 0.010, -0.122),         // 后背板
+      box(0.030, 0.24, 0.28, 0.172, 0.010, 0),          // 侧腰围 R
+      box(0.030, 0.24, 0.28, -0.172, 0.010, 0),         // 侧腰围 L
+    );
+  }
+  if (K.straps) {
+    gearParts.push(
+      box(0.052, 0.22, 0.022, 0.104, 0.075, 0.142),     // 前肩带 R（骑在护板之上）
+      box(0.052, 0.22, 0.022, -0.104, 0.075, 0.142),
+      box(0.064, 0.034, 0.020, 0.104, 0.170, 0.146),    // 肩带扣
+      box(0.064, 0.034, 0.020, -0.104, 0.170, 0.146),
+      box(0.056, 0.024, 0.235, 0.104, 0.230, -0.010),   // 过肩段
+      box(0.056, 0.024, 0.235, -0.104, 0.230, -0.010),
+      box(0.086, 0.022, 0.052, 0, 0.150, -0.145),       // 拖拽提把
+    );
+  }
+  if (K.pack) gearParts.push(box(0.22, 0.24, 0.09, 0, 0.030, -0.150));
+
+  const pouchParts = [
+    box(0.095, 0.115, 0.062, -0.115, -0.130, 0.144),    // 弹匣袋 ×3
+    box(0.095, 0.115, 0.062, 0.000, -0.130, 0.144),
+    box(0.095, 0.115, 0.062, 0.115, -0.130, 0.144),
+    box(0.072, 0.105, 0.058, 0.152, -0.070, 0.138),     // 侧袋 ×2
+    box(0.072, 0.105, 0.058, -0.152, -0.070, 0.138),
+    box(0.098, 0.072, 0.046, -0.108, 0.070, 0.148),     // 左胸 admin 小袋
+  ];
+
+  // 衣领：重装再叠一圈加宽的护颈。**顶面刻意压在 0.250 以下**（= 离地 1.54m）——
+  // 头部命中盒的底面在 1.535，再高就会有一条横带挡在下巴前面把爆头吞掉。
+  const collarParts = [box(0.30, 0.08, 0.24, 0, 0.24, 0)];
+  if (K.pauldron) collarParts.push(box(0.28, 0.055, 0.25, 0, 0.222, -0.005));
+
+  // ---------- 头盔 ----------
+  //
+  // 旧版是一块 0.245×0.13×0.27 的平板 + 一条帽檐 —— 正面看就是个方盒子扣在头上，
+  // 是「这是一块积木」最直白的一处。现在按**战斗头盔的语汇**拆开：
+  // 压扁的半球圆顶 + 后侧裙 + 护目板 + 左右护耳 + NVG 座/筒。
+  //
+  // ⚠️ **头部 AABB 是硬约束**（它同时锁住爆头命中盒与尸体 pivot 两件玩法数值）：
+  //      x ∈ [-0.125, +0.125]   y ∈ [-0.120, +0.165]   z ∈ [-0.135, +0.180]
+  // 这六个数是**实测出来的**（不是抄来的规矩）：x 由帽檐 0.25 宽给出、y 上界由旧头盔顶
+  // 0.165 给出（头部命中盒的顶）、y 下界由面罩 -0.12、z 下界由旧头盔后壁 -0.135、
+  // z 上界 0.18 由帽檐前缘给出 —— 而 z 的上界**正是尸体 pivot 那条约束的源头**
+  // （`h = max(root 系 z)`，见 `/tmp/cfpivot.mjs`）。加件之前先把这三条算一遍，
+  // 任何一轴超出去都要同步改 `enemies.js` 的 0.26 与 `CORPSE_SINK`。
+  //
+  // 本设计三轴全部**顶格但不越界**（圆顶最宽 ±0.125、顶面 0.165；侧裙后壁 -0.135；
+  // 帽檐前缘 0.18）⇒ pivot 的 0.2613 一分不动。
+  const helmetDome = new THREE.SphereGeometry(0.125, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  helmetDome.scale(1, 0.84, 1);             // 压扁：y 半径 0.105，顶面落在 0.165
+  helmetDome.translate(0, 0.06, -0.01);
+  const helmetParts = [
+    helmetDome,                                        // 圆顶（顶面 0.165 / 最宽 ±0.125）
+    // 后侧裙。**前缘止于 0.065** —— 护目镜从 0.08 起、面罩从 0.07 起，再往前伸就是
+    // 「镜片被头盔吞掉一半」（旧版头盔 z ∈ [-0.135, 0.135] 就把护目镜背面压住了）。
+    box(0.21, 0.095, 0.20, 0, 0.012, -0.035),
+    // 护目板 / 帽檐：**宽度取旧版的 0.245 而不是 0.25**（前缘同样 0.18）。这一档不是
+    // 审美 —— 死姿里 `h = max(root 系 z)` 的极值点就是这块板的 (−x, +z) 那个角：脖子
+    // 转 1.15rad 后 world z ≈ −0.913·x + 0.409·z，x 每让出 1mm 就把极值拉回 0.9mm。
+    // 0.25 时实测 0.2620（比旧版 0.2613 还多烂 0.7mm），0.245 落回 0.2597 ≤ 0.26，
+    // `enemies.js` 那个常量才真的不用动。**改这块板先看 `cfpivot`。**
+    box(0.245, 0.042, 0.10, 0, 0.048, 0.13),           // 护目板 / 帽檐（前缘 0.18）
+    box(0.032, 0.080, 0.10, -0.104, -0.015, -0.035),   // 护耳 R
+    box(0.032, 0.080, 0.10, 0.104, -0.015, -0.035),    // 护耳 L
+    // NVG 座/筒骑在圆顶**前斜面**上（y 0.12 处圆顶半径 0.10，座的 z 0.065~0.115 正好
+    // 一半埋进圆顶、一半探出来）。放在正顶面会整块悬空 —— 圆顶到 0.165 时已经收成一点了。
+    box(0.055, 0.032, 0.050, 0, 0.122, 0.090),         // NVG 座
+    box(0.045, 0.045, 0.045, 0, 0.115, 0.135),         // NVG 筒
+  ];
+
+  const G = {
     pelvis: box(0.32, 0.22, 0.24),
     torso: box(0.36, 0.46, 0.25),
-    // 背心：厚度收成 0.22 —— 旧值 0.30 让前表面跑到 z=0.16，把「枪心前 30cm 的握把」
-// 整个包进胸甲内部，正面看就是「手和枪都不见了、只剩一块黑板」（实测踩到）。
-vest: box(0.40, 0.30, 0.22, 0, 0.02, -0.01),
-    pouch: box(0.11, 0.11, 0.06, 0, -0.02, 0.17),
-    backPack: box(0.22, 0.24, 0.09, 0, 0.04, -0.15),
-    collar: box(0.30, 0.08, 0.24, 0, 0.24, 0),
     head: box(0.19, 0.23, 0.21),
-    helmet: box(0.245, 0.13, 0.27, 0, 0.10, 0),
-    brim: box(0.25, 0.04, 0.10, 0, 0.045, 0.13),
     mask: box(0.175, 0.10, 0.06, 0, -0.07, 0.10),
     goggles: box(0.215, 0.065, 0.05, 0, 0.005, 0.105),
     arm: limb(0.062, 0.050, UPPER),
@@ -90,7 +210,99 @@ vest: box(0.40, 0.30, 0.22, 0, 0.02, -0.01),
     jointBig: new THREE.SphereGeometry(0.085, 8, 6),
     jointMid: new THREE.SphereGeometry(0.068, 8, 6),
   };
-  return GEO;
+  // ---------- 四肢护具 ----------
+  //
+  // 护肘 / 护膝 / 靴子三件（肩垫与大腿袋只有重装挂，见 `KITS`）**全部并进已有的桶**，
+  // 一个材质都不新开。新开一个桶要付每帧 +16~32 次调用（8 具 × 2 侧 × 2 处），换一点颜色不值 ——
+  // 所以它们只提供**剪影**，颜色对比由逐敌配色免费提供（见 `PALETTES`）。
+  //
+  // 尺寸是**照着关节球反推**的，不是拍脑袋：`jointBig` 半径 0.085、`jointMid` 0.068，
+  // 护具比球窄就是白挂（球本来就是这条腿上最宽的一件）。所以护膝取 0.175 宽（±0.0875，
+  // 压过球 2.5mm）、护肘取 0.125（±0.0625，压过上臂 0.062 只 0.5mm）。z 方向才是主要露出量：
+  // 护膝前缘 0.1025 比球面 0.085 前出 1.75cm、护肘 0.08 比 0.068 前出 1.2cm。
+  //
+  // 靴子三件：包头（前出 2cm）+ 靴筒口（裹住小腿最下 5.8cm）。**没有鞋底** ——
+  // 脚掌本来就停在离地 1.5cm（`ANKLE_Y 0.10` 减去脚高），再垫一层要动 `ANKLE_Y`，
+  // 那会连带改整条腿的解析解，换不到可读性。
+  const shParts = [G.jointMid, G.arm];
+  if (K.pauldron) shParts.push(box(0.135, 0.060, 0.145, 0, 0.006, 0));
+  const elParts = [G.jointMid, G.fore, box(0.125, 0.090, 0.100, 0, -0.006, 0.030)];
+  const hipParts = [G.jointBig, G.thigh];
+  // 大腿袋挂在**正前方**（x 居中）：`hipThigh` 是两侧共用的同一份几何，带 x 偏移的话
+  // 会在一条腿上是外侧、另一条腿上变成内侧。
+  if (K.thigh) hipParts.push(box(0.085, 0.125, 0.075, 0, -0.17, 0.090));
+  const kneeParts = [G.jointBig, G.shin, box(0.175, 0.105, 0.125, 0, -0.012, 0.040)];
+  const footParts = [
+    G.foot,
+    box(0.108, 0.060, 0.065, 0, -0.048, 0.175),        // 包头
+    box(0.105, 0.060, 0.115, 0, 0.028, 0.010),         // 靴筒口
+  ];
+
+  // ---------- 同父同材质预合批（每具 22 块）----------
+  //
+  // 每个（骨骼 × 材质）桶里的几何合成一块。同父 ⇒ 动画里永远一起走，同材质 ⇒ 本来就是
+  // 一次绘制，拆成多块纯粹是多出来的调用。
+  //
+  // **合并不需要任何矩阵烘焙**：上面 box()/limb() 造几何时已经把偏移 translate 进去了，
+  // 各件几何都直接表达在**父骨骼的局部系**里，所以合并就是纯拼接（顶点原地首尾相接）。
+  // 也正因为如此，同一棵树的合批前后世界顶点集合**逐个一致**。
+  //
+  // **每一桶都走 `mergeAll` 一次给全**（历史写法 `mergePair` 只吃两件，现已删除）：
+  // 件数随构型变（轻装护甲 1 件、重装 12 件），而 `mergePair(mergePair(a,b),c)` 那种嵌套在
+  // `?nobatch` 下会静默丢掉除两件之外的全部（见 `mergeAll` 那条注释）。
+  // 同时把**未合批的件表**留在 `G` 上，构造函数的 `addN` 在兜底分支里要靠它逐件挂回。
+  //
+  // 失败兜底：属性集不一致时 `mergeGeometries` 返回 null 并在控制台留一行 error
+  // （污染「零报错」断言），所以这里**不复用那个返回值当判据** —— 合不了就留 null，
+  // 由构造里的 `addN()` 退回逐个挂。宁可多几次 draw call，也不能少一块身体。
+  //
+  // **合批的正确性判据是「世界顶点云逐个一致」**（`/tmp/cfemerge.mjs`）：同一份源码
+  // 合批树 vs `?nobatch` 树，顶点数 / 三角形数 / 点云校验和 / 包围盒四项全部相等；
+  // 头部命中网格合批后 4 块、`part="head"` 标签仍在，打头依旧一击必杀（`/tmp/cfhit.mjs`）。
+  // **别只截图比对** —— 漏挂一块在截图上很难看出来，而这条断言一眼就红。
+  G.shArm = mergeAll(shParts);
+  G.elFore = mergeAll(elParts);
+  G.hipThigh = mergeAll(hipParts);
+  G.kneeShin = mergeAll(kneeParts);
+  G.bootSet = mergeAll(footParts);
+  G.helmetSet = mergeAll(helmetParts);
+  G.gear = mergeAll(gearParts);
+  G.pouchSet = mergeAll(pouchParts);
+  G.collarSet = mergeAll(collarParts);
+
+  G.shParts = shParts;
+  G.elParts = elParts;
+  G.hipParts = hipParts;
+  G.kneeParts = kneeParts;
+  G.bootParts = footParts;
+  G.helmetParts = helmetParts;
+  G.gearParts = gearParts;
+  G.pouchParts = pouchParts;
+  G.collarParts = collarParts;
+  return G;
+}
+
+// 同父同材质的一批几何合成一件。合不了返回 null（调用方 `addN` 退回逐个挂）。
+// 只在 buildGeo() 里跑一次，所以合并出来的几何是**同构型全敌人共享**的（8 具不会各造一份）。
+//
+// `?nobatch` 让这里**恒返回 null** —— 于是 `addN()` 走它本来就有的退回分支，
+// 得到的就是合批前的几何树。这不是新加第二条路径（退回分支本来就在，只是给
+// 「mergeGeometries 失败」用的），而是把同一个兜底接到那面旗子上：骨段合批改的
+// 正是**射线目标**（敌人网格就在 `flatTargets()` 里），而「合批把命中判定弄坏了」
+// 恰恰是 `?nobatch` 存在的理由。不加这一句的话，这类回归没有对照可跑 ——
+// 截图上什么都看不出来，只会表现为「打头不秒杀」。
+// 旗子与 `scripts/map.js` 的 `NO_BATCH` **同源同名**（那边管地图静态合批），
+// 三个模块各自读一次 `location.search`，刻意不抽公共模块：读法只有一行。
+const NO_BATCH = typeof location !== "undefined"
+  && new URLSearchParams(location.search).has("nobatch");
+
+// **绝不能嵌套调用** `mergeAll([mergeAll([a, b]), c])`：`?nobatch` 时内层返回 `null`，
+// 外层就成了 `mergeGeometries([null, c])` —— 异常被这里吞掉 ⇒ 返回 null ⇒ 调用方
+// 只挂回 2 件，**剩下的件静默消失**（没有报错、没有控制台痕迹，只是画面上少了一块）。
+// 一律**一次给全整张件表**。
+function mergeAll(parts) {
+  if (NO_BATCH || parts.length < 2) return null;
+  try { return mergeGeometries(parts, false) || null; } catch (e) { return null; }
 }
 
 // ---------- 挂枪常量 ----------
@@ -102,9 +314,11 @@ const RIFLE_YAW = Math.PI / 2;   // AK 枪口在本体 -x，+90° → 指向本�
 // 握点/护木点（mount 本地系）：归一化后是「中心归零、枪口朝 +z」的一根长枪（全长 0.92），
 // 扳机握把在中心**之后**约 19cm，木护木在中心之前约 10cm —— 这两个值是从实测截图上
 // 量出来的（用像素比例反推），不是拍脑袋。放错会让左手够到枪管中段。
-// 更硬的一条约束：左肩(0.20, 0.22, 0) 到护木点的距离必须明显小于臂展 UPPER+FORE=0.58，
-// 否则 IK 被迫把支撑臂拉成一条直线（实测护木取 z=0.20 时距离 0.577，手臂完全绷直，
-// 看起来像「枪飘在胸前、手够不着」）。取 0.10 后约 0.50，肘部自然弯 ~60°。
+// 更硬的一条约束：左肩(0.20, 0.22, 0) 到护木点的距离必须明显小于**臂展 0.61**
+// （= `UPPER + FORE`，**不是 0.58** —— 旧注释抄错了，引之前现算一遍）。
+// 否则 IK 被迫把支撑臂拉成一条直线，看起来像「枪飘在胸前、手够不着」。
+// 现在的实测负载：低姿 85.4% / 据枪 85.5%（肘弯 ~63°），上限取 90%
+// —— 推导与余量见 `MOUNT_CARRY` 那条注释。
 //
 // **按枪型号分开取**：三把枪归一化后都在同一个 0.92 的盒子里、枪口都朝 +z，
 // 但握把/护木在盒子里的位置不同（AWM 是手动枪机、M4 的护木更长），共用一套会让某把枪的手插进枪身。
@@ -117,9 +331,21 @@ export const RIFLE_ANCHORS = {
 };
 
 // 两个持枪姿态（相对胸腔中心的枪心位置 + 俯仰；俯仰 >0 = 枪口压下）。
-// 两个姿态都**保证双手够得着**（臂展 0.58）：低姿 0.598/0.40、据枪 0.57/0.34，
-// 所以过渡只是微微抬枪，不会出现手够不着枪的脱手画面。
-const MOUNT_CARRY = { x: 0.0, y: 0.04, z: 0.30, pitch: 0.30 };
+//
+// **`MOUNT_CARRY.z` 是「右手看得见看不见」的唯一旋钮，不是造型参数。**
+// 低姿（pitch 0.30）下 `mount.matrix` 把两个握点送到：
+//     gripTarget = (x_m, y_m − 0.03939, z_m − 0.21107)
+//     hgTarget   = (x_m, y_m − 0.06777, z_m + 0.08371)
+// 旧值 z 0.30 ⇒ 右腕 z = 0.0889，而躯干前表面在 0.125、「前胸板」前表面在 0.135
+// —— 右腕**在胸甲内部**，手网格还沿前臂朝里伸，正面完全看不见（`/tmp/cfhand.mjs` 实测
+// 低姿 0/8 角露出）。**薄化躯干赚不回可见性**：就算护甲薄到 0.11 也只赚 1.5cm，右腕仍在里面
+// 2.1cm。所以只挪挂点，`torso` 保持 0.25 不动（薄化还要连带重排护甲/背包的 tz，收益为负）。
+//
+// z 0.30 → 0.35 让握点前进 5.0cm（越过前胸板），同时 y 0.04 → 0.08 把**左臂**从 89.5%
+// 拉回 85.4% —— 正好与据枪姿态的 85.5% 齐平，这次改动**没让瞄准姿态变差一分**。
+// 左臂负载上限取 **90%**（0.549，肘弯 ≥51°）：留 10% 到硬 clamp `(0.32+0.29)×0.999 = 0.6094`
+// 的余量。95% 只剩 4.8%，后坐/致盲/倒地插值一旦把目标推远就会顶到 clamp、手从枪上脱开。
+const MOUNT_CARRY = { x: 0.00, y: 0.08, z: 0.35, pitch: 0.30 };
 const MOUNT_AIM = { x: -0.02, y: 0.15, z: 0.36, pitch: 0.0 };
 
 // 步频松驰系数：严格「支撑脚世界坐标不动」要求步幅与走过路程严格相等，
@@ -166,7 +392,9 @@ const _shR = new THREE.Vector3(-SHOULDER_X, SHOULDER_Y, 0);
 const _shL = new THREE.Vector3(SHOULDER_X, SHOULDER_Y, 0);
 const _poleR = new THREE.Vector3(-1.0, -0.75, -0.35).normalize();
 const _poleL = new THREE.Vector3(0.75, -1.0, -0.15).normalize();
-const _faceT = new THREE.Vector3(0.10, SHOULDER_Y + 0.10, 0.16);
+// 致盲捂脸的目标点。**z 必须大于护甲前表面**（前胸板 0.135 / 肩带 0.153）——
+// 旧值 0.16 配老背心够用，现在会被前肩带顶穿 1cm，所以提到 0.20。
+const _faceT = new THREE.Vector3(0.10, SHOULDER_Y + 0.10, 0.20);
 // 倒地时枪滑到的位置（胸腔系）与横转角：z 收回到 0.06 是为了让枪落在甲板上而不是甲板下
 const _mountDeadP = new THREE.Vector3(-0.02, -0.22, 0.06);
 const _MOUNT_DEAD_PITCH = 0.45;
@@ -177,13 +405,29 @@ const _dropL = new THREE.Vector3(0.30, -0.32, -0.06);
 const _gripT = new THREE.Vector3();
 const _hgT = new THREE.Vector3();
 
+// 逐具骨架的身份计数器。**必须在构造期取、不能放进 `reset()`**：
+// `EnemyManager` 是对象池（`acquire()` 从 `free` 弹出复用），在 `reset()` 里换色的话
+// 捞出来的人会**继承上一具尸体的配色**，症状是「敌人颜色随机跳」、极难归因。
+// 定死在构造期从结构上消灭这条路径 —— 代价是 `enemies.js` / `main.js` 一个字都不用改。
+let SRIG_N = 0;
+
 export class SoldierRig {
   constructor(rifleTemplate) {
-    const G = geo();
+    // `3` 与 `4` 互质 ⇒ 前 8 具给出 8 组**两两不同**的 (kit, palette)；肤色按 idx 折半交错。
+    this.variant = {
+      idx: SRIG_N,
+      kit: SRIG_N % 3,
+      palette: SRIG_N % 4,
+      skin: (SRIG_N >> 1) % 2,
+    };
+    SRIG_N++;
+    const G = geo(this.variant.kit);
     const mkMat = (color, rough = 0.82, metal = 0.05) =>
       new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
 
     // 每个敌人一份材质（受击闪红要各自独立），几何体共享
+    const C = Object.assign({}, PALETTES[this.variant.palette] || PALETTES[0], C_FIXED,
+      { skin: SKINS[this.variant.skin] || SKINS[0] });
     this.matCloth = mkMat(C.cloth);
     this.matCloth2 = mkMat(C.cloth2);
     this.matGear = mkMat(C.gear, 0.9);
@@ -210,6 +454,14 @@ export class SoldierRig {
       this.meshes.push(m);
       return m;
     };
+    // 同父同材质的一批：合批成功就挂那一块合并几何（省若干次绘制调用），
+    // 失败（`merged === null`，含 `?nobatch`）就原样逐个挂 —— 宁可多几次 draw call，
+    // 也不能少一块身体。`part` 照原样打上（同桶的件本来就同 `part`，如头盔族全是 "head"）。
+    // **两条路都必须把每一件都挂上** —— 这是它一次吃整张件表、而不是两两合并的原因。
+    const addN = (parent, merged, parts, material, part) => {
+      if (merged) return add(parent, merged, material, part);
+      for (const g of parts) add(parent, g, material, part);
+    };
 
     // ---------- 层级：root → pelvis →（spine → chest → 双臂/头/枪）+ 双腿 ----------
     const root = new THREE.Group();
@@ -227,10 +479,9 @@ export class SoldierRig {
     chest.position.y = CHEST_Y;
     spine.add(chest);
     add(chest, G.torso, this.matCloth);
-    add(chest, G.vest, this.matGear);
-    add(chest, G.pouch, this.matPouch);
-    add(chest, G.backPack, this.matGear);
-    add(chest, G.collar, this.matCloth2);
+    addN(chest, G.gear, G.gearParts, this.matGear);
+    addN(chest, G.pouchSet, G.pouchParts, this.matPouch);
+    addN(chest, G.collarSet, G.collarParts, this.matCloth2);
 
     // 头
     const neck = new THREE.Group();
@@ -240,8 +491,7 @@ export class SoldierRig {
     head.position.y = 0.14;
     neck.add(head);
     add(head, G.head, this.matSkin, "head");
-    add(head, G.helmet, this.matGear, "head");
-    add(head, G.brim, this.matGear, "head");
+    addN(head, G.helmetSet, G.helmetParts, this.matGear, "head");
     add(head, G.mask, this.matMask, "head");
     add(head, G.goggles, this.matLens, "head");
 
@@ -250,13 +500,11 @@ export class SoldierRig {
       const sh = new THREE.Group();
       sh.position.set(side * SHOULDER_X, SHOULDER_Y, 0);
       chest.add(sh);
-      add(sh, G.jointMid, this.matCloth2);
-      add(sh, G.arm, this.matCloth2);
+      addN(sh, G.shArm, G.shParts, this.matCloth2);
       const el = new THREE.Group();
       el.position.y = -UPPER;
       sh.add(el);
-      add(el, G.jointMid, this.matCloth2);
-      add(el, G.fore, this.matCloth2);
+      addN(el, G.elFore, G.elParts, this.matCloth2);
       const hd = new THREE.Group();
       hd.position.y = -FORE;
       el.add(hd);
@@ -271,17 +519,15 @@ export class SoldierRig {
       const hip = new THREE.Group();
       hip.position.set(side * HIP_X, HIP_DY, 0);
       pelvis.add(hip);
-      add(hip, G.jointBig, this.matCloth2);
-      add(hip, G.thigh, this.matCloth2);
+      addN(hip, G.hipThigh, G.hipParts, this.matCloth2);
       const knee = new THREE.Group();
       knee.position.y = -THIGH;
       hip.add(knee);
-      add(knee, G.jointBig, this.matCloth2);
-      add(knee, G.shin, this.matCloth2);
+      addN(knee, G.kneeShin, G.kneeParts, this.matCloth2);
       const ankle = new THREE.Group();
       ankle.position.y = -SHIN;
       knee.add(ankle);
-      add(ankle, G.foot, this.matBoot);
+      addN(ankle, G.bootSet, G.bootParts, this.matBoot);
       return { hip, knee, ankle };
     };
     this.legR = mkLeg(-1);

@@ -17,6 +17,7 @@
 // （这一点与 main.js 里 grenadePool 的「用完即 dispose」正好相反）。
 
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
 import { paintSkin, skinsFor, findSkin } from "./skins.js";
 
@@ -52,6 +53,85 @@ function cloneWithMaterials(tpl) {
     dst[i].userData.baseMat = src[i].userData.baseMat;
   }
   return out;
+}
+
+// ---------- 目录侧的**按材质预合批**（每把枪 12~13 块 → 3 块）----------
+//
+// 世界里的枪是**刚体**（敌人手持、地面掉落物都只有整把枪的位移/旋转，没有任何一块
+// 单独动），所以「同一材质名的那些网格」完全可以烘成一块几何。实测 AK 12 块 / M4 13 块，
+// 而材质只有 **3 种**（AK: Dark_metal/Metal/Wood，M4: Primary/Secondary/Highlight）——
+// 也就是说 8 个敌人手里的枪从 ~99 次绘制调用降到 ~24 次。
+//
+// **必须烘焙矩阵**（与 enemy_model.js 那套骨段合批不同，那边 box()/limb() 建几何时
+// 就把偏移 translate 进去了、两块本来就在同一个局部系）：GLB 里每块网格各有自己的
+// 变换，所以要先把它们各自相对**变体根**的矩阵乘进顶点。做法是
+//   local = inverse(root.matrixWorld) · mesh.matrixWorld
+// 变体是游离在场景外的树，`updateMatrixWorld(true)` 会把根当作世界根，所以这个式子是
+// 确定性的（不依赖它在不在 scene 里）。
+//
+// **分组键是 `userData.matName`，不是材质对象** —— `cloneWithMaterials` 是**逐网格**
+// 克隆材质的（同一个材质名也会被克隆出 12 份），按对象分组一个都合并不了。按名字分组
+// 之后再核一遍「这一组的材质属性是不是真的一样」当保险：名字相同但属性不同（脏资产）
+// 就整组跳过，宁可多几次调用也不能把两块不同颜色的件并成一块。
+function matsEqual(a, b) {
+  if (a.type !== b.type) return false;
+  const same = (x, y) => (x === null || x === undefined) ? (y === null || y === undefined) : x === y;
+  const num = (x, y) => Math.abs((x ?? 0) - (y ?? 0)) < 1e-6;
+  const hex = (c) => (c ? c.getHexString() : "");
+  return hex(a.color) === hex(b.color) && hex(a.emissive) === hex(b.emissive)
+    && num(a.metalness, b.metalness) && num(a.roughness, b.roughness)
+    && num(a.emissiveIntensity, b.emissiveIntensity) && same(a.map, b.map);
+}
+
+// 返回合并统计（给测试读）。合不了的组**原样留着**，不抛、不删。
+//
+// `?nobatch` 直接空转返回 —— 与 `enemy_model.js` 的 `mergePair` 读的是同一面旗子
+// （那边管骨段、`scripts/map.js` 的 `NO_BATCH` 管地图静态合批）。三处合起来才是
+// 「合批前」的完整对照；只关一处的话 A/B 比的是两个都合过一半的东西。
+const NO_BATCH = typeof location !== "undefined"
+  && new URLSearchParams(location.search).has("nobatch");
+
+export function mergeByMaterial(root) {
+  if (NO_BATCH) return { mergedGroups: 0, savedMeshes: 0 };
+  root.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const groups = new Map();
+  root.traverse((o) => { if (o.isMesh) groups.set(o, o.userData.matName || o.material.name || "?"); });
+  const byName = new Map();
+  for (const [mesh, name] of groups) byName.set(name, (byName.get(name) || []).concat(mesh));
+
+  let mergedGroups = 0, savedMeshes = 0;
+  for (const [, list] of byName) {
+    if (list.length < 2) continue;
+    const ref = list[0].material;
+    if (!list.every((m) => matsEqual(ref, m.material))) continue;   // 脏资产：整组跳过
+    const geos = [];
+    let bad = false;
+    for (const m of list) {
+      const g = m.geometry.clone();
+      g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+      geos.push(g);
+    }
+    // 属性集不一致 / 索引态不一致时 mergeGeometries 返回 null 并在控制台留一行 error
+    // （会污染「零报错」断言），所以这里自己吞掉异常、失败就整组保持原样。
+    let geo = null;
+    try { geo = mergeGeometries(geos, false); } catch (e) { geo = null; }
+    if (!geo || !geo.attributes.position) { bad = true; }
+    if (bad) { for (const g of geos) g.dispose(); continue; }
+
+    const holder = new THREE.Group();
+    holder.name = "merged_" + (list[0].userData.matName || "mat");
+    for (const m of list) m.parent.remove(m);
+    const mm = new THREE.Mesh(geo, ref);            // 一组共用一份材质
+    mm.userData.matName = list[0].userData.matName;
+    mm.userData.baseMat = list[0].userData.baseMat;
+    mm.castShadow = false; mm.receiveShadow = false;
+    holder.add(mm);
+    root.add(holder);
+    for (const g of geos) g.dispose();              // 烘完即弃：顶点已经进了合并几何
+    mergedGroups++; savedMeshes += list.length - 1;
+  }
+  return { mergedGroups, savedMeshes };
 }
 
 // 从玩家那把枪派生一个世界变体。
@@ -95,11 +175,13 @@ export function buildGunCatalog(guns) {
     for (const skin of skinsFor(id)) {
       const w = makeVariant(src, yaw, 0);
       paintSkin(w, id, skin.id);
+      mergeByMaterial(w); // 必须在 paintSkin **之后**：分组键 matName 与属性核验都要看上完漆的结果
       world[skin.id] = w;
 
       const e = makeVariant(src, yaw + Math.PI, RIFLE_LEN);
       paintSkin(e, id, skin.id);
       darkenForEnemy(e); // 必须在 paintSkin **之后**（上漆会覆盖颜色）
+      mergeByMaterial(e); // 同上，且必须在 darkenForEnemy 之后（压暗是逐材质的）
       enemy[skin.id] = e;
     }
     cache[id] = { world, enemy };

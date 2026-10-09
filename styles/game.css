@@ -1083,38 +1083,38 @@ body {
   left: 50%; top: 50%; transform: translate(-50%, -50%);
   z-index: 6;
   box-sizing: border-box;
-  width: min(440px, calc(100vw - 24px)); min-width: 0;
+  width: min(640px, calc(100vw - 24px)); min-width: 0;
   max-height: calc(100vh - 24px); overflow-y: auto;
   padding: 0;
   border: 1px solid #616b65;
   background: linear-gradient(110deg, rgba(54,65,61,.97), rgba(34,43,41,.97));
   box-shadow: 0 0 0 100vmax rgba(0,0,0,.32), 0 3px 14px #0008, inset 0 0 0 3px #141a1870;
   color: #d0d6cc;
-  font: 11px/1.35 Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+  font: 14px/1.4 Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
   text-shadow: 0 1px 1px #000;
   pointer-events: auto;
 }
 #backpack.hidden { display: none; }
 #backpack .bp-heading {
   display: flex; align-items: center; gap: 6px;
-  position: relative; height: 25px; padding: 0 9px;
+  position: relative; height: 36px; padding: 0 14px;
   border-bottom: 1px solid #526059;
   background: linear-gradient(#1b211e, #101513);
-  font-size: 10px; font-weight: 700;
+  font-size: 13px; font-weight: 700;
 }
-#backpack .bp-heading-icon { color: #86c1da; font-size: 13px; }
+#backpack .bp-heading-icon { color: #86c1da; font-size: 16px; }
 #backpack .bp-title { position: absolute; left: 50%; transform: translateX(-50%); }
 #backpack .bp-list {
-  display: flex; flex-direction: row; gap: 4px; padding: 7px 9px 6px;
+  display: flex; flex-direction: row; gap: 6px; padding: 10px 13px 9px;
   border-bottom: 1px solid #101a17;
   background: linear-gradient(90deg, #23312e88, #61716a22);
 }
 #backpack .bp-item {
-  position: relative; display: grid; place-items: center; flex: 0 0 31px;
-  height: 25px; padding: 0; border: 1px solid #53605b;
+  position: relative; display: grid; place-items: center; flex: 0 0 46px;
+  height: 36px; padding: 0; border: 1px solid #53605b;
   border-bottom-color: #17201b;
   background: linear-gradient(#465650, #2a3732);
-  color: #c2cbc5; font: bold 12px/1 Arial, sans-serif;
+  color: #c2cbc5; font: bold 17px/1 Arial, sans-serif;
   text-shadow: 0 1px 2px #000; cursor: pointer;
   box-shadow: inset 0 1px #76847b44;
 }
@@ -1124,39 +1124,48 @@ body {
   background: linear-gradient(#427b96, #244d64);
   box-shadow: inset 0 1px #a0d2e366, 0 0 3px #0008;
 }
-#backpack .bp-item.equipped::after { content: ""; position: absolute; bottom: 1px; left: 9px; right: 9px; height: 2px; background: #c8af68; }
+#backpack .bp-item.equipped::after { content: ""; position: absolute; bottom: 2px; left: 12px; right: 12px; height: 2px; background: #c8af68; }
 #backpack .bp-item:focus-visible { outline: 2px solid #d3e9ed; outline-offset: 2px; }
-#backpack .bp-loadout { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; padding: 6px; }
+#backpack .bp-loadout { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; padding: 9px; }
 #backpack .bp-weapon-card {
-  position: relative; grid-column: span 3; min-width: 0; height: 82px;
+  position: relative; grid-column: span 3; min-width: 0; height: 160px;
   overflow: hidden; border: 1px solid #66716a;
   background: linear-gradient(145deg, #18201ddb, #25312be8);
   box-shadow: inset 0 0 8px #0005;
 }
-#backpack .bp-slot-primary { grid-column: span 7; height: 114px; }
-#backpack .bp-slot-secondary { grid-column: span 5; height: 114px; }
-#backpack .bp-slot-label { padding: 3px 5px 0; color: #9ea99e; font-size: 9px; }
+#backpack .bp-slot-primary { grid-column: span 7; height: 176px; }
+#backpack .bp-slot-secondary { grid-column: span 5; height: 176px; }
+#backpack .bp-slot-label { padding: 4px 8px 0; color: #9ea99e; font-size: 12px; }
 #backpack .bp-weapon-name {
-  position: relative; z-index: 1; padding: 1px 5px 0;
-  color: #c8af68; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  position: relative; z-index: 1; padding: 2px 8px 0;
+  color: #c8af68; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-#backpack .bp-weapon-picture { position: absolute; inset: 29px 4px 11px; display: grid; place-items: center; }
-#backpack .bp-weapon-picture img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 3px 2px #0009); }
-#backpack .bp-weapon-fallback { width: 80%; height: 80%; color: #b1b9a7; }
-#backpack .bp-weapon-detail { position: absolute; right: 5px; bottom: 2px; color: #bfc6b5; font: 9px/1.2 Consolas, monospace; }
+/* 预览区：绝对定位撑满「标签 + 枪名」之下、「弹药数字」之上那段空间。
+   **图片也必须绝对定位铺满** —— 放在普通流里写 `height:100%` 是无效的（百分比高度在
+   绝对定位的网格容器里解不出来），img 会退回源图自身宽高比而溢出，被卡片的
+   `overflow:hidden` 从上下裁掉，近战/投掷物那种正方形缩略图只剩中间一条。 */
+#backpack .bp-weapon-picture { position: absolute; inset: 42px 7px 19px; }
+#backpack .bp-weapon-picture img {
+  position: absolute; inset: 0; display: block;
+  width: 100%; height: 100%; object-fit: contain;
+  filter: drop-shadow(0 3px 2px #0009);
+}
+#backpack .bp-weapon-fallback { position: absolute; inset: 12%; width: 76%; height: 76%; color: #b1b9a7; }
+#backpack .bp-weapon-detail { position: absolute; right: 8px; bottom: 4px; color: #bfc6b5; font: 12px/1.2 Consolas, monospace; }
 #backpack .is-empty { background: linear-gradient(135deg, transparent 49.6%, #79877d26 50%, transparent 50.4%), #2c383240; box-shadow: none; }
-#backpack .is-empty .bp-weapon-name { color: #8a978c; font-size: 9px; }
-#backpack .bp-hint { margin: 0 7px; padding: 4px 0; border-top: 1px solid #74827433; color: #aab8ac; font-size: 10px; }
-#backpack .bp-hint-keys, #backpack .bp-hint-item { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+#backpack .is-empty .bp-weapon-name { color: #8a978c; font-size: 13px; }
+#backpack .bp-hint { margin: 0 10px; padding: 7px 0; border-top: 1px solid #74827433; color: #aab8ac; font-size: 13px; }
+#backpack .bp-hint-keys, #backpack .bp-hint-item { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
 #backpack .bp-hint-item.warn { color: #d5b86f; }
-#backpack kbd { min-width: 14px; padding: 0 2px; box-sizing: border-box; border: 1px solid #74837588; background: #18211b77; color: #d5e1d4; font: 10px/14px Arial, sans-serif; text-align: center; }
-#backpack .bp-footer { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px 5px; color: #a8b5a9; font-size: 10px; }
+#backpack kbd { min-width: 19px; padding: 0 3px; box-sizing: border-box; border: 1px solid #74837588; background: #18211b77; color: #d5e1d4; font: 12px/19px Arial, sans-serif; text-align: center; }
+#backpack .bp-footer { display: flex; justify-content: space-between; align-items: center; padding: 6px 13px 8px; color: #a8b5a9; font-size: 13px; }
 @media (max-width: 480px) {
   #backpack { width: calc(100vw - 20px); }
-  #backpack .bp-slot-primary, #backpack .bp-slot-secondary { height: 101px; }
-  #backpack .bp-weapon-card:not(.bp-slot-primary):not(.bp-slot-secondary) { height: 76px; }
-  #backpack .bp-loadout { gap: 3px; padding: 5px; }
-  #backpack .bp-weapon-name { font-size: 9px; }
+  #backpack .bp-slot-primary, #backpack .bp-slot-secondary { height: 158px; }
+  #backpack .bp-weapon-card:not(.bp-slot-primary):not(.bp-slot-secondary) { height: 164px; }
+  #backpack .bp-loadout { gap: 5px; padding: 7px; }
+  #backpack .bp-weapon-name { font-size: 12px; }
+  #backpack .bp-weapon-picture { inset: 40px 5px 18px; }
 }
 
 /* HUD 右下角的当前背包标识 */

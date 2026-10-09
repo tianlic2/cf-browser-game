@@ -17,7 +17,7 @@ const emit=(type,e)=>{for(const f of listeners[type]||[])f(e)};
 const flush=()=>{while(pending.length)pending.shift()()};
 const key=(code,repeat=false)=>emit('keydown',{code,repeat,preventDefault(){}});
 const noop=()=>{};
-const ctx={console,document,viewport,window:{addEventListener:noop},state:'playing',locked:true,matchPaused:false,lockRequestCancelled:false,dead:false,curBp:0,keys:{},fireEnabled:false,BACKPACKS:['ak','m4','awm'].map(primary=>({primary,skin:'classic'})),GEAR_SKIN:{pistol:'classic',knife:'classic'},owned:Object.fromEntries(['ak','m4','awm','pistol','knife','frag','flash','smoke'].map(id=>[id,{state:{mag:30,reserve:90,count:1}}])),WEAPON_DEFS:Object.fromEntries(['ak','m4','awm','pistol','knife','frag','flash','smoke'].map(id=>[id,{type:['frag','flash','smoke'].includes(id)?'grenade':'gun'}])),emptySlot:{},gunDisplayName:id=>id,worldModel:()=>({}),classicNades:{},weaponPreview:()=>null,renderer:{},scene:{},knifeBind:null,weaponIconSvg:()=>'<svg/>',sfx:{ui:noop,empty:noop,cancelStreak:noop},canSwapBackpack:()=>allowed,swapBlockReason:()=> 'blocked',showToast:noop,cancelMelee:noop,cancelGrenade:noop,showScoreboard:noop,chat:{cancel:noop,handleKey:()=>false,isTyping:()=>false},hud:new Element(),menu:new Element(),gameover:new Element(),lobby:{setResume:noop,refresh:noop},setScoped:noop,clearFlash:noop,gameStart:()=>{throw Error('must not restart')},equippedPrimary:()=>ctx.BACKPACKS[ctx.curBp].primary,switchWeapon:(id)=>switched.push(id),scoreboardEl:new Element(),IS_SNEAK:'sneak',IS_CROUCH:'crouch',performance:{now:()=>0},crouchDownAt:0,dropWeapon:()=>{throw Error('must not drop')},startReload:()=>{throw Error('must not reload')},switchToPrimary:noop,switchToSecondary:noop,switchNade:noop,quickSwitch:noop};
+const ctx={console,document,viewport,window:{addEventListener:noop},state:'playing',locked:true,matchPaused:false,lockRequestCancelled:false,dead:false,curBp:0,keys:{},fireEnabled:false,BACKPACKS:['ak','m4','awm'].map(primary=>({primary,skin:'classic'})),GEAR_SKIN:{pistol:'classic',knife:'classic'},owned:Object.fromEntries(['ak','m4','awm','pistol','knife','frag','flash','smoke'].map(id=>[id,{state:{mag:30,reserve:90,count:1}}])),WEAPON_DEFS:Object.fromEntries(['ak','m4','awm','pistol','knife','frag','flash','smoke'].map(id=>[id,{type:['frag','flash','smoke'].includes(id)?'grenade':'gun'}])),emptySlot:{},lifePickup:{primary:null,secondary:null},gunDisplayName:id=>id,worldModel:()=>({}),classicNades:{},weaponPreview:()=>null,renderer:{},scene:{},knifeBind:null,weaponIconSvg:()=>'<svg/>',sfx:{ui:noop,empty:noop,cancelStreak:noop},canSwapBackpack:()=>allowed,swapBlockReason:()=> 'blocked',showToast:noop,cancelMelee:noop,cancelGrenade:noop,showScoreboard:noop,chat:{cancel:noop,handleKey:()=>false,isTyping:()=>false},hud:new Element(),menu:new Element(),gameover:new Element(),lobby:{setResume:noop,refresh:noop},setScoped:noop,clearFlash:noop,gameStart:()=>{throw Error('must not restart')},equippedPrimary:()=>ctx.BACKPACKS[ctx.curBp].primary,switchWeapon:(id)=>switched.push(id),scoreboardEl:new Element(),IS_SNEAK:'sneak',IS_CROUCH:'crouch',performance:{now:()=>0},crouchDownAt:0,dropWeapon:()=>{throw Error('must not drop')},startReload:()=>{throw Error('must not reload')},switchToPrimary:noop,switchToSecondary:noop,switchNade:noop,quickSwitch:noop};
 ctx.menu.classList.add('hidden');vm.createContext(ctx);
 const run=s=>vm.runInContext(s,ctx);
 run(source.slice(source.indexOf('function switchBackpack(i)'),source.indexOf('// 数字键 4：')));
@@ -41,11 +41,23 @@ key('KeyB');key('KeyB');flush();assert.equal(ctx.backpackOpen(),false);assert.eq
 // Same-number confirmation closes, and cancellation does not equip hover.
 key('KeyB');flush();key('Digit1');flush();assert.equal(ctx.backpackOpen(),false);
 key('KeyB');flush();nodes.bpList.children[2].onmouseenter();key('Escape');flush();assert.equal(ctx.curBp,0);assert.equal(ctx.locked,true);
+// 捡来的枪只活一条命（复活那条清空在 respawnPlayer 里，不在本切片）：确认一个背包
+// ——**包括自己正在用的那个编号**——必须把拾取记录作废并换回这个背包的配枪。
+key('KeyB');flush();
+ctx.lifePickup.primary={id:'m4',skin:'classic'};switched.length=0;
+ctx.previewBackpack(0);assert.ok(nodes.bpCurrent.textContent.includes('手持拾取 m4'),'panel names the held pickup');
+key('Digit1');flush();
+assert.equal(ctx.lifePickup.primary,null,'confirming the current backpack discards the pickup');
+assert.deepEqual(switched,['ak'],'and re-equips the backpack gun');
+// pickUpItem 不在任何切片里，所以这条直接对着源码断言：它写拾取记录，绝不改写背包配装。
+const pick=source.slice(source.indexOf('function pickUpItem('),source.indexOf('// 每帧：自转 + 起伏 + 拾取判定'));
+assert.ok(pick.includes('lifePickup[it.slotKind]'),'pickup records into lifePickup');
+assert.ok(!/BACKPACKS\[curBp\]|GEAR_SKIN\.pistol\s*=/.test(pick),'pickup must never rewrite the backpack config');
 // Re-lock denial must expose Return to Battle instead of leaving dead controls.
 key('KeyB');flush();denyLock=true;key('Digit2');assert.equal(ctx.backpackOpen(),false);assert.equal(ctx.gameMenuOpen(),true);assert.equal(ctx.menu.classList.contains('hidden'),true);assert.equal(ctx.hud.classList.contains('hidden'),false);
 // Ordinary Escape/unlock opens the battle dialog, never the lobby.
 denyLock=false;ctx.requestLock();flush();document.exitPointerLock();flush();assert.equal(ctx.gameMenuOpen(),true);assert.equal(ctx.menu.classList.contains('hidden'),true);
-console.log('PASS: native cursor mode, hover without equipping, accurate empty slots, mouse and digit confirmation, same-number close, rule rejection, B/Escape cancel, rapid close/unlock race, re-lock denial recovery, normal game-dialog unlock, no click-through fire or movement.');
+console.log('PASS: native cursor mode, hover without equipping, accurate empty slots, mouse and digit confirmation, same-number close, rule rejection, B/Escape cancel, held-pickup disclosure and pickup discard on backpack confirm (config never rewritten), rapid close/unlock race, re-lock denial recovery, normal game-dialog unlock, no click-through fire or movement.');
 
 // Esc menu regressions share the same real keyboard and pointer-lock handlers.
 ctx.toggleMatchPause();assert.equal(ctx.matchPaused,true);

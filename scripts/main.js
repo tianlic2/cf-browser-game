@@ -1295,11 +1295,10 @@ let curBp = 0;
 const GEAR_SKIN = { pistol: STOCK, knife: STOCK };
 
 // 出厂配装的一份只读副本。
-// **捡枪会改写 BACKPACKS[curBp].primary/.skin 与 GEAR_SKIN**（CF 里也是捡了就是捡了），
-// 但那是「本局」的事 —— 新开一局必须还原成出厂值，否则上一局在地上捡的那把枪会跟着你
-// 进下一局（开局发现主武器不是自己配的那把，很像 bug）。
-// 复活**不**还原：CF 里死了再站起来，手上还是你上一条命拿的枪。
-// 注意 `__tactical.setSkin` 改的也是 BACKPACKS 本身，所以调用顺序必须是「先 beginGame 再 setSkin」。
+// **捡枪不改写 BACKPACKS / GEAR_SKIN** —— 捡来的枪记在 lifePickup 里，只活这一条命。
+// 这里保留 `resetLoadout()` 是因为 `__tactical.setSkin` 改的就是 BACKPACKS 本身：
+// 它写下的皮肤必须在新开一局时还原，否则上一局调的皮肤会跟着进下一局。
+// 注意调用顺序必须是「先 beginGame 再 setSkin」。
 const LOADOUT_DEFAULT = {
   packs: BACKPACKS.map((b) => ({ ...b })),
   gear: { ...GEAR_SKIN },
@@ -1313,13 +1312,32 @@ function resetLoadout() {
   GEAR_SKIN.knife = LOADOUT_DEFAULT.gear.knife;
 }
 
+// 「**这条命**捡来的枪」。形状 `null` 或 `{ id, skin }`（skin 在 pickUpItem 里已过
+// `skinForGun` 校验，所以这里存的一定是这把枪自己的合法皮肤）。
+//
+// 捡到的枪**只活到死**，这是 CF 的规则，也是它与「背包配装」的分界：
+//   · `pickUpItem` 写这里，**不碰** `BACKPACKS[curBp].primary/.skin` / `GEAR_SKIN`
+//     （后者是玩家的配置，不该被一次拾取改写）；
+//   · `respawnPlayer` 清空 ⇒ 复活时 `equippedPrimary()` 自然回到
+//     `BACKPACKS[curBp].primary` 配的那把；
+//   · `switchBackpack` 也清空 —— 按 B 确认一个背包就是「从这个背包里再取一把枪」，
+//     那一下应当真的换回配枪，而不是继续端着上一条命捡的。
+// 按槽位分两条：敌人掉的永远是 primary，玩家丢手枪才产生 secondary。
+const lifePickup = { primary: null, secondary: null };
+
 // 某把武器此刻该用哪款皮肤。投掷物返回 null —— 它们靠 def.tint 区分三件套，
 // 不吃皮肤（applySkinTo 收到 null 会直接返回，不碰材质，从而保住那份 tint）。
 function activeSkinId(id) {
   const def = WEAPON_DEFS[id];
   if (!def) return null;
-  if (def.slot === "primary") return BACKPACKS[curBp].skin;
-  if (id === "pistol" || id === "knife") return GEAR_SKIN[id];
+  if (def.slot === "primary") {
+    // 这条命捡来的枪用**它自己带进来的**皮肤。按 id 比对是必需的：捡来的枪型与背包
+    // 那把常常不同（捡了敌人的 M4 而背包 1 是 AK），不比对就会把 AK 的皮肤套到 M4 上。
+    if (lifePickup.primary && lifePickup.primary.id === id) return lifePickup.primary.skin;
+    return BACKPACKS[curBp].skin;
+  }
+  if (id === "pistol") return lifePickup.secondary ? lifePickup.secondary.skin : GEAR_SKIN.pistol;
+  if (id === "knife") return GEAR_SKIN.knife;
   return null;
 }
 
@@ -1727,10 +1745,12 @@ function quickSwitch() {
   if (!id) { slotEmptyHint(to); return; }
   switchWeapon(id);
 }
-// 当前背包的主武器。防御性回退到 AK：switchWeapon 对未加载的 id 是静默 no-op，
+// 当前手上该是哪把主武器。**这条命捡来的枪优先** —— 它只活到死，
+// 复活时 lifePickup 已被清空（见 respawnPlayer），于是自动回到背包配的那把。
+// 防御性回退到 AK：switchWeapon 对未加载的 id 是静默 no-op，
 // 会让 currentId / 可见性 / 枪口火光全部停在旧状态。
 function equippedPrimary() {
-  const id = BACKPACKS[curBp].primary;
+  const id = lifePickup.primary ? lifePickup.primary.id : BACKPACKS[curBp].primary;
   return owned[id] ? id : "ak";
 }
 // 数字键 1：切到「当前背包的主武器」。
@@ -1759,9 +1779,17 @@ function switchBackpack(i) {
     showToast(swapBlockReason());
     return false;
   }
-  if (i === curBp) return true;
+  // 确认一个背包 = 从这个背包里再取一把枪 ⇒ 这条命捡来的那把作废（见 lifePickup）。
+  // **这一句必须排在 `i === curBp` 的早退之前**：端着捡来的 M4 时按 B+1，面板上写着
+  // 背包 1 是 AK，那一下就该真的换回 AK。排在后面的话，玩家最常按的那个编号
+  // （自己正在用的背包）会是个空操作，「按 B 换回背包配枪」这条路等于不存在。
+  const hadPickup = lifePickup.primary !== null;
+  lifePickup.primary = null;
+  const same = i === curBp;
+  // 纯粹的「按了一下自己正在用的背包」、手上也没有捡来的枪：无副作用，照旧收起面板
+  if (same && !hadPickup) return true;
   curBp = i;
-  // 换背包 = 从这个背包里再取一把枪，所以它顺手把「主武器已丢空」的标记清掉。
+  // 换背包顺手把「主武器已丢空」的标记清掉。
   // 不清的话会出现「按 G 丢了 AK，再 B+2 切到背包 2，手上还是空的」—— 面板明明写着
   // 背包 2 是 M4 却拿不到，看着像坏了。放这里也没有被滥用的余地：能换背包就意味着
   // 站在复活点且本回合没开过火，而那种状态下本来就可以直接选任意一个背包。
@@ -1769,7 +1797,9 @@ function switchBackpack(i) {
   // force=true：换包后即使主武器恰好是同一把，也要刷新可见性与枪口火光
   switchWeapon(equippedPrimary(), true);
   updateBackpack();
-  showToast("切换至背包 " + (i + 1));
+  // 同一个编号那一下也要出声：玩家按它是为了「放下捡来的枪、换回配枪」，
+  // 静默的话看不出到底发生了什么。
+  showToast(same ? "已换回背包 " + (i + 1) + " 的配枪" : "切换至背包 " + (i + 1));
   return true;
 }
 // 数字键 4：在手雷 / 闪光弹 / 烟雾弹之间循环（CF 的投掷物槽行为）
@@ -1824,6 +1854,13 @@ function confirmBackpack(i) {
   if (switchBackpack(i)) closeBackpack(true);
   else updateBpHint();
 }
+// 面板底部那行状态。「手上拿着什么」与「背包里配了什么」现在是两件事 —— 捡来的枪只活到死
+// （见 lifePickup），而面板列的是**背包配装**。不点明的话，端着捡来的 M4 打开面板看到
+// 「背包 1 · AK-47」会以为是坏的。没有拾取时输出与改动前逐字一致。
+function bpStatusText(base) {
+  const held = lifePickup.primary;
+  return held ? base + " · 手持拾取 " + gunDisplayName(held.id, held.skin) : base;
+}
 function previewBackpack(i) {
   if (!backpackOpen() || !BACKPACKS[i]) return;
   previewBp = i;
@@ -1832,7 +1869,7 @@ function previewBackpack(i) {
     row.classList.toggle("active", n === previewBp);
     row.classList.toggle("equipped", n === curBp);
   }
-  document.getElementById("bpCurrent").textContent = "查看背包 " + (previewBp + 1) + " · 已装备 " + (curBp + 1);
+  document.getElementById("bpCurrent").textContent = bpStatusText("查看背包 " + (previewBp + 1) + " · 已装备 " + (curBp + 1));
   updateBackpackLoadout();
 }
 function backpackOpen() {
@@ -1847,7 +1884,7 @@ function backpackOpen() {
 // **皮肤机制本身一个字没动**：`BACKPACKS[i].skin` / `GEAR_SKIN` / `activeSkinId()` /
 // `applySkinTo()` / `skinForGun()` 全部照旧，三个背包的默认皮肤（老兵 / 雷神 / 紫电）照常挂上、
 // 捡到的枪也照常带着敌人的皮肤。程序化入口只剩 `__tactical.setSkin`（它本来就不写
-// `LOADOUT_DEFAULT`，与「捡来的枪只活一局」的边界一致）。
+// `LOADOUT_DEFAULT`，与「捡来的枪只活一条命」的边界一致）。
 // 面板是「查看 + 切换」用的，改配装在开始菜单里（等价于 CF 在仓库里配好再进战场）。
 // 悬停只更新预览；鼠标与数字键共用 confirmBackpack 确认。
 function updateBackpack() {
@@ -1869,7 +1906,7 @@ function updateBackpack() {
     row.onclick = () => confirmBackpack(i);
     list.appendChild(row);
   });
-  document.getElementById("bpCurrent").textContent = "当前背包 " + (curBp + 1);
+  document.getElementById("bpCurrent").textContent = bpStatusText("当前背包 " + (curBp + 1));
   // Preview generation is lazy: closing the panel must not render thumbnails.
   if (backpackOpen()) previewBackpack(previewBp);
   updateBpHint();
@@ -2079,6 +2116,10 @@ function dropWeapon() {
     return false;
   }
   emptySlot[slot] = true;
+  // 枪已经不在手上了，「这条命捡来的那把」随之作废 —— 不清的话 equippedPrimary()
+  // 还会指着那把已经躺在地上的枪（平时被 emptySlot 挡着看不出来，但按 B 切背包时
+  // 会拿它去 `switchWeapon`，等于把丢掉的那把又装回手上）。
+  lifePickup[slot] = null;
   sfx.empty(); // 掉地的机械声。没有新增音频资源 —— 音效表里没有 drop/pickup 一类
   showToast("已丢弃 " + gunDisplayName(id, skin));
   // 切到另一个槽位；两个都空就掏刀（拿刀时按 G 是被上面挡掉的，不会空转）
@@ -2087,17 +2128,14 @@ function dropWeapon() {
   return true;
 }
 
-// 真正把一把地上的枪装到手上。槽位标记、背包配置、场景移除三处必须一起改。
+// 真正把一把地上的枪装到手上。拾取记录、槽位标记、弹药快照、场景移除四处必须一起改。
 function pickUpItem(it, idx) {
   emptySlot[it.slotKind] = false;
-  if (it.slotKind === "primary") {
-    // 捡到的枪**替换当前背包的主武器**（连同皮肤）—— CF 里也是「捡了就是捡了」。
-    // 复活/重开一局都走 equippedPrimary()，所以这把枪会一直用到本局结束。
-    BACKPACKS[curBp].primary = it.id;
-    BACKPACKS[curBp].skin = skinForGun(it.id, it.skin);
-  } else {
-    GEAR_SKIN.pistol = it.skin; // 副武器只有 USP 一个型号，皮肤是全局一份
-  }
+  // 捡到的枪记进「这条命捡来的枪」，**不改写 BACKPACKS / GEAR_SKIN**（那是玩家的配装）。
+  // 于是它只活到死：复活时 lifePickup 被清空，手上自动回到背包里配的那把。
+  // 皮肤在这里就过一遍 `skinForGun` —— 存进去的一定是这把枪自己的合法 skin id，
+  // 免得 `activeSkinId` 把别的枪的皮肤套到它身上（`findSkin` 找不到会按原厂处理，枪变黑）。
+  lifePickup[it.slotKind] = { id: it.id, skin: skinForGun(it.id, it.skin) };
   // 弹药按**这把掉落的枪自带的那份**写回武器状态（见 spawnGroundGun 的 ammo 那条）。
   // 少了这一步，捡到的枪会沿用玩家手上同型号那把的剩弹 —— 也就是「敌人掉的枪有几发，
   // 取决于我自己那把还剩几发」。换弹/拉栓/射速闸门一起清掉：捡起来的是一把**新枪**，
@@ -2218,8 +2256,9 @@ function buildMenuMatch() {
 // 这一节是**唯一**把游戏数据翻译成大厅文案的地方：`lobby.js` 只负责排版、一个数字都不重算，
 // 所以「武器库里印着 36、`WEAPON_DEFS` 里改成 40」这类漂移在结构上不可能发生。
 //
-// 数据是**每次渲染现调**的（不是构造时快照一份）：`BACKPACKS` 会被捡枪改写、`GEAR_SKIN`
-// 会被 `setSkin` 改写 —— 快照会让「个人仓库」一直停留在打开页面那一刻。
+// 数据是**每次渲染现调**的（不是构造时快照一份）：`BACKPACKS` / `GEAR_SKIN` 会被
+// `__tactical.setSkin` 就地改写 —— 快照会让「个人仓库」一直停留在打开页面那一刻。
+// （对局中捡到的枪**不进**这张表：它只活一条命、记在 `lifePickup` 里，不是玩家的配装。）
 const LOBBY_KIND = { rifle: "步枪", sniper: "狙击枪", pistol: "手枪", melee: "近战", grenade: "投掷物" };
 
 function lobbyArsenalRows() {
@@ -3136,10 +3175,15 @@ function respawnPlayer() {
   if (spawn) player.pos.fromArray(spawn);
   else player.pos.set((Math.random() - 0.5) * 10, 0, bounds.hl - 6);
   actedThisLife = false; // 复活回到安全区，重新开放背包切换（CF 规则）
-  // 复活恢复**完整配装**：丢枪留下的空槽一起清掉。地上的枪不动 ——
-  // 它们留在原地等人捡（包括自己刚丢的那把）。
+  // 复活恢复**完整配装**：丢枪留下的空槽与「这条命捡来的枪」一起清掉。
+  // 清 lifePickup 是这一节的重点 —— 复活后手上应该是**上一条命选的背包**里配的那把，
+  // 而不是那条命在地上捡的（CF 规则：捡来的枪死了就没了）。`equippedPrimary()` 与
+  // `activeSkinId()` 都读它，所以清完下面那次 switchWeapon 自然挂回背包那把枪与它的皮肤。
+  // 地上的枪不动 —— 它们留在原地等人捡（包括自己刚丢的那把）。
   emptySlot.primary = false;
   emptySlot.secondary = false;
+  lifePickup.primary = null;
+  lifePickup.secondary = null;
   player.vel.set(0, 0, 0);
   player.yaw = 0;
   player.pitch = 0;
@@ -3529,7 +3573,9 @@ function gameStart() {
   actedThisLife = false;
   emptySlot.primary = false;   // 新一局恢复完整配装（同 respawnPlayer）
   emptySlot.secondary = false;
-  resetLoadout();              // 上一局在地上捡的枪不进下一局（见 LOADOUT_DEFAULT）
+  lifePickup.primary = null;   // 新一局不继承上一条命的拾取（同 respawnPlayer）
+  lifePickup.secondary = null;
+  resetLoadout();              // 上一条命留下的 setSkin 不进下一局（见 LOADOUT_DEFAULT）
   player.vel.set(0, 0, 0);
   player.yaw = 0;
   player.pitch = 0;
@@ -4657,6 +4703,15 @@ async function init() {
         list: BACKPACKS.map((b) => b.primary),
         skins: BACKPACKS.map((b) => b.skin),
         gear: { ...GEAR_SKIN },
+        // 「这条命捡来的枪」。**捡到枪之后 `list[curBp]`（背包配装）与 `held`（手上那把）
+        // 会分道扬镳，而 `list` 恰恰是**不该变**的那一半** —— 所以断言「捡了枪」要看
+        // `held` / `life`，断言「背包配装没被改写」要看 `list`。缺了这两个读口，
+        // 「捡来的枪只活一条命」这条行为在无头用例里根本量不到。
+        held: equippedPrimary(),   // 手上的主武器（捡来的枪在则优先，= 复活后会换掉的那把）
+        life: {
+          primary: lifePickup.primary ? { ...lifePickup.primary } : null,
+          secondary: lifePickup.secondary ? { ...lifePickup.secondary } : null,
+        },
       }),
       setActed: (v) => { actedThisLife = !!v; },
       // ---- 皮肤 ----

@@ -46,10 +46,10 @@ const LEG_REACH = THIGH + SHIN;
 // 面具 / 镜片 / 队标三色**逐具固定**（那是装备规格，不是涂装；队标红色是全队的识别色）。
 const PALETTES = [
   //  制服主色   深色件     装具     辅袋     靴       手套
-  { cloth: 0x4c5138, cloth2: 0x3b4030, gear: 0x24262a, pouch: 0x6a6147, boot: 0x2b2d32, glove: 0x5c4d36 },
-  { cloth: 0x8a7a56, cloth2: 0x6d6044, gear: 0x3a3226, pouch: 0x9c8a63, boot: 0x40382a, glove: 0x2e2b26 },
+  { cloth: 0x42464b, cloth2: 0x30343a, gear: 0x26292b, pouch: 0x454741, boot: 0x242527, glove: 0x36322a },
+  { cloth: 0x3e4d5f, cloth2: 0x303b49, gear: 0x24282c, pouch: 0x444b50, boot: 0x26282b, glove: 0x35322c },
   { cloth: 0x55604e, cloth2: 0x434c3e, gear: 0x2e3237, pouch: 0x6f7566, boot: 0x33373a, glove: 0x6b5a41 },
-  { cloth: 0x3f4430, cloth2: 0x31362a, gear: 0x22242a, pouch: 0x5c5540, boot: 0x282a2d, glove: 0x4a3f2f },
+  { cloth: 0x6b6654, cloth2: 0x4d4b40, gear: 0x2e302b, pouch: 0x5c5947, boot: 0x282a2d, glove: 0x4a3f2f },
 ];
 const SKINS = [0xa8815c, 0x8a6743];
 // 面具 / 镜片 / 队标：逐具不变
@@ -80,6 +80,30 @@ const KIT_ORDER = ["light", "std", "heavy"];
 // ⚠️ 每个构型必须**恰好 22 块**、且**每个桶在每个构型里都非空** —— 否则块数会随构型变，
 // 测试里 `find(!dead)` 取到的骨架形状会漂（cfdraw / cfhit 的断言全靠这个数）。
 const GEO_CACHE = new Map();
+// Shared neutral cloth detail: palette color is applied only by the material.
+// Deterministic weave / seams keep pooled actors identical after respawn.
+let fabricMap;
+function fabricTexture() {
+  if (fabricMap) return fabricMap;
+  const c = document.createElement("canvas"); c.width = c.height = 256;
+  const ctx = c.getContext("2d"), pixels = ctx.createImageData(256, 256);
+  for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const noise = ((x * 73 + y * 151 + (x ^ y) * 17) % 29) - 14;
+    const weave = ((x + y) % 3 === 0 ? -9 : 0);
+    const fold = 9 * Math.sin(y * 0.15 + Math.sin(x * 0.025) * 2);
+    const v = Math.max(0, Math.min(255, 222 + noise + weave + fold));
+    const i = (y * 256 + x) * 4;
+    pixels.data[i] = pixels.data[i + 1] = pixels.data[i + 2] = v; pixels.data[i + 3] = 255;
+  }
+  ctx.putImageData(pixels, 0, 0);
+  ctx.strokeStyle = "rgba(40,40,40,.28)"; ctx.lineWidth = 2;
+  ctx.setLineDash([3, 3]);
+  for (const x of [7, 249]) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 256); ctx.stroke(); }
+  fabricMap = new THREE.CanvasTexture(c);
+  fabricMap.colorSpace = THREE.SRGBColorSpace;
+  fabricMap.anisotropy = 4;
+  return fabricMap;
+}
 export function geo(kit = 0) {
   let G = GEO_CACHE.get(kit);
   if (!G) { G = buildGeo(kit); GEO_CACHE.set(kit, G); }
@@ -88,13 +112,35 @@ export function geo(kit = 0) {
 
 function buildGeo(kit) {
   const box = (w, h, d, tx = 0, ty = 0, tz = 0) => {
-    const g = new THREE.BoxGeometry(w, h, d);
+    // Rounded seams instead of sharp toy blocks; exact outer dimensions stay fixed.
+    const g = new THREE.BoxGeometry(w, h, d, 4, 4, 4);
+    const p = g.attributes.position, r = Math.min(w, h, d) * 0.22;
+    const half = [w / 2 - r, h / 2 - r, d / 2 - r];
+    const v = new THREE.Vector3(), inner = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i);
+      inner.set(THREE.MathUtils.clamp(v.x, -half[0], half[0]), THREE.MathUtils.clamp(v.y, -half[1], half[1]), THREE.MathUtils.clamp(v.z, -half[2], half[2]));
+      v.sub(inner).normalize().multiplyScalar(r).add(inner);
+      p.setXYZ(i, v.x, v.y, v.z);
+    }
+    g.computeVertexNormals();
     g.translate(tx, ty, tz);
     return g;
   };
+  const oval = (w, h, d, x = 0, y = 0, z = 0) => {
+    const g = new THREE.SphereGeometry(1, 16, 12);
+    g.scale(w / 2, h / 2, d / 2); g.translate(x, y, z); return g;
+  };
   // 骨段：从关节（原点）向 -y 伸展，正好对应「骨骼局部 -y 是骨段方向」
   const limb = (rTop, rBot, len) => {
-    const g = new THREE.CylinderGeometry(rTop, rBot, len, 7);
+    const g = new THREE.CylinderGeometry(rTop, rBot, len, 12, 8);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const t = (len / 2 - p.getY(i)) / len;
+      const fold = 1 + Math.sin(t * Math.PI) * 0.13 + Math.sin(t * Math.PI * 6) * 0.025;
+      p.setXYZ(i, p.getX(i) * fold, p.getY(i), p.getZ(i) * fold);
+    }
+    g.computeVertexNormals();
     g.translate(0, -len / 2, 0);
     return g;
   };
@@ -152,7 +198,7 @@ function buildGeo(kit) {
 
   // 衣领：重装再叠一圈加宽的护颈。**顶面刻意压在 0.250 以下**（= 离地 1.54m）——
   // 头部命中盒的底面在 1.535，再高就会有一条横带挡在下巴前面把爆头吞掉。
-  const collarParts = [box(0.30, 0.08, 0.24, 0, 0.24, 0)];
+  const collarParts = [oval(0.25, 0.08, 0.22, 0, 0.24, 0)];
   if (K.pauldron) collarParts.push(box(0.28, 0.055, 0.25, 0, 0.222, -0.005));
 
   // ---------- 头盔 ----------
@@ -178,7 +224,7 @@ function buildGeo(kit) {
     helmetDome,                                        // 圆顶（顶面 0.165 / 最宽 ±0.125）
     // 后侧裙。**前缘止于 0.065** —— 护目镜从 0.08 起、面罩从 0.07 起，再往前伸就是
     // 「镜片被头盔吞掉一半」（旧版头盔 z ∈ [-0.135, 0.135] 就把护目镜背面压住了）。
-    box(0.21, 0.095, 0.20, 0, 0.012, -0.035),
+    oval(0.235, 0.14, 0.24, 0, 0.012, -0.015),
     // 护目板 / 帽檐：**宽度取旧版的 0.245 而不是 0.25**（前缘同样 0.18）。这一档不是
     // 审美 —— 死姿里 `h = max(root 系 z)` 的极值点就是这块板的 (−x, +z) 那个角：脖子
     // 转 1.15rad 后 world z ≈ −0.913·x + 0.409·z，x 每让出 1mm 就把极值拉回 0.9mm。
@@ -189,19 +235,31 @@ function buildGeo(kit) {
     box(0.032, 0.080, 0.10, 0.104, -0.015, -0.035),    // 护耳 L
     // NVG 座/筒骑在圆顶**前斜面**上（y 0.12 处圆顶半径 0.10，座的 z 0.065~0.115 正好
     // 一半埋进圆顶、一半探出来）。放在正顶面会整块悬空 —— 圆顶到 0.165 时已经收成一点了。
-    box(0.055, 0.032, 0.050, 0, 0.122, 0.090),         // NVG 座
-    box(0.045, 0.045, 0.045, 0, 0.115, 0.135),         // NVG 筒
   ];
+  // Light kit: close-fitting balaclava / respirator; others use a plain PASGT shell.
+  if (!K.plate) helmetParts.splice(0, helmetParts.length, oval(0.215, 0.265, 0.23, 0, 0.018, -0.015));
+
+  const torso = box(0.36, 0.46, 0.25);
+  const tp = torso.attributes.position;
+  for (let i = 0; i < tp.count; i++) {
+    const y = tp.getY(i), waist = THREE.MathUtils.clamp((y + 0.23) / 0.46, 0, 1);
+    tp.setX(i, tp.getX(i) * (0.80 + 0.20 * Math.sin(waist * Math.PI * 0.68)));
+  }
+  torso.computeVertexNormals();
 
   const G = {
-    pelvis: box(0.32, 0.22, 0.24),
-    torso: box(0.36, 0.46, 0.25),
-    head: box(0.19, 0.23, 0.21),
-    mask: box(0.175, 0.10, 0.06, 0, -0.07, 0.10),
-    goggles: box(0.215, 0.065, 0.05, 0, 0.005, 0.105),
+    pelvis: box(0.29, 0.22, 0.235),
+    torso,
+    head: oval(0.19, 0.23, 0.21),
+    mask: oval(0.175, 0.105, 0.065, 0, -0.067, 0.099),
+    goggles: mergeGeometries([
+      oval(0.084, 0.056, 0.032, -0.052, 0.006, 0.112),
+      oval(0.084, 0.056, 0.032, 0.052, 0.006, 0.112),
+      box(0.028, 0.013, 0.022, 0, 0.012, 0.116),
+    ], false),
     arm: limb(0.062, 0.050, UPPER),
     fore: limb(0.052, 0.044, FORE),
-    hand: box(0.082, 0.11, 0.082, 0, -0.045, 0),
+    hand: oval(0.082, 0.115, 0.082, 0, -0.045, 0),
     thigh: limb(0.100, 0.080, THIGH),
     shin: limb(0.076, 0.058, SHIN),
     foot: box(0.11, 0.08, 0.25, 0, -0.045, 0.06),
@@ -231,7 +289,7 @@ function buildGeo(kit) {
   // 大腿袋挂在**正前方**（x 居中）：`hipThigh` 是两侧共用的同一份几何，带 x 偏移的话
   // 会在一条腿上是外侧、另一条腿上变成内侧。
   if (K.thigh) hipParts.push(box(0.085, 0.125, 0.075, 0, -0.17, 0.090));
-  const kneeParts = [G.jointBig, G.shin, box(0.175, 0.105, 0.125, 0, -0.012, 0.040)];
+  const kneeParts = [G.jointBig, G.shin, oval(0.163, 0.125, 0.10, 0, -0.012, 0.047)];
   const footParts = [
     G.foot,
     box(0.108, 0.060, 0.065, 0, -0.048, 0.175),        // 包头
@@ -438,6 +496,7 @@ export class SoldierRig {
     this.matMask = mkMat(C.mask, 0.7);
     this.matLens = mkMat(C.lens, 0.25, 0.45);
     this.matTeam = mkMat(C.team, 0.7);
+    for (const m of [this.matCloth, this.matCloth2, this.matGear, this.matPouch, this.matGlove, this.matMask]) m.map = fabricTexture();
     this.mats = [
       this.matCloth, this.matCloth2, this.matGear, this.matPouch, this.matGlove,
       this.matBoot, this.matSkin, this.matMask, this.matLens, this.matTeam,

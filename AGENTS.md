@@ -1,5 +1,62 @@
 # AGENTS.md
 
+## 2026-10-09 参考图 HUD（优先于旧血条/弹药/顶栏样式）
+- 用户提供截图作为样式基准。顶部改为窄条「潜伏者 enemyScoreVal / 目标 limitVal / 保卫者 teamScoreVal」，倒计时单独在下面；左右阵营顺序与旧版相反，计分逻辑和 40 杀目标不变。`enemyNumVal` 保留为隐藏兼容节点，对局设置仍在大厅。
+- 左下为自绘人物轮廓 + AC/HP 小数字、细白色血条；ACE 仅在玩家有击杀且不低于敌人名册最高击杀时亮起。尚无护甲机制，AC 如实显示 0，不能写死参考图中的 90 或声称有护甲减伤。
+- 右下新增 `ammoMag` / `ammoReserve` 两个持久子节点，`updateAmmoHud` 分别写入弹匣/备弹，禁止再用 `ammoVal.textContent=` 覆盖整棵子树。枪支用真实数值、投掷物为库存/0、近战为 --/--；`ammoFill` 隐藏兼容。背包编号缩成小框，枪名下显示随武器变化的剪影。
+- `assets/hud/numerals.woff` 是本项目绘制的数字字形，由 `python3 tools/build_hud_font.py` 重建（fontTools，WOFF 不依赖 Brotli），不是提取的 CF 字库。中文沿用系统无衬线。新样式在 CSS 末尾且以 `.hud` 作用域覆盖旧规则，窄屏不缩放整块 HUD。
+- 20 项浏览器检查通过：字体加载、阵营顺序、开火/换弹、受伤/血条、击杀/ACE、8 种武器、开镜、死亡/复活、1280×800 / 514×387 / 480×900 布局和零运行错误。
+
+## 2026-10-09 地图镜像与出生区地道（当前约定）
+- `classic_map.js` 在加载时做 X 镜像：场景组 `scale.x=-1`，同时反转 collider 中心/平面法向 X、双方出生点 X 和雷达顶面 X；前后阵营不交换。磁盘上的导入几何保持来源坐标，不可再次镜像。
+- BSP 转换保留甲板以下地板、墙壁和楼梯，共 754 个凸体（新增 156 个地下凸体），最低地板为 −2.4384m；不能恢复旧的 `hi.y < −0.05` 导入过滤。22 个窄踏面标记 `stair`，`brushSupport` 仅对此使用纵向 ±0.12m 的脚掌接触区，避免身体半径大于台阶间距导致上楼卡死。箱子等其他表面仍取脚底中心。
+- 玩家支撑高度与手雷兜底平面从 `mapData.floorY` 取，回退地图仍为 0；跳跃用 `brushBottom` 检查顶棚，不可穿过地道顶部。两侧出口保留原木箱，玩家需跳上木箱，再从旁边空档跳回甲板。
+- `GroundNavigation` 按同一 X/Z 的不同地板建立独立节点，楼梯窄道额外采样中心线；邻接检查高度、实体净空及真实地板。AI 使用当前脚底高度碰撞，可从出生区楼梯进入/返回地道；AI 仍不执行出口跳箱。雷达可见性使用实际眼高与凸体平面，不能透过甲板显示另一层敌人。
+- 回归：`node tools/test_classic_map.mjs`；浏览器已验证 21 项：镜像几何/碰撞/出生点/雷达、32 个刷点、双侧上下楼和出口跳箱、顶棚、子弹、手雷、雷达遮挡、60 秒 8 人寻路与 AI 下地道。调试增加 `movementStep(dt)` / `supportAt(x,z,feetY)`。
+
+## 2026-10-09 统一手臂与投掷物（优先于旧投掷约定）
+- 投掷物行走摆幅在 `animateWeapon()` 共用 bob 系数处设为其他武器的 30%，同时覆盖经典视模和回退手臂；静步/蹲走原有衰减继续生效，拉环、投掷、切换动作不乘此系数。
+- `classic_arms.js` 从 AK 的实际手/袖蒙皮烘出四块网格，供 `ViewArms.loadClassic` 安装到所有其他武器；材质直接共享 AK，不能再另调成棕手套或绿袖。上臂烘焙时展平至肩向、保留腕端，避免刀重击时暴露 AK 原弯肘折面。旧 `fps_arms.glb` 只作加载失败回退。
+- `assets/classic/grenades/{frag,flash,smoke}` 是经典投掷物模型/50 骨骼/idle、prefire、fire、reload；三者手部纹理与 AK 完全一致。烟雾沿用该来源提供的 flash/smoke 共用形体和动作，贴图从默认 smoke MDL 提取。来源与条件见 CREDITS.md。
+- `tools/import_cf_grenades.py` 必须先把每个 SMD 的独立 bind 姿态变换到统一参考骨架，再写顶点。手臂 SMD 与雷体 SMD 的参考姿态不同，直接共用 inverseBind 会让双手飞出画面。
+- `grenadeAction` 管理拉环、待投、松手和收手；拉环 20/30 秒来自来源 QC，拉环声第 9 帧。离手才扣库存、创建实体、开始引信；按住不蓄力、不炸膛。原 fire 片段第一帧已放开雷，必须从出手时开始播。切枪/死亡/聊天/失焦/失锁取消待投，投出后回先前未丢弃的武器。
+- `grenades.js` 使用 120Hz 子步 + 扫掠球与凸体/AABB 平面求交，覆盖墙、台阶、箱顶/底面；实际碰撞触发弹跳声。积分止于引信时刻并处理浮点尾差，爆点保留真实高度。飞行模型只烘雷体，无手臂/骨架；克隆共用缓存材质/几何，移除时不可 dispose。
+- 高爆伤害与闪光对玩家/AI 都检查实体遮挡；玩家背闪缩短白屏/耳鸣。三类每条命各 1 颗，烟雾 28 粒子/25s；速度、伤害、引信、扩散等是本项目近似参数，不能说是原客户端精确数值。
+- 已做浏览器检查：三类原动作逐帧袖口接缝/出屏、8 武器截图、多分辨率近战、待投/取消/回枪、薄墙高速反弹、30/120fps 一致、真实引信回收、墙后免伤免闪、背闪和烟雾回收。
+
+## 2026-10-09 持枪与近战（优先于旧刀具约定）
+- `classic_view.js` 导入同一 CF AK 社区包的第一人称 `PV-AK47`、`PV-AK47_GR` 与 SMD idle/reload/fire：51 根骨骼，枪和手指共用骨架。`tools/import_cf_view.py` 生成 `assets/classic/ak/view/`。世界/掉落仍用静态 AK，不可把手臂带入世界目录。
+- 第一人称 AK 只有 classic 皮肤启用该视模；加载失败回退原握点。它在 vmScene 中独立显示，切枪/开镜/死亡每帧明确隐藏；枪口光从蒙皮枪口顶点派生，不能继续用旧静态枪口。原换弹有自己的枪身/手臂位移，不能再叠加旧 IK 换弹。
+- AK 原视模两侧上臂各有一个 8 顶点开口，`classic_view.js` 的 `SleeveExtension` 从实际边界提取并逐帧接到画面下方肩位（共用一批动态网格）。不能只平移整把枪遮住断口；手腕边界不延长，手/枪的原蒙皮动画不改。SMD UV 已翻 V，TextureLoader 必须 `flipY=false`，否则袖口纽扣与肩端、枪身标识都会贴错；延伸处使用布料区域。已检查四种分辨率、四段原动画共 2164 个采样，接缝重合、末端出屏。
+- AK 换弹音效按来源 QC 的 39/299、102/299、202/299 帧比例播放；其他枪仍用旧 0.16/0.58/0.80。M4/AWM 分别设置静止构图，仍是既有 IK，不能宣称已导入它们的原版动作。
+- `melee.js` 是刀具参数/姿势的单一来源。旧 CS 的 0.91m、即时射线扣血、统一后坐抖动已被替换。左键单击横划；按住接前刺；右键翻握下刺。轻划 0.4s、续刺 0.5s、重刺 1s；命中窗口分别 0.11–0.20 / 0.15–0.23 / 0.38–0.48s。
+- 刀距 1.4m 是本项目按米制场景标定的近似值，不是官方精确数据。距离从相机到实际命中表面，不另加敌人半径；窗口内扫过多条射线，保留地图阻挡，一刀最多结算一次。低帧率跨过整个窗口也必须执行扫掠。
+- 轻刀身体/头部为 35/90，重刀 90/180，背刺 120/180；轻刀爆头不再无条件秒杀。上述数值属于本项目近似配表，人物没有独立护甲系统。
+- 切枪/死亡/失锁/失焦/聊天取消未完成的刀击；左右键持续输入分别控制连划/连续重刺。刀具右肘和左防守手以相机肩位为锚，前臂保持连到画面外；重击只把刀身绕掌心翻握，不把整只腕子翻转 180°。
+- 调试：`meleeState` / `meleeStep(dt)` / `poseMelee(kind,t)` / `knifeStats` / `classicViewState`。20 项浏览器专项检查通过，覆盖前摇、一次伤害、1.39/1.41m 边界、墙体阻挡、切枪取消、真实 SWAT 命中与原视模切换。
+
+## 2026-10-09 社区原素材导入（当前规范，优先于下方历史记录）
+- 默认场景由 `classic_map.js` 加载 `assets/classic/transport/` 的社区 CF 运输船移植资源，失败时才调用 `map.js` 的程序化地图。下方 COLS/ROWS/STACK、14 个货箱与 33 条雷达记录只描述回退地图，不可拿来断言当前原图。
+- 来源、署名与使用条件见 `assets/classic/CREDITS.md`；只完成本地接入，未发布。SWAT 是社区重制版，不能宣称全部是未修改的原游戏资源或完整 1:1 客户端。
+- BSP 转换只画 worldspawn，排除不可见购买区子模型；54 批材质、22515 三角面，保留原贴图/光照图/天空。天空盒顺序为 ft,bk,up,dn,rt,lf；最后两面顺序错会出现云层接缝。海面沿用本项目水材质。
+- 754 个凸体碰撞（含地道）保留原平面，`brush_collision.js` 的 `intersectsBrush` 与 `brushTop` 供玩家/AI 共用，不能把斜面退回整个 AABB。雷达来自 304 个可见顶面，不从 collider 反推。双方各 16 个原出生点；出生背包区从我方出生点包围矩形加 2m 余量派生。
+- `GroundNavigation` 用 0.55m 基础网格加楼梯中心采样建立分层共享反向流场，实际地板决定可走区域；八方向不能切角。每次玩家目标网格变化才重算，角色脚底跟随地板高度。改图后必须做定步长寻路验证，不能只观察截图。
+- `ClassicSoldierRig` 使用 50 骨骼、3724 三角面的 SWAT；8 个可见蒙皮网格，其中 2 个头部命中网格。既有 IK 驱动原骨架，未导入 CF 原动作。加载失败时回退原 22 网格人物。Source VTX 绕序需反转，否则会从外面看到内壁。
+- SWAT 尸体落地基准为 0.35m（实测最低点约 0.027m），回退人物仍是 0.26m。倒地后保留 5s，再按累计时间下沉；对象池复用必须重置姿态。
+- 默认 AK 使用社区原 CF 的 798 三角面 SMD 转 GLB，握点 `ak_cf`、长度 0.82m；开火/退匣/插匣/拉栓使用 4 段原 WAV。M4/AWM 仍是既有精细模型的黑色/军绿配色。
+- 三把默认模型启动时预加载；世界目录第二个参数接收已加载的模型，玩家/敌人/掉落物保持同一几何。未预加载的其他皮肤仍可回退基础模型。不得恢复“精细模型只用于玩家”的旧约定。
+- `tools/import_cf_source.py`、`tools/import_cf_ak.py` 可重做本地格式转换；下载包不放仓库，产物与包哈希记在 manifest。军徽仍为自绘，人物动作/枪感/AI/HUD 仍为本项目实现。
+
+## 2026-10-08 经典老版视觉（程序化回退与历史记录）
+- 用户已选择经典老版端游；本节描述原素材导入前的自建人物与地图。当前默认资源见上节。
+- 默认背包和 `DEFAULT_SKIN` 三把主武器均为 `classic`；M4 复用 `m4_gold.glb` 的精细几何并按三个材质槽改为黑钢/聚合物，AWM 复用 `awm_field.glb` 的精细几何改为军绿。保持各自既有锚点和 targetLen。旧皮肤目录/API 保留，但 `randomGunRoll()` 只出经典三枪。
+- 人物仍是 22 个网格 / 4 个头部命中网格：圆角衣装、收腰躯干、椭圆头部/面罩/护膝、双片护目镜、三档头盔/头套。布料纹理全角色共享，材质仍逐角色独立。尸体最大前伸量实测轻装 0.2056m，另两档 0.2544m，均在既有 0.26m 落地边界内。
+- 地图：中路栈桥已整体移除（几何/碰撞/射线/小地图同步）；两侧屋顶与楼梯仍可走。龙门吊整体移到 z=−43，合批在变换之后；中央两口箱改为 1.90m 高的深绿篷布货箱，位置/平面尺寸保持。边界与 AI 通道不变。
+- `STACK` 两端行改为 `[2,1,1,2]`，中间行不变；16 个钢集装箱 + 2 口篷布货箱，共 14 个货箱 collider；`topdown` 共 33 条，无 bridge 条目。
+- `killMedalSvg` 是自绘金属羽翼军徽；位于屏高 64% 的准星下方。普通击杀内嵌武器，爆头改为骷髅（因此 `killIcon().hasGun` 在爆头时为 false），黄金爆头改金色。1.15s 后淡出，连杀文字与计时条在下方。
+- `#killBurst` / `#streakFlash` 仅保留旧读口兼容，不触发动效且 CSS display:none；不要恢复全屏冲击波。连杀计数及上次完成的经典男声逻辑保留。
+- 雷达改为圆形（184/144/114px），`toPx` 与 `_box` 共用等比投影，使用地图半对角线把四角收进圆内。可见性/烟雾/开火暴露规则不变。
+
 ## 项目概览
 - **战术突击（Tactical Assault）**：基于原生 HTML + Three.js（CDN，无构建步骤）的浏览器第一人称射击（FPS）游戏，玩法对标穿越火线（CrossFire）。
 - 战场为 CF 经典「运输船」集装箱货轮甲板（**晴天白昼**）；多武器系统（步枪/狙击/手枪/近战/投掷物三件套）。
@@ -13,7 +70,7 @@
     - **只有 `[data-pane="play"]` 的正文写在 HTML 里**，其余三页由 `scripts/lobby.js` 生成（单一数据源）。play 页里那块 `.menu-setup` 是从旧首页**原样搬家**的 —— `#enemyMinus`/`#enemyCountVal`/`#enemyPlus`/`#mlDiff` 四个 id 一个都没动（`buildMenuMatch()` 与 `init()` 里的步进器都是模块级无保护取用）。后面接 `.lobby-brief`（`#lobbyLimit`/`#lobbyTime`）与 `<button class="menu-btn" id="startBtn">`。
     - **`#gameover` 与 `#menu` 共用 `.menu` / `.menu-panel` / `.menu-title` / `.menu-sub` / `.menu-btn` / `.gameover-stats` 这几个类**（它自己仍是 `class="menu hidden"`，**没加 `.lobby`**）。所以大厅样式一律另起 `.lobby*` 作用域挂在 `#menu` 上，**绝不能去改那几个共用规则** —— 改一个 `.menu-panel` 就会顺手改掉结算画面。已实测：`endTDM("win")` 后结算面板 `display:flex`、`.menu-panel` `display:block`、「再来一局」可见、标题是还原后的纯色 `rgb(74,222,128)`。
 - `styles/game.css` — 全部样式（CF 风格 HUD、准星、背包、菜单、命中/受击/闪光特效、**击杀图标与击杀冲击波**、狙击镜、**左下聊天框**）。层级：`.menu` 10 > `.fx-layer` 8 > `.hud` 7 > `.scope` 6 > 画布 1。
-  - **击杀冲击波（`.fx-layer .killburst`）是「击杀动画要酷炫华丽」那个需求的落点**：一个节点 + 两个伪元素承载三个动画（环 / 放射速度线 / 向外扫的光带），三档只换 `color` 与 `--kb`。**它的尺度上限是「准星周围的一记爆发」而不是「糊满全屏的一层光」** —— 「过于浮夸、挡视野」那次改动把它与击杀图标一起收过一轮（有 A/B 表）。结构、`--kb` 阶梯、像素判据、两条陷阱（伪元素同时吃母元素的 `transform` 与 `opacity`；`mix-blend-mode` 在 `.fx-layer` 这个 stacking context 里是空操作）都写在 HUD 那节的「击杀冲击波」一条里。
+  - **经典军徽**位于准星下方；旧 `.killburst` 与 `.streak-flash` 已停用，见文件开头当前规范。
   - `.chat` **只锚 `bottom`、不定 `top`/`height`**（内容变高时自然向上生长，新行在最下、旧行往上顶）。**必须自带中文字体栈**（`.hud` 是 `Consolas, monospace`，没有中文字形，不覆盖就掉到系统衬线体）。`pointer-events` 沿用 `.backpack` 那条先例：外层 `none`（日志区永不接受点击，挡不住准星与开火）+ 输入框单独复位 `auto`。
   - `.chat-input` **常驻占位、用 `opacity`/`visibility` 切换而不是 `display:none`**，否则每次开关输入整摞行都会跳一下。窄屏走 `@media` **只缩字号与宽度、不用 `transform: scale()`**（同菜单那条禁忌；且 480px 下不收宽度会压住右下角 240px 宽的弹药区）。
   - **首页走 CF 大厅配色（炭黑 + 琥珀橙 `#ff9b1a`），与战场 HUD 的战术绿/红是两套色**：大厅是「界面」，橙黄承担强调与可点性；HUD 保留绿/红/黄的功能色。这块是 `DESIGN.md`「避免大面积高饱和」那条禁忌的**明确例外**（CF 的大厅本来就是大面积橙黄）。
@@ -33,16 +90,16 @@
     3. **`lobby.setMatch()` 挂在 `buildMenuMatch()` 里** —— 那是 `enemyTarget`/`difficultyId` 的**唯一**既有汇总点（`init()`、两个步进器、`__tactical.setEnemyTarget`、`setDifficulty` 都会过它），挂在那里就不会漏。
   - **`pointerlockchange` 的加锁分支要 `lobby.setResume(false)`、失锁分支要 `lobby.setResume(true) + lobby.refresh()`**。失锁分支那条 `if (state === "playing")` 里的 `state` **仍是 `"playing"`**（中途按 Esc 回大厅不结束对局），所以点主按钮是**原局续打**而不是重开一局 —— 文案不改玩家会以为按下去要重来。`refresh()` 是为了让「个人仓库」反映这一局里捡到的枪。
   - **`__tactical` 读口**：`lobbyState()` / `lobbyData()` / `lobbyShow(tab)`。`lobbyState()` = `Lobby.state()`（`ok`/`tab`/`tabs`/`panes`/`rendered`/`resume`）再补两个只有 main.js 知道的量：`visible` 与 `coveringVm`。**「大厅是否可见」只能从 `menu.classList.contains("hidden")` 判** —— `state` 永远不会回到 `"menu"`（只有 `gameStart` 置 `"playing"`、`endTDM` 置 `"over"`），拿状态机去问会得到恒假的答案。
-- `scripts/map.js` — 运输船地图（CF 经典「运输船」甲板）：炭灰钢甲板 / 船体 / 抬高的舷侧走道与栏杆、**4×4 集装箱网格（2 列/舷 × 4 排，共 20 只 + 2 只中央横置绿箱）**、米黄木质货箱堆、**左右舷两层甲板室（带外部楼梯 + 可上人屋顶）**、**横跨中路的栈桥**、船首舰桥（烟囱 + 桅杆）与船尾甲板室、舷边救生艇 / 黄白条纹遮阳棚 / **龙门吊** / 叉车、港口小道具（系缆桩/通风管/消防桶/舱盖/救生圈/信号灯/警示线）、海浪顶点动画、**烟囱白烟 / 海鸥 / 吊装小车等动态元素**；产出 `colliders`（AABB）、`obstacles`（射线阻挡）、`bounds`、**`topdown`（小地图俯视布局，见下）**。
-  - **`topdown` 是构建期在各构建点顺手推入的，绝不从 `colliders` 反推**。`colliders` 里混着栏杆、隐形墙、逐级台阶碎片与几百条「挡人但不该画」的件，拿它画小地图是一片噪声。条目统一 `{ x, z, hx, hz, kind, y0? }`，`kind ∈ container | house | crate | stairs | walk | bridge | hull`，目前 **34 条**（container 14 / crate 9 / stairs 4 / walk 2 / house 2 / hull 2 / bridge 1）。
+- `scripts/map.js` — 运输船地图（CF 经典「运输船」甲板）：炭灰钢甲板 / 船体 / 抬高的舷侧走道与栏杆、**4×4 集装箱网格（2 列/舷 × 4 排，共 16 只 + 2 口中央篷布货箱）**、米黄木质货箱堆、**左右舷两层甲板室（带外部楼梯 + 可上人屋顶）**、独立的屋顶瞭望位、船首舰桥（烟囱 + 桅杆）与船尾甲板室、舷边救生艇 / 黄白条纹遮阳棚 / **龙门吊** / 叉车、港口小道具（系缆桩/通风管/消防桶/舱盖/救生圈/信号灯/警示线）、海浪顶点动画、**烟囱白烟 / 海鸥 / 吊装小车等动态元素**；产出 `colliders`（AABB）、`obstacles`（射线阻挡）、`bounds`、**`topdown`（小地图俯视布局，见下）**。
+  - **`topdown` 是构建期在各构建点顺手推入的，绝不从 `colliders` 反推**。`colliders` 里混着栏杆、隐形墙、逐级台阶碎片与几百条「挡人但不该画」的件，拿它画小地图是一片噪声。条目统一 `{ x, z, hx, hz, kind, y0? }`，`kind ∈ container | house | crate | stairs | walk | bridge | hull`，目前 **33 条**（container 14 / crate 9 / stairs 4 / walk 2 / house 2 / hull 2）。
     - **推入点与 `colliders.push` 同源、用同一批局部量**（这样两边不可能漂移），但**粒度不同**：**集装箱是每格一条、不按叠放层数**（同一格叠 2 层在俯视图上是同一个方块，与 `colliders`「每格一个」一致）；`addStairs` 整条梯段画成一个长条（一级 0.62m 在 40×68 的图上不到 1px）；甲板室整座画成一块实心（墙上的门洞在这个尺度读不出来）；舰体块按地图矩形裁掉，只在上下缘露出一点，那一点正好是「这条船还有首尾」的可读信号。
     - **栈桥那条带 `y0`**（值与 `colliders` 里同源）——它画出来（玩家该知道桥上有人），但**不算视线遮挡**（与 `enemies.js` 的 `c.y0 >= ENEMY_HEAD_ROOM` 同一条语义）。
     - **改 `COLS`/`ROWS`/`STACK` 之后 `topdown` 自动跟上**（它在同一个循环里），不必额外维护；但**新增任何"大件"要记得补一条** —— 漏了不会报错，小地图上就是少一块地标。
 
   - **船体尺寸**：`DECK_W = 20`（半宽）、`DECK_L = 34`（半长）→ 甲板 **40×68m**（原 52×104，缩到约 50% 面积）。`bounds = { hw: DECK_W-0.65, hl: DECK_L-0.65 } = {19.35, 33.35}`，船尾 `+z` 是我方出生、船头 `-z` 是敌方基地。船首（z=-(DECK_L+8)）舰桥 + 烟囱 + 桅杆，船尾（z=DECK_L+5）甲板室；两端各有一块 6.2m 高的红色舷侧舰体块（`hullTexture()`）。**`spawnRadius` 已删**（曾经是死代码，全仓库无消费点）。
   - **集装箱是「列 × 行」的 4×4 网格**，不是手摆的一堆坐标：
-    - `COLS = [-11.6, -6.4, 6.4, 11.6]`（列心，**间距 5.2**，2 列/舷）；`ROWS = [-15.2, -6.2, 6.2, 15.2]`（行心，**间距 9.0**，4 排）；`STACK[r][c]` 是每格的叠放层数（0 = 空位），整体左右/前后镜像。**网格 12 个非空格 → 20 只箱**（两端两排 `r0/r3` 整排 2 层 = 前沿墙，中间两排只剩内列各 1 层），再加 2 只中央横置绿箱 = **22 只**。
-      - **碰撞体是 14 个而不是 22 个**：`colliders` 是**每格一个**（不论叠几层），所以是 12 + 2。写审计断言时别按箱数写（曾经断言 22 → 假红），AGENTS.md 下面那条「审计脚本里的尺寸常数要跟着实测走」讲的就是这类空跑/假红。
+    - `COLS = [-11.6, -6.4, 6.4, 11.6]`（列心，**间距 5.2**，2 列/舷）；`ROWS = [-15.2, -6.2, 6.2, 15.2]`（行心，**间距 9.0**，4 排）；`STACK[r][c]` 是每格的叠放层数（0 = 空位），整体左右/前后镜像。**网格 12 个非空格 → 16 只钢箱**（两端两排 `[2,1,1,2]`，中间两排只剩内列各 1 层），再加 2 口中央篷布货箱 = **18 只**。
+      - **货箱碰撞体是 14 个而不是 18 个**：`colliders` 是**每格一个**（不论叠几层），所以是 12 + 2。写审计断言时别按箱数写（曾经断言 22 → 假红），AGENTS.md 下面那条「审计脚本里的尺寸常数要跟着实测走」讲的就是这类空跑/假红。
     - **真实尺寸是 `CONT_T`(宽) 2.55 × `CONT_H` 2.43 × `CONT_L`(长) 6.00**（`CONT_SCALE = 1.9`）。**这个数字必须从 collider 直方图实测**（`dump` 脚本），照文件名或旧文档猜会得到 4.85×11.4 那种两倍多的值 —— 按错误尺寸排网格会得到 4.65m 的列距，箱子之间空得能开船，整张图散掉（实测踩过，是这次改图里代价最大的一个错）。
     - 由此**列通道净宽 = 5.2 − 2.55 = 2.65m**、**行通道净宽 = 9.0 − 6.00 = 3.0m**。中央大道是 x∈[-6.4+1.275, 6.4-1.275] ≈ ±5.1（约 10.25m）。中央 z=±10.7 各横置一只深绿箱（`rot=SHORT`）切断大道，形成 S 形交火线。
       - **这口横置绿箱绝不能摆在大道正中（`x=0`）** —— 见下面「AI 绕行的几何约束」一节，那是敌人 AI 的硬约束、不是美术选择。现在两口箱心在 **x = ∓3.85**（箱体压 x ∈ ±[2.575, 5.125]，东沿与内列箱西沿 5.125 齐平），两口分别偏两侧、z 也相反。
@@ -54,13 +111,8 @@
     - 9m 失败的样子（逐帧追踪过）：敌人在墙面外 x∈[-5.5, -1.85] 之间**来回蹭**，每滑 3.7m 就翻一次向，永远出不去。蹭的原因是 `detourSide` 被「净推进监工」反复翻转（见 `enemies.js` 那条注释：监工用「离玩家的距离 2.2s 内没减少 0.35m」判卡住，而**贴着长墙横滑恰恰是远离玩家的**，于是把合法绕行判成了卡死）。**把监工换成「2.2s 净位移 < 1.0m」实测更差**（7m 那档 8/8 → 6/8，两种判据在长墙几何里各有盲区），已回退。所以真实地图请守住 3m 这条线，别去指望 AI 能绕开一整堵墙。
     - 落地：① 中央那两口横置绿箱（`hx = 3.0`，超限）从 `x=0` 挪到 **`x = ∓3.85`**，被挡区间从「两侧窗口各 1.125m」变成「单侧窗口净宽 6.7m」；② 木箱堆 `nx ≤ 3`（半宽 1.40m）安全，`nx = 4` 时 1.875m 也仍在限内；把守出生口那两堆仍**偏心摆到 `x = ±3.0`**，给敌人让开中轴。
     - **改图之后必须重跑寻路回归**（不是只看有没有卡住的截图）：`t.pause()` 后定步长快进 60s，判据要用**累计路程**而不是位移（「原地画圈」和「完全没速度」的位移都是 0），见「无头测试的几个坑」。
-  - **立体结构（`y0` 的用武之地）**：左右舷各一座 2 层甲板室（`PORT_X=-12.0` / `STBD_X=12.0`，`topY=4.5`），**外挂楼梯**上屋顶、屋顶整块可站人、屋内可进入；一条 `BR_Y=4.62` 的**栈桥**横跨中路连接两舷屋顶（`xL/xR = PORT_X+2.4 / STBD_X-2.4`，**跨度 19.2m**）。
-    - **栈桥两侧的桁架栏杆是实心障碍**（`colliders` 两条：`z = ±0.9`、`hz = 0.07`、`hx = span/2`、`h = BR_Y+1.42`、`y0 = BR_Y-0.12`）。原先它们只是画上去的（`obstacles` 里只有上弦那根），玩家走到桥边一步就穿出去掉下桥 —— 用户实测报的「看得见的障碍与障碍逻辑对不上」。
-      - **高度必须止于看得见的上弦顶端**（`BR_Y+1.35` 中心 + `0.07` 半厚 = `6.04`）：再高就是**看不见的墙**（脚底明明越过看得见的栏杆却还是被挡）。取这个高时跳跃**恰好过得去** —— 脚底从桥面 `4.74` 抬到 `5.54` 即可（`JUMP_VEL 7.5` / `GRAVITY 21` ⇒ 跳高 1.34m），所以「**必须跳起来才能从桥上下来**」是靠一道看得见的栏杆成立的，不是靠隐形墙硬拦。实测：一直按 W 走停在 `z = -0.37`、`y = 4.74`（下不去）；补一次空格后落到甲板 `y = 0`、越过栏杆到 `z = -8.2`。
-      - **可走带因此只剩 `|z| ≤ 0.38`**（1.8/2 − 0.07 − 0.45 半径）。两端（`x = ±span/2`）仍然敞开、照样通到屋顶 —— 实测从桥心沿 +x 走到 `x = 10.05`（被甲板室顶上的方舱挡住）、`y = 4.50` 已落到屋顶。
-      - **与屋顶栏杆那条「不给碰撞」的区别**（`roof` 那段注释）：屋顶的栏杆围成**四面**，给了碰撞等于把整块屋顶封死（人走不到边上）；栈桥只有**两条长边**，所以给碰撞不堵路。别把这条"统一"过去。
-      - **桥下那条通道不受影响**：`y0 = 4.5` ⇒ 甲板上的玩家判「4.5 ≥ 0 + `PLAYER_TOP` 1.78 → 从底下过」，敌人那边 `blockedAt` 直接滤掉 `c.y0 ≥ ENEMY_HEAD_ROOM` 的碰撞体。实测：甲板高度从 `(4.5, 0)` 一路走到 `z = -8.97` 无阻；60s 定步长寻路 8 人累计 143~180m、0 人卡住、0 NaN 帧。
-      - **只加"挡人"、没加"挡子弹"**：三道横杆与斜腹杆仍然不在 `obstacles` 里（只有上弦那根在）—— 栏杆本来就是透空的栅格，子弹从缝里过去是对的。要改这条得连着敌人 LOS 与掩体一起想。
+  - **立体结构（`y0` 的用武之地）**：左右舷各一座 2 层甲板室（`PORT_X=-12.0` / `STBD_X=12.0`，`topY=4.5`），**外挂楼梯**上屋顶、屋顶整块可站人、屋内可进入；经典版两侧屋顶不再由中路栈桥相连。
+    - 经典版已移除中路栈桥；旧桥的栏杆与桥面碰撞也已移除。两侧屋顶与楼梯单独保留。
     - 楼梯用 `addStairs(cx, zBottom, dir, topY, mat)` 生成，**`TREAD` 必须大于 `PLAYER_RADIUS`（0.45）** —— 这是本碰撞模型推出来的硬约束：分轴解算会把「下一级台阶」按玩家半径外扩，`TREAD ≤ 0.45` 时那一级的外扩盒正好盖住当前踏面，玩家永远站不上去。第一版 `TREAD = 0.40` 实测卡死在 z=13.47。现在 `TREAD = 0.62`（余量 0.17m），级高 `topY/round(topY/0.44)` ≈ 0.45（**不能取到正好等于 `STEP_H`(0.5)**，边界会抖）。
     - 屋顶是**一整块板**（`colliders.push({... h: topY, y0: topY - 0.3})`），不是一圈环。做成环（只有边上 0.95m 有碰撞）时，人从屋顶往中间一走就**穿过看得见的屋面板掉进屋里** —— `y0` 出现之后这个折衷就没必要了。
   - **甲板室立面细节（`addHouseDetail`）——这是「一面刷了漆的墙」与「船舱外壁」的分界。** 两座甲板室（左舷 `PORT_X` / 右舷 `STBD_X`）的四面墙按船舶立面的真实语汇补齐：舷窗（`TorusGeometry` 圈 + 凹进去的玻璃）、腰线 belt rail、四角竖向包边、门框与门楣横窗、门边壁灯、通风百叶、**舱壁管路**。
@@ -200,9 +252,11 @@
   - ⚠️ **`rig.armR` / `rig.armL` 是 `mkArm()` 返回的普通对象 `{ sh, el, hd }`，不是 `Object3D`**（`sh` 才是挂在 `chest` 下的那个 `Group`）。所以 `rig.armR.visible = false` 只是往普通对象上加了个没人读的属性 —— **不报错、也不生效**（要藏整条胳膊得写 `rig.armR.sh.visible = false`）。调试脚本里踩过：一次「藏双臂」的截图照旧带着两条胳膊，于是把弹匣袋误判成了手套。属于本仓库反复记的那类「控制台之外无痕迹」的失败。
   - `setRifle(template, gunId)`：把旧的 `this.rifle` 从 `mount` 上摘掉、挂上新的 `clone(true)`（**不 dispose**，模板是目录里共享的）、记下 `this.rifleYaw = this.rifle.rotation.y`、按 `gunId` 换 `this.anchors = RIFLE_ANCHORS[gunId]`。枪型每局随机，所以**真正挂枪永远是这一步干的**，构造函数的 `rifleTemplate` 参数只是个可用可不用的入口。
   - **`RIFLE_ANCHORS`（`{ grip, handguard }`）现在按枪型分表**，形态照抄 `viewarms.js` 的 `ARM_ANCHORS`（导出的可变对象、便于在线微调）。三把枪目前**统一用 AK 那套值**，因为 `enemy` 变体已经统一缩到 `RIFLE_LEN` 且共用同一套 mount，实测三把枪的枪管口都在 `z=0.46`、与头盔的净空也一致（角点最深 0.03m，无实质穿插）。**改这套值之前先看 AGENTS.md 这条硬约束**：左肩到护木点的距离必须明显小于臂展 `UPPER+FORE=0.61`，否则 IK 会把支撑臂拉成直线（画面变成「枪飘在胸前、手够不着」）。
-- `scripts/audio.js` — **音效系统：采样 + 合成混合**。分界线是「这个声音在现实里存不存在」，不是「重不重要」：
+- `scripts/audio.js` — **音效系统：采样 + 合成混合**。叙事内音效分界线是「这个声音在现实里存不存在」，不是「重不重要」；用户指定的 CF 连杀人声是采样例外：
   - **叙事内音效走 `audio/` 里的 CC0 真实录音**：枪声（AK/AWM）、换弹三段、拉栓、**收枪/出枪（长枪、手枪、刀各一份 `sw_*`）**、**空枪干击 `sw_dryfire`**、**开镜/退镜 `sw_scope_in/out`**、脚步、命中掩体/肉体/跳弹、掠耳、弹壳、倒地、近战、爆炸、玩家受伤、**全部页面交互声**。逐文件署名见 `audio/CREDITS.txt`（**这份文件是 CC0 成立的前提，不能省**）。
-  - **只有「现实里不存在的声音」才保持合成**：连杀播报、命中标记（`hit`/`headshot`）、击杀音调、回合结束、起跳、落地、投掷拉环、烟雾嘶嘶、闪光耳鸣。理由写进 `DESIGN.md` 的「音效设计」一节 —— 这些声音在现实里不存在，换成录音只会变浑浊（且玩家需要一个**每次一模一样**的奖励反馈，录音的逐发抖动在这里是反效果）。
+  - **命中、单杀与回合奖励音保持合成；连杀人声按用户要求改为 CF 经典保卫者英文采样。** `cf_streak_2..8` → `audio/announcer/cf_gr_2..8.{ogg,m4a}`。Double Kill / Multi Kill / Ultra Kill / Unbreakable / Unbelievable / You Want a Piece of Me? / Come and Get Some!；8 杀以上只封顶语音，不封顶连杀计数。不要恢复系统 TTS 或旧方波琶音，也不能把这些游戏语音标成 CC0；来源与归属见 `audio/CREDITS.txt`。
+  - **`SFX.streak(n)` 单通道人声抢占**：`rate:1`、`rateJitter:0`、`vol:0.65`、`volJitter:0`、`hudBus:true`（走 `hf`，不经过场景混响/距离衰减/闪光低通），`schedule:"streak"`、延迟 40ms。`cancelStreak()` 以 15ms 渐隐 + 20ms 停源余量终止前句，新句在它结束之后开始；同帧多杀只听见最后一档。独立人声不受世界音效池占满影响。缺素材返回 false 并记录 `reason:"missing"`，视觉提示照常。`onKill` 只在单杀时调 `sfx.kill()`，连杀时不叠合成奖励音。
+  - **生命周期必须停止人声**：`beginDeath` / `gameStart` / `endTDM` / `pointerlockchange` 失锁分支均调 `cancelStreak()`；切枪不取消连杀。回归脚本 `/tmp/cf-classic-streak.mjs`（默认 OGG，`--aac` 拦 OGG 验证 M4A 回退），覆盖真实 onKill、同帧多杀、播放中抢占、实际音频输出、缺文件与退出清理。
     - **这条线在「手上动作」上是反过来划的**（用户反馈「切枪偏卡通」那次改的）：`holster`/`deploy`/`scopeIn`/`scopeOut`/`empty` 本来按「听不见的机械细节、合成更省」判给了合成，但合成出来的金属扫频一听就是程序 — 而它们在现实里**确实存在**（枪机、镜筒、击针），所以整类搬去真实录音。**判据是「现实里存不存在」，不是「重不重要」** —— 照着这条重划时别只看重要性。
     - **刀（`type === "melee"`）另有一条 `sw_deploy_knife` / `sw_holster_knife`，判据只能写 `type`，不能靠"其余都算长枪"兜。** `deploy()`/`holster()` 原来只分 `pistol` 与"其它"，而 `WEAPON_DEFS.knife.type` 是 `"melee"` —— 它**静默落到了长枪那两条**（725397「M16 换弹全程」/ 725403「步枪摆弄」）上，收出刀听成"子弹上膛"（用户报的正是这一条）。现在 `holster()`/`deploy()` 各多一个 `melee` 分支，刀取 462579@6.600（出，谱心 7.2k，3~12k 占 73%）与 107590@0.482（收，谱心 4.9k = 素材本身就是"入鞘"这个动作）。合成兜底也**不是**长枪/手枪那两条低通扫频：`_knifeDeploySynth()` / `_knifeHolsterSynth()` 走 `_clink()`，用几个**非整数比**的分音同时衰减 —— 整数倍会听成一根有音高的柱子，不像金属。**"出亮收钝"两边同源**（采样 7.2k/4.9k 与合成的 0.20s/0.13s 同向）。
       - **投掷物（`type === "grenade"`）目前仍落在长枪那两条上**（三种投掷物共用同一套 `holster`/`deploy`，没有自己的槽位）。与刀那条是同一类"兜底分支静默接管"，但换手雷/闪光/烟雾时的动作确实是"从装备带上摘下来/挂回去"，与 725403 那句"步枪摆弄"的听感差得不远，所以**这次不动它**；哪天要修，照刀这组加一对 `sw_*_nade` 即可。
@@ -219,7 +273,7 @@
   - **`preload()` 与 `ensure()` 是两件事，绝不能合并。** `ensure()` 的语义是「同步、幂等、只由用户手势调起」（建图 + 解锁 ctx）；预载是**异步网络副作用**，塞进去会让第一局在缓冲还在下载时开局。两者各自幂等，且**在对方第一次跑起来时互相补触发**：`init()` 里 `sfx.preload()` 一次不 await（见 `main.js`），`ensure()` 里 `if (!this._preloadPromise) this.preload()`，`_doPreload()` 结尾再 `if (this._musicOn && this.ctx && !this._music) this._startMusic()`（「ctx 之前就设过 BGM 意愿」的补触发）。
     - **`preload()` 永不 reject**：每个文件独立 `try/catch`、失败记入 `_failed[]` 并 `console.warn`。这不只是防御性编程 —— **异步的 reject 会绕过 `__errs` 与 `loopErrors()`**（它们只抓主循环里的同步异常），一个漏网的 reject 会变成一个没人看见的 unhandledrejection。
     - **解码器可以不是 `this.ctx`**：`AudioBuffer` 与创建它的 context 无关，所以 ctx 还没建起来时用 `new OfflineAudioContext(1, 1, 48000)` 当**纯解码器**（`this._decoder`）。两个都没有（浏览器不支持）就 `_preloadDone = true` 直接返回 ⇒ 全部退回合成。
-    - **`audio/` 里 55 个 stem、96 个文件、约 1.3 MB**（41 个 stem 有 ogg+m4a，14 个只有 m4a）。
+    - **`audio/` 里 62 个 stem、96 个文件、约 1.3 MB**（41 个 stem 有 ogg+m4a，14 个只有 m4a）。
   - **回退是 `_playMapped()` 的第三个参数，不是 `if (has(x))` 分支。**
     ```js
     this._playMapped("shoot", { id: "ak47_fire", … }, () => this._shootSynth(kind));
@@ -248,18 +302,18 @@
   - **连杀播报 `streak(n)` 的音高表有 8 档**（`notes` 数组按半音递增），高档位听感继续往上顶。**音高档数与播报文案档数是两回事**：文案 2~9 + 无上限的中文数字，音频只有 8 档，超了按 `min` 取最后一档 —— 加文案不必动这张表，但别反过来以为文案也封顶在 8。
   - **低频闷音总线的字段名必须叫 `this.muffleNode`，绝不能叫 `this.muffle`**：`SFX` 上本来就有一个 `muffle(dur, to)` **方法**，`ensure()` 里写 `this.muffle = this.ctx.createBiquadFilter()` 会用一个**实例属性盖掉同名原型方法**。`ensure()` 一跑（用户点「进入战场」那一下就会跑），`sfx.muffle` 就变成了 BiquadFilterNode，之后每次 `sfx.muffle(...)` 都抛 `TypeError: sfx.muffle is not a function`。而 `clearFlash()` 正是这么调的，它又是 **`beginDeath()` 与 `respawnPlayer()` 的第一行** —— 玩家一死，`beginDeath` 在 `clearFlash` 处抛异常（`dead=true` 已置、**死亡面板根本没机会显示**），3 秒后 `respawnPlayer` 每帧再抛一次：`update()` 走不完 → `renderer.render` 永不执行 → **画面彻底冻住、永远无法复活**（用户实测踩到，排查了两轮）。同一处撞车还连累 `flashbang()` → `this.muffle(d)`，闪光弹一炸也抛。**给类里加实例字段前先搜一遍有没有同名方法**（`panner()` 也是方法，目前没有同名字段，别踩）。
   - `clearFlash()` 现在只在 `ready()` 为真时才走音频（`muffle` 内部已有 `if (!this.ready()) return;`），**所以「无头测试里音频图没建起来」会让这一整类 bug 全部隐身**，见下方「无头测试的几个坑」第一条。
-- `scripts/skins.js` — CF 风格武器皮肤表（`SKINS` / `STOCK` / `DEFAULT_SKIN` / `DEFAULT_MUZZLE` / `skinsFor` / `findSkin` / `isSkinned` / `skinLabel` / **`paintSkin`**）：5 把枪 + 匕首共 **13 项**（每把枪的「原厂」+ 8 款模型皮肤），每款 = 按 **GLB 原始材质名**分部位上漆 + `pulse` 发光呼吸 + 专属枪口焰色。
-  - 实测的分布（**改动这里之后请重新数一遍再用，别抄**）：`ak 2 / m4 6 / awm 3 / pistol 1 / knife 1`。模型皮肤 **8 款**，其余 5 项全是原厂。
+- `scripts/skins.js` — CF 风格武器皮肤表（`SKINS` / `STOCK` / `DEFAULT_SKIN` / `DEFAULT_MUZZLE` / `skinsFor` / `findSkin` / `isSkinned` / `skinLabel` / **`paintSkin`**）：5 把枪 + 匕首共 **15 项**（每把枪的「原厂」+ 10 款模型配装），每款 = 按 **GLB 原始材质名**分部位上漆 + `pulse` 发光呼吸 + 专属枪口焰色。
+  - 实测的分布（**改动这里之后请重新数一遍再用，别抄**）：`ak 2 / m4 7 / awm 4 / pistol 1 / knife 1`。模型配装 **10 款**，其余 5 项全是原厂。
   - **这张表只有两类条目，加新皮肤时必须落在其中一类里**：① **原厂**（`STOCK`）；② **模型皮肤**（带 `model` 字段、自带一棵 GLB，会渲染出「模型」徽章 —— 判据是 `lobbyData()` 交出去的 `s.model`，渲染它的是大厅「个人仓库」那张卡片的 `lv-badge`。面板里那行皮肤已随「取消换皮肤 UI」删掉，所以这里的徽章只剩这一个消费点）。
     - 曾经的 **10 款纯改色皮肤**（火麒麟 / 黑武士 / 黄金AK / 黑龙 / 死神 / 无影 / 极光 / 黄金AWM / 修罗 / 天神）**已全部删除**：它们只是把基础低模染个色，在「换整把模型」面前没有辨识度，面板里和原厂挤在一起、只靠一行色块区分。删掉之后「没有『模型』标识的条目」只剩原厂。
     - **原厂必须留着**：删掉它 `skinsFor("pistol")` / `skinsFor("knife")` 会变成空数组，而 `findSkin` 的兜底正是 `list[0] || null` —— 空表让它返回 null，于是 `paintSkin` 返回 null、`applySkinTo` 变空转，`guncatalog` 里那把枪**整个从世界目录消失**（掉落的手枪再也刷不出来，且没有任何报错）。原厂对应的就是基础枪自己的 GLB，「有对应模型」对它是成立的。
   - **只有 AK/M4**材质是按部位命名的（`Dark_metal`/`Metal`/`Wood`、`Primary`/`Secondary`/`Highlight`），AWM 是单网格单材质、USP 是 16 网格共用 1 个材质。**手枪与匕首现在没有任何皮肤**（只剩原厂），所以「分部位上漆」实际只被 AK/M4 用着，而且它们的 `slots` 现在**只服务于**敌人与地面掉落物那一版基础低模（玩家选中时整把换成模型皮肤）。**投掷物故意不做皮肤**（三件套纯靠 `def.tint` 区分，再叠皮肤就分不清手里是哪颗了）。
   - **`paintSkin(root, weaponId, skinId)` 是唯一的上漆入口**，返回 `glowMats[]`（或 `null`）。`main.js` 的 `applySkinTo` 只是它的薄壳（调它 + 写 `glowMats` + 收尾枪口焰颜色），`guncatalog.js` 也直接 import 它给敌人/掉落物上漆——**上漆逻辑只有这一份**，别再往 `main.js` 里写第二份。
-  - **按「枪型 × 皮肤」数：ak 2 / m4 6 / awm 3 / pistol 1 = 12 种**（`skinsFor(id)` 的长度）。这个数被 `worldModels()` 的断言用着；**四个型号并不相等**。给敌人配枪的 `randomGunRoll()` 只在 ak/m4/awm 里抽，所以那边是 **11** 种（2+6+3）。**匕首不在这条里**（`skinsFor("knife").length === 1`，且 `randomGunRoll` 不抽匕首）。
+  - **世界目录按型号 × 皮肤计共 14 种**（ak 2 / m4 7 / awm 4 / pistol 1）。`randomGunRoll()` 默认只选三种经典主武器；目录仍保留其它皮肤，确保调试换装后的掉落模型可用。
   - **两套形态的依据是「怎么被用」**：
     - **基础低模 + 材质上漆** = 敌人手里那把与地面掉落物的形态（`guncatalog` 从 `baseGun` 派生），皮肤在这条路上只贡献 `slots`（配色）。
-    - **模型皮肤**（现 8 款）= 皮肤自带一个 GLB，选中时**换掉整把枪的模型**（**只作用于玩家**）。8 款是：`ak/classic`「老兵」、`m4/thor`「雷神」（**这是升级既有的雷神，不是新增**）、`m4/frost`「霜白」、`m4/bubblegum`「泡泡糖」、`m4/goldenm4`「黄金M4」、`m4/xuanjin`「炫金」、`awm/volt`「紫电」、`awm/field`「荒原」。
-    - **模型皮肤也必须写 `slots`**（面向**基础低模**的材质名）。把「带 `model`」的那几款从世界枪械目录里滤掉是个**静默回归**：`thor` 同时是背包 2 的默认皮肤，滤掉它敌人的 M4 池从 6 款掉到 5 款，而且没有任何测试会红。正确判据是「有没有材质槽」，不是「有没有模型」——于是 `worldModel(id, skin)` 对**玩家能拿到的每一款**都非 null，`spawnGroundGun` 也就没有静默失败路径。
+    - **模型皮肤**（现 10 款）= 皮肤自带一个 GLB，选中时**换掉整把枪的模型**（**只作用于玩家**）。10 款包括新增 `m4/classic` 与 `awm/classic`，原有 8 款是：`ak/classic`「老兵」、`m4/thor`「雷神」（**这是升级既有的雷神，不是新增**）、`m4/frost`「霜白」、`m4/bubblegum`「泡泡糖」、`m4/goldenm4`「黄金M4」、`m4/xuanjin`「炫金」、`awm/volt`「紫电」、`awm/field`「荒原」。
+    - **模型皮肤也必须写 `slots`**（面向**基础低模**的材质名）。把「带 `model`」的那几款从世界枪械目录里滤掉是个**静默回归**：`thor` 是保留的模型皮肤，滤掉它敌人的 M4 池从 6 款掉到 5 款，而且没有任何测试会红。正确判据是「有没有材质槽」，不是「有没有模型」——于是 `worldModel(id, skin)` 对**玩家能拿到的每一款**都非 null，`spawnGroundGun` 也就没有静默失败路径。
   - **`model` 描述符**（写在 `SKINS[id][].model` 上）：`{ file, rotY, targetLen, anchorKey, muzzleY? }`。`modelOf(weaponId, skinId)` 取它、`allModelSkins()` 列全部。
     - **`targetLen` 是不变量，不是可调项**：必须与被替换的**基础枪**完全相同（ak/m4 `0.82`、awm `0.95`）。`ARM_ANCHORS`、`bx/by/bz` 握持位、`MAGWELL`、敌人 `RIFLE_ANCHORS` 全都是在「原点 = 包围盒中心、最长轴缩到 `targetLen`、枪口在局部 −z」这个归一化坐标系里手工量出来的，换了标尺那套数字全部失效。
     - **`rotY` 每个模型都不一样**（实测 + 渲染验证，把枪口转到本组 −z 所需的绕 Y 角）：`ak_classic` `+π/2`、`m4_thor` `+π/2`、`m4_frost` `0`、`m4_bubblegum` `π`、`m4_goldenm4` `0`、`m4_xuanjin` `π`、`awm_volt` `+π/2`、`awm_field` `−π/2`。**不能照抄基础枪的 `−π/2`**。写错的话长轴会落到 x 上、整把枪横过来——`gunDebug()` 里的 `size[2] >= size[0] && size[2] >= size[1]` 就是拦这个的。
@@ -532,7 +586,7 @@
   - **走 `switchWeapon` 一处挂钩即可覆盖所有入口**：`switchBackpack()` / `respawnPlayer()` / `gameStart()` 全都已经走 `switchWeapon(…, true)`，所以在 `attachMuzzleTo(id)` 旁边调一次 `applySkinTo(id, activeSkinId(id))` 就够。切投掷物也要走这一趟（要靠它把上一把枪改过的焰色还原回来）。
 - **模型皮肤（`mountGunModel` / `applyMountedModel` / `fitGunModel`，只在 `main.js`）**：一款皮肤可以自带 GLB，选中时换掉整把枪的模型。**只作用于玩家**——敌人与地面掉落物永远从 `baseGun` 派生。
   - **`owned[id]` 的形状**：`{ group, gun, baseGun, baseMuzzle, muzzleLocal, models, modelMuzzles, modelLoads, state, def, glowMats }`。`gun` = **此刻挂着的**子树，`baseGun` = 出厂低模（**永不替换**）。
-    - **`baseGun` 是目录的唯一来源**：`init()` 的 `buildGunCatalog({ ak: owned.ak.baseGun, … })` 只能喂它。喂 `gun` 会把高精度模型也塞进敌人/掉落物的目录里（与「仅玩家用模型」相反），而且背包 2 的默认皮肤恰好就是模型皮肤（雷神），开局那一刻随时可能是它。
+    - **`baseGun` 是目录的唯一来源**：`init()` 的 `buildGunCatalog({ ak: owned.ak.baseGun, … })` 只能喂它。喂 `gun` 会把高精度模型也塞进敌人/掉落物的目录里（与「仅玩家用模型」相反），而且背包 2 的默认皮肤也是模型皮肤（经典），开局那一刻随时可能是它。
     - 也不能靠 `group.children[0]` 现取：`group` 后面还会被 `viewArms.attach` / `attachMuzzleTo` 塞进别的子节点，第一个孩子是谁就不确定了。
     - `loadWeapon` 的结束态**必须**是 baseGun 挂着 —— 否则「初始化时目录是干净的」就依赖于「init 完成前没人挂过模型皮肤」的运气。
   - **`fitGunModel(gun, { rotY, targetLen, muzzleY })` 的顺序是「缩放 → 旋转 → 量 → 居中」，不能改。** `Object3D` 的局部矩阵是 **T·R·S**，先居中再旋转会残留一个 `(R−I)·center`。实测残差：三把基础枪是 0.004 / 0.003 / 0.020（**看不出来，所以一直没人发现**），而 `m4a1_leishen` 是 **1.651**、`m4a1_bubblegum` 是 **0.590** —— 枪会悬在手前方一米五。改成先转再居中之后九个模型全部是 **0.000**（`modelResidual()` 就是量这个的，`guncatalog.js` 的 `makeVariant` 早就是正确写法，仓库里已有先例）。
@@ -553,7 +607,7 @@
   - **手臂锚点按模型分表**：`ViewArms.attach/configure` 现在收的是**锚点 key 而不是武器 id**（`ARM_ANCHORS[key] || ARM_ANCHORS.ak`），key 由 `main.js` 的 `armAnchorKey(id)` 给：皮肤 `model.anchorKey` 优先，没有就用武器 id 自己那张。两个调用点（`switchWeapon` / 模型加载完成）都走它，必须同源。敌人的 `RIFLE_ANCHORS` **不用动**（敌人永远不挂模型皮肤）。
     - **不要退回「给枪加一个 Y/Z 平移」那种改法**：一次握持是**两个**接触点（右手腕咬扳机、左手腕托护木）**加**换弹的弹匣井，单一个平移最多只对得准一个点；它还会挪动整把枪，破坏 `bx/by/bz` 当初按「手必须落在画面内」反推出来的构图。
     - 八款模型皮肤的锚点（`ak_classic` / `m4_thor` / `m4_frost` / `m4_bubblegum` / `m4_goldenm4` / `m4_xuanjin` / `awm_volt` / `awm_field`）**初值一律复制所属武器那一套**（含 `m` = 弹匣井，显式写出来是为了可单独调）。实测两手腕都落在各自模型包围盒内（外扩 0.10 以内）、换弹 p=0.58 时左手确实走到弹匣井，所以**目前不需要逐款微调**；要调就用 `armsPose()` + `project()` 的数值链路——`ARM_ANCHORS` 是导出的可变对象、已经接在 `__tactical.setArmAnchor` 上，加 key 完全兼容，而视模从不读枪的几何自适应、只能量。
-- **背包与切枪**：`BACKPACKS` 是 3 个背包，每个记 `{ primary, skin }`（默认 背包1=AK 老兵 / 背包2=M4 雷神 / 背包3=AWM 紫电 —— 三把都是模型皮肤），**在代码里写死**——大厅里没有配装 UI（背包选枪行与皮肤行都已移除；那个位置现在是只读的「个人仓库」，列出当前配装但**一个可点选项都没有**）。游戏内也没有改配装的入口——背包面板与 `switchWeapon` 都不写 `BACKPACKS`（否则 debug 钩子 `switchWeapon("m4")` 会悄悄改掉背包 1）。
+- **背包与切枪**：`BACKPACKS` 是 3 个背包，每个记 `{ primary, skin }`（默认 背包1=AK 老兵 / 背包2=M4 经典 / 背包3=AWM 经典 —— 三把都是模型皮肤），**在代码里写死**——大厅里没有配装 UI（背包选枪行与皮肤行都已移除；那个位置现在是只读的「个人仓库」，列出当前配装但**一个可点选项都没有**）。游戏内也没有改配装的入口——背包面板与 `switchWeapon` 都不写 `BACKPACKS`（否则 debug 钩子 `switchWeapon("m4")` 会悄悄改掉背包 1）。
   - **「三背包 = 三把主武器」这条玩法没丢**：默认值恰好是 AK / M4 / AWM，所以进战场按 `B` + `1/2/3` 依然能在三把枪之间切。丢掉的只是「在菜单里自选哪把配哪个背包」。
   - **皮肤与配装机制整体保留**：`BACKPACKS[i].skin` / `GEAR_SKIN` / `skinForGun()` / `activeSkinId()` / `applySkinTo()` 以及 `__tactical.setSkin` / `skinState` 全部照常生效，删掉的只是 UI，不是能力。默认值与 `skins.js` 的 `DEFAULT_SKIN` 一致，所以「不做任何选择」得到的就是原来那套皮肤。
   - **`skinForGun()` 现在是"没有调用点"的守卫**：它唯一位于菜单选枪按钮里的调用点随 UI 一起删了。函数**保留**是有意的 —— 「M4 不许挂着 AK 的 skin id」这条不变式依然成立，只是触发点变成 `__tactical.setSkin` 这类程序化改动。删掉它等于把这条不变式重新变成「靠调用方自觉」。
@@ -702,7 +756,7 @@
     - `armDeathWatchdog()`：死亡期间每 1.5 秒检查一次，**判据是 `frameCount` 有没有推进**（不是墙上时钟——低帧率机器上倒计时本来就会慢于真实时间，实测 1.2fps 下 3 秒要走 6.4 秒墙上时钟，按秒数判会把好机器误判成卡死）；只有「整整 1.5 秒一帧都没动」才由兜底直接复活。`cancelDeath()` 里 `clearTimeout`，每次 `beginDeath` 重挂。唯一的副作用：`__tactical.pause()`（只停 RAF）期间死亡视角不再被冻结，兜底会照常复活。
   - `bindRoster()` 开头有 `if (!roster.length) initRoster();` 自愈：`gameStart()` 把 `state = "playing"` 放在**第一行**，一旦它中途抛异常，名册就停在 `[]` 而 `update()` 照样跑 `refillEnemies()`，于是每 2.4 秒抛一次 `Cannot set properties of undefined (setting 'enemy')`（实测踩到）。
   - UI 是 `#hud` 内的 `#deathScreen`（层内 z-index 4，天然压住 `.scope` 6、低于 `.fx-layer` 8），红晕 +「你被击杀」+ 击杀者名 + 武器 + 倒计时条；**进度条每帧写 `width`、不做 CSS 动画**（与 `#crosshair` 每帧写 `--gap` 同一套做法，CSS 动画跟不上 `pause()`/变速）。击杀者的武器名走 `enemyWeaponName(e)`（= `e.weaponName`，敌人现在每局随机枪，所以**不再有** `const ENEMY_WEAPON = "步枪"` 那个写死常量），死亡面板与 `pushKillFeed` 两处同源。
-- HUD：顶部单条计分板 `teamScoreVal`（蓝）/`roundTime` 倒计时/`limitVal` 目标/`enemyScoreVal`（红）；左下 `hpVal`+`hpFill`；右下 `weaponName`+`ammoVal`+`ammoFill`；右上 `killfeed`；中上 `streak` + **连杀窗口倒计时 `streakTimer`**；中心 `killIcon`（击杀图标）+ **`killBurst`（击杀冲击波）** 与 `hitdir`。`pushKillFeed()`/`showStreak()`/`updateStreakHud()`/`showKillIcon()`/`showHitDir()` 驱动，连杀播报同时走浏览器语音合成（失败静默降级）。`.fx-layer` 里另有高档连杀的全屏边缘辉光 `streakFlash` 与每次击杀的 `killBurst`。
+- HUD：顶部单条计分板 `teamScoreVal`（蓝）/`roundTime` 倒计时/`limitVal` 目标/`enemyScoreVal`（红）；左下 `hpVal`+`hpFill`；右下 `weaponName`+`ammoVal`+`ammoFill`；右上 `killfeed`；军徽下方 `streak` + **连杀窗口倒计时 `streakTimer`**；准星下方 `killIcon`（击杀军徽） 与 `hitdir`。`pushKillFeed()`/`showStreak()`/`updateStreakHud()`/`showKillIcon()`/`showHitDir()` 驱动，连杀人声统一走 `sfx.streak(n)` 的 CF 固定采样（缺失静默降级）。`.fx-layer` 里的 `streakFlash` / `killBurst` 为兼容保留的隐藏节点。
   - **连杀是「计数器 + 一个会重置的时间戳」，不是「最近 N 秒的击杀时间数组」**（`STREAK_WINDOW = 4.0` / `streakCount` / `lastKillAt`，在 `main.js` 靠近 `killTimes` 那个变量原来的位置）。每击杀一人 `streakCount++` 并把 4 秒窗口**从这一发重新起算**；`time - lastKillAt > 4.0` 就归零、重新从 1 数。
     - 这两种写法**真的会算出不同的数**，不是口味问题：在**相邻间隔都 < 4s、但首尾间隔 > 4s** 时分道扬镳。第 0 / 3.5 / 7.0 秒各杀一人 —— 滑动窗口（`killTimes.filter(t => time - t < 4.0)`）在第三杀只数得到 **2**（第 0 秒那杀被 `7.0 - 4.0` 挤出了窗口），而「每杀一人重置计时器」是 **3**：只要相邻两杀都接得上，连杀就一直续着。**这就是 CF 的手感**（`/tmp/cfstreak.mjs` 第 5 条专门守这个分水岭，用 3.5s 间隔，滑动窗口实现在那里必然红）。
     - **时间轴用主循环的 `time`（`time += dt`），不用 `performance.now()`**：`__tactical.pause()` 只停 rAF，`time` 跟着一起冻住，无头测试才能定步长快进（同 chat / 死亡计时那套）。
@@ -720,37 +774,8 @@
       - **调试读口 `__tactical.streakLabel(n)`**（给任意 n 的播报文案，用来断言阶梯单调无上限）与 **`__tactical.streakHud()`**（给 `{ visible, num, fill, low }`，`fill` 是 `"87.5%"` 这样的字符串）—— 没有它们，「超过五连杀显示的不是五杀」和「条在递减」这两条都只能靠肉眼看截图。
     - **调试读口 `__tactical.streak()` 给 `{ count, since, window }`**：`count` 当前连杀数、`since` 距上一杀的秒数、`window` 窗口长度（免得测试把 4.0 抄一份进去、以后改窗口时假红）。**`since` 在「本局还没杀过人」时是 `null`，不是 `Infinity`** —— 内部 `time - lastKillAt` 确实是 `Infinity`，但 CDP 的 `returnByValue` 走 JSON、`Infinity` 到那边会变成 `null`（实测对着它调 `toFixed` 直接 TypeError）。与其让读口在两处表现不一致，不如在源头就写成 `null` 并写进注释。
     - `gameStart()` 里连同 `killTimes` 那行一起换成 `streakCount = 0; lastKillAt = -Infinity;`。
-  - **击杀冲击波 `#killBurst`（`.fx-layer` 里的第三个孩子，紧跟 `streakFlash` 之后）—— 这是「击杀动画要酷炫华丽」那个需求的落点，与 `.killicon` 的过冲入场是一对，都由 `showKillIcon()` 里**同一处**点亮。**
-    - **触发只有一个入口**：`showKillIcon(headshot, weaponId, golden)` 末尾那句 `spawnKillBurst(kind)`（`kind ∈ "hit" | "head" | "gold"`），而 `showKillIcon` 的唯一调用者是 `onKill()`。图标、扫光带、冲击波**三件事挂在同一个函数上**，因此不可能出现「图标亮了但冲击波没炸」这种半截状态。重触发走仓库既有的那条惯用法：**重写 `className` → `void el.offsetWidth` 强制一次回流 → `classList.add("show")`**（同 `.streak` / `#streakFlash`）。
-    - **一个节点承载三个动画，分别挂在元素本身 + 两个伪元素上**（`styles/game.css`）：
-      - **元素本身 = 主冲击环**（200×200、`border: 4px solid currentColor` + 双层 `box-shadow` `0 0 12px 1px / 0 0 30px 6px`，`kbRing` 0.5s `cubic-bezier(0.15,0.75,0.25,1)`，`scale 0.16 → 1.6×--kb`）。最锐、收得最快，**也是三层里唯一吃 `--kb` 的一层**。
-      - **`::before` = 放射速度线**（520×520 的 `repeating-conic-gradient` 出条 + `radial-gradient` 当 `mask-image`，`kbRays` 0.42s `ease-out`，自身 `scale 0.34 → 0.62` **（不带 `--kb`）** + `rotate(-7° → 5°)`）。**色标是 1.4deg 实线 / 7.2deg 空 / 1.4deg 实线 / 11deg 空** —— 两段**间距不等**是关键：等距密排的细线读起来是一把伞骨，「**宽窄不一 + 疏密不一**」才像炸开（第一版 0.9deg 等距 24 根，冻结帧上读作几道淡米色的斜杠）。
-      - **`::after` = 向外扫过的光带**（560×560 的一整圈柔光 `radial-gradient(closest-side, transparent 30%, currentColor 46%, transparent 74%)`，`kbHalo` 0.46s `ease-out`，自身 `scale 0.24 → 0.62` **（同样不带 `--kb`）**）。**三层里唯一真正铺开的那一层**；它的实际半径 = 母元素 scale × 自身 scale × 280px，两个 scale 都在涨 ⇒ 单调外扩。
-      - **中心必须留空**：速度线那条 mask 的 `transparent 30%` 就是干这个的（光带渐变的中心本来就透、环只有一圈 `border`）。少了它 520px 的锥形条会一直铺到中心、准星正下方糊成一片，**开镜（fov 7.5°）时尤其难看**。这条有专门的回归护栏 —— `centerRise`（半径 < 60px 那几档涨幅的**均值**；`cfkbsweep2.mjs` 里那个同名量是**求和**，两者别混用）在 `/tmp/cfkill.mjs` 里断言 < 8，实测 **1.82**。
-    - **三档只换两样：`color` 与自定义属性 `--kb`（强度倍率）**，其余 CSS 一个字不动。`hit` 金 `#ffd24a` `--kb:1`（与 `.killicon.hit` 同色）、`head` 红 `#ff4d4d` `--kb:1.2`、`gold` 淡金 `#ffe9a0` `--kb:1.5`（黄金爆头：最亮、最大）。`--kb` 被 `calc()` 消费在 keyframes 的目标 `scale` 里（`scale(calc(1.6 * var(--kb)))`）——**自定义属性能这样用，是因为它会继承进伪元素**。**配色没有新增一个色号**：用的就是既有的击杀金/红那套（见 `DESIGN.md` 里「击杀反馈是科技感炫光禁忌的明确例外」那条）。
-    - ⚠️ **`--kb` 只许乘在母元素的 scale 这一处，两个伪元素的自身 scale 不许再乘一遍。** 曾经三处都乘（父 3.4×kb、射线 1.25×kb、光带 2×kb），合成尺度就成了 kb 的**平方** —— gold 的铺开面积是 hit 的 2.25 倍，三档根本不是线性关系。**这类错误不报错、也没有任何可见的中间状态**，只在三档并排比对时才露出来；所以 `styles/game.css` 的 `kbRays`/`kbHalo` 上方也挂了一条同样的注释。
-    - **`box-shadow` 在这里安全，但在 `.menu-panel` 上不安全** —— 两处的差别只有一个：**`clip-path` 会把 `box-shadow` 一起裁掉**（面板与按钮都切了斜角），而 `.killburst` 是个没切角的圆环，所以双层外发光能真的画出来。**要改这里先想清楚有没有给元素加 `clip-path`。**
-    - **`mix-blend-mode` 是被否掉的方案**：`.fx-layer` 有 `z-index: 8` + `position: fixed`，**它自己就是一个 stacking context** —— 里面的元素只会跟这个透明组的背板混合，不会跟背后 3D 场景混，`screen`/`plus-lighter` 会变成一次静默空操作。所以颜色必须**自带足够的亮度与不透明度**，不能指望「叠在景物上发亮」。
-    - ⚠️ **伪元素同时吃母元素的 `transform` 与 `opacity`**（它们是母元素的子树）。两个后果都实测过：① 母元素的 `scale` 会**乘在**伪元素的有效半径上 —— 冻结在 t=0.30 时 `#killBurst` 的 `getBoundingClientRect()` 是 **309.34×309.34（hit）/ 463.42×463.42（gold）**（基数才 200px；收敛前 gold 是 **953.75×953.75**，量法见 `/tmp/kbrect.mjs`），所以射线看着能甩出准星好几圈；② **`kbRing` 的 `opacity` 不能太早归零**，不然光带会被一起掐掉（现在 62% 那一帧还留 0.42）。
-    - **为什么是三层而不是「一圈细线」**：白昼甲板本来就亮，第一版（4px 环 + 0.9deg 射线 + 一圈模糊的边）冻结帧上只读到几道淡米色的斜杠，**区域亮度只涨了 2.79/255**（等于没画）。三处补偿都是照这条来的：环加双层发光、射线加宽到 1.4deg 且间距不等、`::after` 从「一圈模糊的边」改成「一整条向外扫的光带」。
-    - **尺度收敛（「击杀特效过于浮夸、挡视野」那次改动）—— 补偿加过了头，这一轮把它压回「准星周围的一记爆发」。** A/B 用 `/tmp/cfkbsweep2.mjs`（冻结法：`pause()` 冻住画布 → 注入 `animation-play-state:paused` + 负 `animation-delay` 把三个动画 seek 到确定时刻 → 截 A → 触发一次 `onKill` → 截 B → 比逐像素差的**半径剖面**）。模式 `both` = 玩家实际同时看到的两件：
-      | 指标（各档最坏帧） | 收敛前 | 收敛后 |
-      |---|---|---|
-      | 屏幕外圈 60px 被点亮（Δ>25） | **30.9%** @t=0.22 | **0.0%** |
-      | 全屏被点亮 | 36.2% @t=0.22 | 1.8% @t=0.22 |
-      | 下半屏被点亮（`cov`） | 57.1% @t=0.22 | 3.4% @t=0.22 |
-      | 准星 ±28 | Δ25.69 / 峰值 209.63 @t=0.32 | Δ1.84 / 峰值 138.49 @t=0.32 |
-      | 准星 ±50 | Δ22.11 | Δ8.96 |
-      **逐件归因：两件的「最坏帧」本来就不在同一时刻，别把它们的数混着比。** 收敛前 `burst` 的坏在**铺开**（t=0.22：屏幕外圈 30.9%、全屏 36.0%、下半屏 57.1%），而它在准星那一格上一直很轻；`icon` 的坏在**盖住瞄准点**（t=0.32：准星 ±28 Δ24.04 / 峰值 209.63，同一时刻 burst 自己只贡献 Δ1.56 / 峰值 28.33）。收敛后 —— `burst`：全屏 ≤1.6%、外圈 0.0%、准星 ±28 最坏 Δ1.51 / 峰值 22.33（@t=0.08）；`icon`：准星 ±28 最坏 Δ1.76 / 峰值 138.63（@t=0.32）。**冲击波现在完全不碰瞄准点了**，图标那点残值是外发光与扫光带的尖端擦到 ±28 格的外缘（140px 放大图里绿色准星完整可见，白色扫光带停在准星上臂之上）。
-      - 冲击波侧的四个旋钮：**`--kb` 只留父 scale 一处**；父 scale 上限 **3.4 → 1.6**（gold 2.4）、射线 **1.25 → 0.62**、光带 **2 → 0.62**；峰值不透明度 **0.95/1/0.5 → 0.80/0.55/0.28**（射线与光带是「铺开」的那两层，先压它们）；外发光 **18px 2px / 48px 10px → 12px 1px / 30px 6px**、时长 **0.6/0.5/0.58 → 0.5/0.42/0.46s**。
-      - 图标侧另收过两轮（84→72→62px、光晕 12→10→7px、`0%` 缩放 2.3→1.7→1.4、时长 0.92→0.80s），**判据是「下缘不许探进准星 ±28 方框」** —— 两轮各自的读数写在 `styles/game.css` 里 `.killicon` 上方那段注释里（本轮把下缘从 `cy-20` 推到 `cy-30`，准星方框是 ±28）。
-      - **`top: calc(50% - 92px)` 不能再往上挪**：再高就与连杀计时条（`top: calc(24% + 56px)`，713px 高下约 227px）撞上，两者间隙只剩约 10px。要再收只能继续缩图形与光晕。
-    - **判据必须量像素，不能只看截图** —— 它是个 0.4~0.5s 的一次性动画，截图只能证明「某一帧看着不错」。做法：`pause()` 冻住 WebGL 画布与所有逐帧写入 → 截 A → 注入一段「`animation-play-state: paused` + 负 `animation-delay`」的样式把三个动画 seek 到确定时刻 → 触发**一次** `onKill` → 截 B → 比**半径剖面的逐像素差**。三个附带护栏缺一不可：**角落对照 Δ0.00**（证明不是整屏都在变）、**`centerRise < 8`**（准星那一块留着）、**只触发一次**（`streakCount` 停在 1，`showStreak` 的 n ≥ 2 守卫让它不播，否则「十连杀!」文案与 r5 紫金边缘辉光会混进 A/B 差里）。
-      - **「改前」那一轮不能拿现在的 CSS 去跑旧的 keyframes**：`/tmp/cfkbsweep2.mjs` 是在 `<head>` 末尾注入一份 `ORIG_CSS`（同选择器 + 更靠后 ⇒ 级联上赢）来复现改前的，而**时长那一行也必须一起盖回去**。只盖几何不盖 `animation-duration`，同一批采样时刻对应的动画进度就对不上（图标在第 40% 帧附近最大，时间轴一错就读不到它）。补上之后 before 轮复现出与历史基线完全一致的读数（边缘 30.9%、准星 Δ25.69 / 峰值 209.63），这条对照才可信。
-      - **为什么不直接比「整块环带的均值涨幅」**：射线只占约 10% 的角向占空比，均值会被剩下 90% 的空隙稀释（第一版环带均值只涨 2.8，**而峰值像素涨了 145** —— 只看均值会得出「没画」的错误结论）。剖面同时回答三个问题：**哪一圈亮起来了 / 亮了多少 / 中心有没有被糊住**。
-      - **只取中心正下方那一半**：上半圈被 HUD 占着（击杀图标在 center−92px、连杀计时条在 center−152px），把它们算进去的话「图标亮了」会被记成「冲击波画出来了」。
-      - **`/tmp/cfkill.mjs` 里的覆盖阈值是跟着「环带自己那一圈」定的，不是「占下半屏的比例」。** 收敛后环从 r240 收到 r80~120，半径小了近一半 ⇒ 面积小到约 1/5：44.1% 的**环带像素**被点亮，而占下半屏只剩 2.2%。所以主判据是 `peak.lit > 0.15`（环带自己的点亮率），全局占比只留一条 `> 0.015` 的「确实画了东西」下限。**别为了迁就旧阈值（`>0.03`）把特效重新吹大** —— 那正好是这次要消掉的东西。
-      - 视觉复核另有 `/tmp/cfkillview.mjs`（纯出图、无断言）：逐档（hit/head/gold）× 逐时刻（0.04/0.09/0.16/0.30）各出一张**整屏** PNG。**它连发 12+ 次 `onKill`，`streakCount` 会过 10** ⇒ 图上会出现「十连杀!」与紫金边缘辉光 —— **那是测试脚本自己的产物，不是产品缺陷**（比对时别被它带偏）。
+  - **经典军徽取代冲击波**：`showKillIcon()` 重写节点内容，调用 `killMedalSvg()`；单杀与连杀共用一个节点，不累积。普通 / 爆头 / 黄金互斥，爆头后下一次普通击杀必须回到武器图形。
+  - 动效验收要看实际像素、淡出后的 opacity=0、四种屏幕尺寸避开准星和弹药。不要再沿用旧冲击波的环宽/放射线断言，旧节点只为 debug 兼容保留。
 - **战绩面板（按住 Tab，与 CF 一致）**：`#scoreboard` 插在 `#hud` 内，左右两列各「名字/击杀/死亡」，表头是我方·保卫者 vs 敌方·潜伏者 + 目标击杀。
   - **统计必须挂在名册上，不能挂在敌人对象上。** `EnemyManager` 是对象池（`free`/`acquire`/`release`），同一个 `Enemy` 实例会反复易主；把 `kills/deaths` 存在 `Enemy` 上会在复用后串台。`roster` 是长度 = `enemyTarget` 的**常驻条目**数组，`bindRoster(e)` 在补员时把条目挂到敌人（`e.roster`），`onEnemyDeath()` 记 `deaths` 后**解绑**（`roster.enemy = null`）——名册条目活过敌人的一生。对局中改敌人数时由 `resizeRoster()` 跟长度（见上节）。
   - 玩家侧只有一行（`PLAYER_NAME = "你"`），`kills` 直接复用 TDM 比分，死亡数走 `playerDeaths`（`damagePlayer` 里自增）；击杀者的 `roster.kills` 由 `damagePlayer(amount, byEnemy, killer)` 的 `killer` 参数归属。
@@ -765,8 +790,8 @@
   - **定位音**（敌人枪声/脚步）走 `out3d(node, x, y, z)` → `PannerNode`（`equalpower`，比 `hrtf` 省 CPU）；每帧在 `update()` 里调一次 `sfx.updateListener(player.pos, player.yaw)` 同步听者位姿。玩家自身音效（起跳/落地）传空坐标即直连 master，不做定位。
 - **无头测试的几个坑**（用无头 Chrome + CDP 验证时）：
   - **测试音频相关路径前，必须先让音频图「活起来」，否则整条音频链路全程隐身。** `SFX` 的每个方法都以 `if (!this.ready()) return;` 开头，而 `ready()` 是 `this.enabled && this.ctx`；`ctx` 只在 `sfx.ensure()` 里创建，`ensure()` 又只由「进入战场」/「再来一局」两个按钮的 click 调起。历史上所有用例都是直接 `__tactical.beginGame()`，于是 `ctx` 恒为 null、所有 `sfx.*` 都是静默 no-op —— **`this.muffle` 覆盖 `muffle()` 那个致命 bug 因此整整两轮都没测出来**。现在用例开头一律先 `document.getElementById("startBtn").click()`（无头下这次点击没有用户手势，`requestPointerLock` 会以未处理的 Promise 拒绝告警收场，用 `Input.dispatchMouseEvent` 发真点击或直接忽略这个 `unhandledrejection` 都行，但**音频图一定会建起来**），然后再 `beginGame()`。
-    - **「建起音频图」只解决一半 —— 采样是异步预载的，还要等 `audioState().preloadDone === true`。** 55 个 stem 是网络下载 + `decodeAudioData`，`ensure()` 之后立刻读到的 `loaded` 是空的、`lastAttempt.reason` 会是 `"synth"`（看着像「采样全挂了」，其实只是还没到）。用例开头一律 `startBtn.click()` → **轮询等 `preloadDone`** → 再做别的；报加载完整性的那条断言**必须把 `loaded.length` 打出来**（一个都没匹配上的空跑同样是「全绿」，`/tmp/cfsfx.mjs` 里打印的 `载入 55/55` 就是这条抓手）。
-      - **那个 55 是硬编码的断言值，素材增删时必须跟着改**（`/tmp/cfsfx.mjs` 与 `/tmp/cfswap.mjs` 各一处，`totalStems === 55` 与 `pk.n === 55`）。停在旧值不会让任何用例变红 —— 它会安静地变成一条**过期的断言**，而「新素材根本没进 `SAMPLES`」这类失效恰好就会被它放过。
+    - **「建起音频图」只解决一半 —— 采样是异步预载的，还要等 `audioState().preloadDone === true`。** 62 个 stem 是网络下载 + `decodeAudioData`，`ensure()` 之后立刻读到的 `loaded` 是空的、`lastAttempt.reason` 会是 `"synth"`（看着像「采样全挂了」，其实只是还没到）。用例开头一律 `startBtn.click()` → **轮询等 `preloadDone`** → 再做别的；报加载完整性的那条断言**必须把 `loaded.length` 打出来**（一个都没匹配上的空跑同样是「全绿」，`/tmp/cfsfx.mjs` 里打印的 `载入 62/62` 就是这条抓手）。
+      - **那个 62 是硬编码的断言值，素材增删时必须跟着改**（`/tmp/cfsfx.mjs` 与 `/tmp/cfswap.mjs` 各一处，`totalStems === 62` 与 `pk.n === 62`）。停在旧值不会让任何用例变红 —— 它会安静地变成一条**过期的断言**，而「新素材根本没进 `SAMPLES`」这类失效恰好就会被它放过。
     - **`ctx` 建起来 ≠ `ctx.state === "running"`**：无头下 `startBtn.click()` 没有临时用户激活，ctx 停在 `suspended`、**时间不前进**，于是探针一律读 0.000、排程的 `at` 时刻永远不到（看着像「压缩器完美削顶」「换弹三段一段都没响」）。要量信号就先 `ctx.resume()`（页面内调即可，或 CDP 带 `userGesture: true`）、并断言 `ctxState === "running"`。**这一条只在「量波形 / 量排程时刻」时才是硬需求** —— 只断言 `lastAttempt` 的用例不受影响（节点照样建、`_note` 照样写）。
     - **量波形的三条前提**（`/tmp/cfsfx.mjs` 的削顶块，三个坑都踩过）：① ctx 必须 running（上一条）；② **必须把 BGM 的增益钉成 0**（源头压，不是 `setMusic(false)`，见 `scripts/audio.js` 那节的 ⚠️）；③ **每档之间要留 ≥ 14 帧静默期** —— `AnalyserNode.getFloatTimeDomainData` 的窗口是 `fftSize/sampleRate` = 8192/44100 = **186 ms ≈ 11 帧 @60fps**，不留就量到上一档的尾音（实测「单发」那档读到与校准正弦**一模一样**的峰值）。探针循环一律写在页面里按 `rAF` 逐帧累计，**绝不用 CDP 轮询**（一次往返 ~100 ms，比要量的瞬态还长）。
   - **`try/catch` 会把异常藏起来，测试要断言 `loopErrors() === 0` 且 `lastError() === null`。** 主循环和死亡块都有兜底（见死亡流程一节），异常不再冒泡到 `window.onerror`，只看 `__errs` 会得到一片「零报错」的假绿。想验证兜底本身有效，可以故意弄坏一个每帧都会被写的 DOM（如给 `#crosshair` 的 `style` 装一个抛异常的 getter，`update()` 每帧都会写它的 `--gap`）。
@@ -835,7 +860,7 @@
 - HUD 元素 id 与 `main.js` 内 DOM 取用一一对应，勿随意改动命名。
 - `window.__tactical` 调试钩子（`?debug` 开启）暴露 `ready/curId/switchWeapon/switchNade/switchToPrimary/switchBackpack/backpackState/setActed/setScoped/cycleScope/scopeStage/isScoped/fov/tdmScores/onKill/hurt/endTDM/forceFire/getAmmo/nadeCounts/smokeBlocks/frames/showScoreboard/scoreboard/skinState/setSkin/meshMats/deathState/deathPanel/dropWeapon/pickUpNearest/slotWeapon/groundItems/emptySlotState/enemyLoadouts/worldModels/modelSkins/modelState/modelResidual/gunDebug/backpackOpen/chat/chatState/chatLines/chatIsTyping/chatOpen/chatClose/chatSend/chatTrigger/chatClear/switchState/switchBlocking/switchTimes/poseSwitch/clearSwitch/switchStep/killIcon/killBurst/killFeed/hitMark/hitDir/particleCount/time/topdown/minimapState/minimapPlayer/minimapEnemies/minimapSample/minimapResize/minimapStep/minimapProbe/lobbyState/lobbyData/lobbyShow/audioState/punch/resetRecoil/setPunch/punchTable/punchStep/setPunch/kickState/enemyTuning/setEnemyTarget/difficulty/difficulties/setDifficulty/freezeEnemies/colliders/obstacles/bounds/renderStats/pause/resume/loopErrors/lastError` 等，改动这些签名时保持向后兼容。写测试时注意：`isScoped()`/`scopeStage()` 是函数而 `scoped` 是内部布尔量，别把前者当属性读；`loopErrors()` 返回**数字**不是数组（没有 `.length`）；**`lastError()` 返回 `{where,msg,count}` 对象**（无异常时才是 `null`），不是字符串；`scoreboard().roster` 给的是**副本**（改了不影响游戏内的名册）。
   - **音效**：`audioState()`（= `SFX.audioState()`）给 `{ ready, ctxState, sampleRate, decodeSupported, loaded[], pending[], failed[{id,url,err}], loadedStems, totalStems, preloadDone, voices, maxVoices, lastAttempt, scheduled[], music:{on,playing,gain} }`。`loaded` 是**槽位 id** 的数组（不是文件数），`loadedStems` / `totalStems` 才是文件计数。
-    - **`lastAttempt` 是「这条音效走了采样还是回退」的唯一判据**（`{ method, kind, id, dur, reason }`，`reason ∈ "sample" | "synth" | "capped"`）。**它不记 `wet`** —— 混响量只能靠往节点上挂探针去数（`/tmp/cfsfx.mjs` 的 `drain()` / `calls()` 就是干这个的）。
+    - **`lastAttempt` 是「这条音效走了采样还是回退」的唯一判据**（`{ method, kind, id, dur, reason }`，`reason ∈ "sample" | "synth" | "capped" | "missing"`（missing 仅用于连杀人声缺素材））。**它不记 `wet`** —— 混响量只能靠往节点上挂探针去数（`/tmp/cfsfx.mjs` 的 `drain()` / `calls()` 就是干这个的）。
     - `scheduled` 每条给 `{ method, at, delay, secsSinceTrigger }`（**秒**，已四舍五入到毫秒），按 `delay` 升序 —— 「换弹三段排在 0.39/1.41/1.94」与「`cancelReload()` 之后剩 0 条」这两条断言就用它。`method` 就是排程标签（`"reload"` / `"bolt"`）。
     - **`pending` 在 `preloadDone` 之后恒为空**（它的判据就是 `!this._preloadDone`），所以「加载完了没」要看 `preloadDone`，不要看 `pending.length`。
     - **`music.gain` 是那条增益的实时值**，静音 BGM 就是读它/写它（见 `scripts/audio.js` 那节：`setMusic(false)` 关不掉，主循环会顶回来）。
@@ -857,7 +882,7 @@
   - **掉落与捡枪**：`dropWeapon()` / `pickUpNearest()` / `slotWeapon(slot)` / `groundItems()` / `emptySlotState()` / `enemyLoadouts()` / `worldModels(id)`。
     - `groundItems()` 每条给 `{ id, skin, slotKind, x, y, z, armed, inScene, meshes, mag, reserve }`（`y` = `baseY`）。**`mag`/`reserve` 是这把枪自带的弹药快照**（见上方「地上的枪自带一份弹药快照」那条）—— 「捡起来的枪有几发」这条断言就靠它：捡之前读一次、捡之后读 `getAmmo()`。
     - `worldModels(id)` 按皮肤返回 `{ skin, world, enemy }` 三个布尔，用来断言目录**真的**为每个「枪型 × 皮肤」都产出了两种变体。**组合总数是 12 不是 20**（ak 2 + m4 6 + awm 3 + pistol 1）—— 款数四个型号并不相等，按「4 把枪 × 4 款」写断言会假红。**断言时务必把匹配到的条数一起打出来**：一条都没匹配上的空跑同样是「全绿」。
-    - `modelSkins()` 列全部 8 款模型皮肤（`{ weaponId, skinId, file, anchorKey, targetLen }`；
+    - `modelSkins()` 列全部 10 款模型配装（`{ weaponId, skinId, file, anchorKey, targetLen }`；
       **注意它与 `skins.js` 的 `allModelSkins()` 形状不同** —— 那个返回 `{ weaponId, skinId, model }`，锚点嵌在 `model` 底下。直接用模块里那个去读 `m.anchorKey` 会静默得到 `undefined`，七款全都对不上，而报错指不到这上面）。
       `modelState(id?)` 给当前武器的模型状态（`{ wants, mounted: "base"|"model", loading, ready, anchorKey, muzzleLocal }`）——
       **`wants` 是布尔量不是 skin id**；**`loading` 的语义是「这个皮肤有没有一条加载记录」，加载完成之后仍然是 `true`**，判「加载完了没」要看 `ready`（两个一起看：`loading && !ready` 才是在飞）。`modelResidual(id?)` 给居中残差（见下）；`gunDebug(id?)` 给「模型在武器组局部系里的包围盒 + 有效可见性 + 枪口火光挂在谁身上」；`backpackOpen()` 判面板开合（`skinCycle` / `selectSkin` 两个读口已随选皮肤 UI 删除，程序化换皮肤走 `setSkin`）。
@@ -868,15 +893,9 @@
     - `chatTrigger(cat, ctx)` 是测试的**主动触发器**——否则只能靠真打一局、等限流和冷场计时器自己走。`ctx` 里可给 `{name}` / `{speaker}` / `{kind:"system"}`。
     - **`chatLines()` 给的是渲染后的正文**（占位符已替换），拿它跟 `CHAT_LINES` 里的模板直接比会漏掉带 `{name}` 的那几条 —— 要先把两边的 `{...}` 抹掉再归一化空白，否则是**测试自己的假红**（实测踩到过）。台词库用页面内 `await import("./scripts/chat.js")` 取（同一个模块实例）。
     - 快进聊天时钟：`pause()` 之后 `for (…) window.__tactical.chat.update(1/60)`（别 sleep 墙上时钟）。
-  - **击杀特效（模块 3）**：`killIcon()` 给 `{ ok, kind: "gold"|"head"|"hit"|null, hasBadge, badgeGold, hasGun, animating }`；`killFeed()` 逐行给 `{ killer, weapon, victim, foe, hasWeaponIcon, hasBadge, badgeGold }`（**DOM 顺序，最旧在前**，与玩家看到的一致）；`hitMark()` 给 `{ live, last:{kind,golden}, goldRing }`；`hitDir()` 给 `{ ok, visible, rotate, arcW, arcH, arcBg }`；`particleCount()` 给 `{ total, active }`。
-    - **`killBurst()` 给 `{ ok, kind, animating, ringW, ringBox, ringLevel, rayW, rayMask, haloW, haloBg }`**（见上面「击杀冲击波」那一节）。**它读的全是 computed style，因为三层里有两层是伪元素** —— DOM 里没有子节点可数（同 `hitDir()` 那条）。几个字段的用法：`ringW` 是主环的 `border-top-width`（非 0 = 环画出来了）、`ringBox`/`rayW`/`haloW` 是三层的基础尺寸（200 / 520 / 560，**越往外越大才扫得开**）、**`ringLevel` 读的是自定义属性 `--kb`** —— 它是三档强度的**唯一**旋钮（1 / 1.2 / 1.5）、`rayMask` 判 `mask-image !== "none"`（缺了它中心会被糊住）、`haloBg` 判 `background-image !== "none"`（光带画出来了）。**`kind` 由 `classList.contains` 逐档判**（gold 排最前），`animating` = 是否还挂着 `.show`。
-      - **档位必须能回落**：`className` 是整串重写的，若哪天改成 `classList.add("gold")` 就会三档叠在一起 —— gold 判据排最前 ⇒ **之后所有击杀都显示成黄金爆头、且不会有任何报错**。所以用例里黄金爆头之后要再打一次普通击杀，断言回落到 `hit`。
-      - **静息态（没击杀时）要断「什么都不该画」**：`kind === null && animating === false`、`opacity === "0"`、`pointerEvents === "none"`（它铺满全屏，吃鼠标就等于把开火挡了）、图标里没有 `.ki-shine`（那是 `showKillIcon` 现写 `innerHTML` 的，会越积越多就是 bug）。**动画跑完 `opacity` 必须回到 0** —— `fill-mode` 是 `forwards`，收尾那一帧得自己写 `opacity: 0`。
-      - 另有 `prefers-reduced-motion: reduce` 分支（`styles/game.css` 末尾）：`killburst.show` 缩到 0.16s、两个伪元素动画 `animation: none`、`killicon` 缩到 0.4s、扫光带关掉 —— 同 `.lobby-ticker` 那条先例。
-    - **`hitDir()` 读的是 `::before` 的 computed style，不是子节点计数** —— 那条受击弧由伪元素承载，DOM 里压根没有子节点可数。**「修复前 `.hitdir span` 匹配不到任何东西」正是这个功能从来没生效过（`arcW` 恒为 `0px`）的证据**，所以它是模块 3 里唯一一条**改动前必红的回归断言**。
-    - **`killFeed()` 的 `foe` class 就是「玩家被杀」**（`pushKillFeed` 的最后一参）。`killer` 可能为 `null`（手雷自伤那条路径），所以构造行的时候要判空、回退到通用步枪图标。
-    - **黄金爆头是本作自定口径**：`golden = headshot && 击杀前该敌人满血`。做法是在 `fire()` 调 `takeDamage()` **之前**取 `wasFull`，沿 `onEnemyDeath` → `onKill` 传下去。**注释与文档里要写清「这是本作口径」，别写成「与 CF 一致」**（与 M4/USP 那两张"本作自配"的弹道表同性质）。
-  - **小地图**：`topdown()`（34 条布局的**副本**）/ `minimapState()` / `minimapPlayer()` / `minimapEnemies()` / `minimapSample(wx, wz)` / `minimapResize(w, h, dpr)` / `minimapStep(dt)` / `minimapProbe(x, z, combatAt)`。
+  - **击杀特效**：`killIcon()` 仍读 `{ok, kind, hasBadge, badgeGold, hasGun, animating}`；爆头军徽用骷髅替换枪形，`hasGun` 为 false。`killBurst()` 保留兼容，静息无动画、display:none。黄金后再普通应回落到 hit，连续触发只保留一枚 `.ki-medal`。
+  - 黄金爆头是本作自定口径：爆头且击杀前满血。右上 killFeed、hitMark、hitDir 的读口不变。
+  - **小地图**：`topdown()`（33 条布局的**副本**）/ `minimapState()` / `minimapPlayer()` / `minimapEnemies()` / `minimapSample(wx, wz)` / `minimapResize(w, h, dpr)` / `minimapStep(dt)` / `minimapProbe(x, z, combatAt)`。
     - `minimapEnemies()` 每条给 `{ x, z, visible, reason }`，`reason ∈ "fov" | "combat" | null`；`minimapPlayer()` 给 `{ x, z, yaw, angle }`（`angle = -(yaw)`）。`minimapState()` 给 `{ ok, w, h, dpr, items, baked, bakeCount, frames, drawn, visible, bounds }` —— **`frames` 在 canvas 处于 `display:none` 时是真的不涨的**（`update()` 的早退排在 `frames++` 之前），这是「隐藏时零开销」那条负控制的抓手。
     - **`minimapProbe(x, z, combatAt)` 是四道闸门的分离探针**：拿**真实 colliders** 在指定位置造一个假敌人、给定 `combatAt`，返回 `{ visible, reason }`。比真刷一个敌人可控得多（真刷还要等它走位、还会被打死）。测试里要 `pause()` 之后**密集调 `minimapStep(0.2)`** 再读，且四条判据（正前方 / 正后方 / 正前方但被箱子挡住 / 被挡但交火中）**每条"不该显示"后面都跟一条"能显示"的负控制**。
     - **`minimapStep(dt)` 要喂 `dt ≥ 0.1` 才穿得透 10Hz 的可见性节流**（`MM_VIS_HZ`）：喂 `1/60` 的话可见性那一层几十帧才重算一次，读到的是上一步的缓存（走位类的断言会假红）。

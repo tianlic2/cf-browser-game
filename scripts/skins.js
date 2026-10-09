@@ -56,21 +56,35 @@ export const SKINS = {
       // **大面积部件决定主色观感** —— AK 的 `Metal` 覆盖枪管与机匣一大片、`Dark_metal`
       // 只是弹匣/枪机/保险那些小件。想要「哑光黑 + 金线」就得把金放在 Dark_metal；
       // 放 Metal 会得到一把黄枪配黑枪托（第一版实测如此）。以后加 AK 的改色皮肤别再踩。
-      id: "classic", name: "老兵", slots: {
+      id: "classic", name: "经典", slots: {
         Metal: { color: 0x6c7076, metalness: 0.72, roughness: 0.40 },
         Dark_metal: { color: 0x4a4d52, metalness: 0.66, roughness: 0.44 },
         Wood: { color: 0x8a5a2c, metalness: 0.22, roughness: 0.74 },
       },
       muzzle: 0xffb060, accent: 0x8a5a2c,
       model: {
-        file: "./models/skins/ak_classic.glb", rotY: Math.PI / 2,
-        targetLen: 0.82, anchorKey: "ak_classic",
+        file: "./assets/classic/ak/ak47.glb", rotY: 0,
+        targetLen: 0.82, anchorKey: "ak_cf", muzzleY: 0.075,
       },
     },
   ],
 
   m4: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
+    {
+      // Reuse the detailed M4 geometry with classic parkerized steel / polymer.
+      // The source has no albedo textures; material slots preserve every model detail.
+      id: "classic", name: "经典", slots: {
+        Primary: { color: 0x343b3e, metalness: 0.55, roughness: 0.52 },
+        Secondary: { color: 0x262b2b, metalness: 0.12, roughness: 0.76 },
+        Highlight: { color: 0x5b6160, metalness: 0.60, roughness: 0.46 },
+        matM4_1: { color: 0x303334, metalness: 0.32, roughness: 0.62, envMapIntensity: 0.35 },
+        matM4_2: { color: 0x444847, metalness: 0.38, roughness: 0.55, envMapIntensity: 0.35 },
+        matM4_3: { color: 0x222624, metalness: 0.08, roughness: 0.78, envMapIntensity: 0.3 },
+      },
+      accent: 0x343b3e, muzzle: 0xffbc72,
+      model: { file: "./models/skins/m4_gold.glb", rotY: 0, targetLen: 0.82, anchorKey: "m4_goldenm4" },
+    },
     {
       id: "thor", name: "雷神", slots: {
         Primary: { color: 0x8894a3, metalness: 0.45, roughness: 0.36 },
@@ -173,6 +187,16 @@ export const SKINS = {
   awm: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
     {
+      id: "classic", name: "经典", slots: {
+        "Material.001": { color: 0x526245, metalness: 0.12, roughness: 0.72 },
+        lambert1: { color: 0x172522, metalness: 0.30, roughness: 0.15 },
+        lambert2: { color: 0x303536, metalness: 0.58, roughness: 0.46 },
+        lambert3: { color: 0x526245, metalness: 0.08, roughness: 0.74 },
+      },
+      accent: 0x526245, muzzle: 0xffbc72,
+      model: { file: "./models/skins/awm_field.glb", rotY: -Math.PI / 2, targetLen: 0.95, anchorKey: "awm_field" },
+    },
+    {
       // 「紫电」：紫光放电。模型（AWM_1）自带的三个材质里 `light`/`light_2` **本身带 emissive**，
       // 所以额外给这两个名字写槽位（只改发光、`color` 保持纯白不动贴图）——
       // 现成的 pulse 呼吸机制就自动作用到它们身上了。这两个名字在基础 AWM 上不存在，
@@ -221,7 +245,7 @@ export const SKINS = {
 // `DEFAULT_SKIN[gunId] || STOCK`，一旦指向一个被删掉的 id，`findSkin` 会静静地回退成原厂，
 // 表现为「默认皮肤莫名其妙没了」。
 export const DEFAULT_SKIN = {
-  ak: "classic", m4: "thor", awm: "volt", pistol: STOCK, knife: STOCK,
+  ak: "classic", m4: "classic", awm: "classic", pistol: STOCK, knife: STOCK,
 };
 
 // 枪口焰没上皮肤时的原色（与 muzzleShot / muzzleLight 的构造值一致）

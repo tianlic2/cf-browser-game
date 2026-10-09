@@ -1,0 +1,428 @@
+{
+  "archives": {
+    "cf_transport.rar": {
+      "bytes": 9481752,
+      "sha256": "54e7a9cfb0839b3ca92b834972b6de9c5c36fa755261bd722531e43ac00a25ff"
+    },
+    "cf_swat.zip": {
+      "bytes": 8577841,
+      "sha256": "446dd534ac3112d6108f7bac8ac78944523a4deb98c134bbac35feba0d55956a"
+    },
+    "cf-ak47.7z": {
+      "bytes": 17770960,
+      "sha256": "979db52f5a00ff95413a45aab935fb7668ed89df350acbd24ea1ece69aac8a49"
+    },
+    "cf-frag-source.rar": {
+      "bytes": 867856,
+      "sha256": "8931d256b109e1fbe6583629819e3c0a5ede04afdad93689cfa51ef797d635d9"
+    },
+    "cf-flash-source.rar": {
+      "bytes": 854443,
+      "sha256": "546e2f5f399d586df0dd219468797a2e5a225d0e90f60f4b2a7ca5176e3356ce"
+    },
+    "cf-grenades-pack.rar": {
+      "bytes": 43976889,
+      "sha256": "3409ba43deeb90198032f908a9c2cfd425af894169e708fbbcbb00468010fb7f"
+    }
+  },
+  "files": {
+    "ak/ak47.glb": {
+      "bytes": 119636,
+      "sha256": "bb5b9c1d5d19c48e1781ad1018897a62b5139d7f3c1e2562df5bcb384939ee6f"
+    },
+    "ak/view/FVIEW_ARM_GR.png": {
+      "bytes": 124831,
+      "sha256": "1109fc3bc594eb3881264dfcbefabd56ed586e918d6b758a160d2c1aa6452aa3"
+    },
+    "ak/view/FVIEW_HAND_GR.png": {
+      "bytes": 175166,
+      "sha256": "a4d5ab2ee394107129646b940e1a6ba8445f3020f1272e6a3af06dd1f852aa04"
+    },
+    "ak/view/PV-AK47.png": {
+      "bytes": 186584,
+      "sha256": "d03511f96c189304acdc68b703d98aea5d21bf9b8c2b14a70ff13a5aaf8d5a41"
+    },
+    "ak/view/view.bin": {
+      "bytes": 1285188,
+      "sha256": "c599602eb8bc3b13c82f641324a54ab57397dbeb77cf4d3a73ed98a512ee6ee5"
+    },
+    "ak/view/view.json": {
+      "bytes": 11806,
+      "sha256": "85d1bce3e6cfdcdf4b0b9d03a2e8b923240dc774be64a6f148c7eec4678687a5"
+    },
+    "swat/models_player_cf_swat_backpack.png": {
+      "bytes": 47888,
+      "sha256": "c9956165b1155445cc8dbb8feffe11bb87232f5179eb46e040b1ac92ddac527f"
+    },
+    "swat/models_player_cf_swat_ct_urban.png": {
+      "bytes": 962532,
+      "sha256": "090c28028ff9f6a14173da954088c7a7758b6e87746f428e8a1d2ba1ba50b148"
+    },
+    "swat/models_player_cf_swat_eb9a780.png": {
+      "bytes": 932489,
+      "sha256": "b7547306c5acbe059da99864dcfbe31199ece497f7023c2d4aa9e640777b6e00"
+    },
+    "swat/models_player_cf_swat_ebc2ae0.png": {
+      "bytes": 48441,
+      "sha256": "987cac9d56dd8eeeadf574055af99fc84f804c32787b481b2651ce150d0248f0"
+    },
+    "swat/models_player_cf_swat_ec02a80.png": {
+      "bytes": 134481,
+      "sha256": "9434c630fffda5ff990f699565b041acbebe2fe524175f16d8e347682bbc54cd"
+    },
+    "swat/models_player_cf_swat_ec17ee0.png": {
+      "bytes": 69567,
+      "sha256": "b7fe33aa1509a396118690cd5f62f17899662cb914bf4a18ff9351c7390eaa4d"
+    },
+    "swat/swat.bin": {
+      "bytes": 715008,
+      "sha256": "fba46ab766edb4ac42bafd1ba5f2eafcb94ca4e14223a74dd9fdd0905c01ffe2"
+    },
+    "swat/swat.json": {
+      "bytes": 11805,
+      "sha256": "7f62597df45aaf0c5311a6241a0d2404acbd5f258ec80fbf4c0fe18ab674b735"
+    },
+    "transport/blackrockshooter_brsbodyinterior.png": {
+      "bytes": 151394,
+      "sha256": "c3d2eb1154422478d454274f8b0e040f0db5ae8696d93394048683dbede6fcdd"
+    },
+    "transport/cs_havana_metalfence007a.png": {
+      "bytes": 179859,
+      "sha256": "797e784354c26dceac10eb0c1a05cb271f93300673c56a1cf8132aee63eb291b"
+    },
+    "transport/lightmap.png": {
+      "bytes": 367962,
+      "sha256": "35f24c4f5466bca8e04454500ff996d8af88fde62ec0ca0a9999f174fa81f359"
+    },
+    "transport/map.bin": {
+      "bytes": 1891260,
+      "sha256": "c635be1276827aac496239c3e4ebaae1094020a14134f06caaab1a716333ff5e"
+    },
+    "transport/map.json": {
+      "bytes": 444288,
+      "sha256": "0de67862f79223f864cfd2a601f1255905ea6769cd4b1e688112666afbd7d5f6"
+    },
+    "transport/ship_m_00001.png": {
+      "bytes": 27605,
+      "sha256": "294547efecdba8cd840a085506608fefef0d89175c68781e34451e3bfb80a2d9"
+    },
+    "transport/ship_m_00017.png": {
+      "bytes": 14897,
+      "sha256": "08fc7d6e6ed7fa611e15eeb5644e067e075e679f8d4fe23c3fd2a80322dc0b1d"
+    },
+    "transport/ship_m_00024.png": {
+      "bytes": 7603,
+      "sha256": "8423a03a120288fdddea6e85a46be233283395c28018b3fe196090abd4e7e4f0"
+    },
+    "transport/ship_m_00025.png": {
+      "bytes": 6777,
+      "sha256": "3cc290e7f6afbfcff4464f9f3e44875a00f4b434ede07dff21193f82812313c2"
+    },
+    "transport/ship_m_00030.png": {
+      "bytes": 16427,
+      "sha256": "07ea8dda04c962a41c5cd68d691a1f0386a36c4facb99b026b58f64391b64f2d"
+    },
+    "transport/ship_m_00032.png": {
+      "bytes": 1296,
+      "sha256": "7eb1fb8b48e43b674bb6dfcc54547b622993920c1ce1066e4ffaab020b740b60"
+    },
+    "transport/ship_w_00004.png": {
+      "bytes": 6998,
+      "sha256": "8f8c2dea192dffdc685deef8835ad174314cc2017dd4f2597dcd1145dd8e2a31"
+    },
+    "transport/ship_w_00005.png": {
+      "bytes": 3761,
+      "sha256": "132ff6901ce9829f40d688c7bc99892260051dcab9a0e308021e8b8b1f5fe3e4"
+    },
+    "transport/ship_w_00006.png": {
+      "bytes": 8911,
+      "sha256": "9b08cedb3b98124db8d13642c7ef9d490bc6fc27cd151cd6c2e83dbb72d817b2"
+    },
+    "transport/ship_y_00002.png": {
+      "bytes": 6586,
+      "sha256": "c3e9c137350e32eee495a9667d0b69c79f9173466247e2f49db2d05294427533"
+    },
+    "transport/sky_bk.png": {
+      "bytes": 237200,
+      "sha256": "4996a80a04e6b0bdd1a90f3dbaa41a64cb640dea5dcaa93d9fa6379dd3632de7"
+    },
+    "transport/sky_dn.png": {
+      "bytes": 179704,
+      "sha256": "d908c32d4a4894839b59f17acbc348ec1e4d9a96751c29bf2dc70c856745f0be"
+    },
+    "transport/sky_ft.png": {
+      "bytes": 222491,
+      "sha256": "b23822b0ac586eca8a53111791d9c26396737a43a66eefde38bd5065ab06bc21"
+    },
+    "transport/sky_lf.png": {
+      "bytes": 204567,
+      "sha256": "b261c5a885786052215934f2b53f82b5d46af72527fa4a10385d83eee1279ba0"
+    },
+    "transport/sky_rt.png": {
+      "bytes": 201181,
+      "sha256": "3ae173ad61391ecc994b6cbf4adb450c062e49e9ce24bdb687ad86bdd773fecc"
+    },
+    "transport/sky_up.png": {
+      "bytes": 179704,
+      "sha256": "d908c32d4a4894839b59f17acbc348ec1e4d9a96751c29bf2dc70c856745f0be"
+    },
+    "transport/transportship_fuslo.png": {
+      "bytes": 7248,
+      "sha256": "5261d352286849acf2b7fcfd270dc5c95eb40f122589d9cb3341a6d9a508b121"
+    },
+    "transport/transportship_texture_100.png": {
+      "bytes": 151886,
+      "sha256": "ee5e69855f5c548df0f3f1210980ddb4b0a0ae44a6c7f96eb8337decdacead3b"
+    },
+    "transport/transportship_texture_101.png": {
+      "bytes": 53346,
+      "sha256": "bbfd44c1e87c3e92c38945e4c50af5f78b9c51a1f22fa911096650cf12a2aa72"
+    },
+    "transport/transportship_texture_105.png": {
+      "bytes": 105415,
+      "sha256": "bbc093b3e60cc088fad361b2deefbb84e70d711a0ff30ad0b5b593f38725d643"
+    },
+    "transport/transportship_texture_106.png": {
+      "bytes": 19354,
+      "sha256": "1702d581d061b169c7f1a86a8ffe62c4c95b091a48749b5e080eef8cb4dc04ba"
+    },
+    "transport/transportship_texture_107.png": {
+      "bytes": 17288,
+      "sha256": "4f2cefce7a04e3c5f67dddeb7d41c33d221c6bd6b9426f7d124db0a9c50aa7c0"
+    },
+    "transport/transportship_texture_108.png": {
+      "bytes": 100002,
+      "sha256": "d360330565d9c8b4fe38439981e88f3e149bf3bbeb1c6b864db656928a94c9c3"
+    },
+    "transport/transportship_texture_113.png": {
+      "bytes": 103607,
+      "sha256": "275b74acb704870016d2d4f0643911ef0b4f9020f4037172d0dcb91185e206f4"
+    },
+    "transport/transportship_texture_119.png": {
+      "bytes": 90489,
+      "sha256": "3b80e7490dcafd08353a77dec2968195c7bab49be1b3a4d90cfb1daa83843d2d"
+    },
+    "transport/transportship_texture_125.png": {
+      "bytes": 123135,
+      "sha256": "8bef6a931f93c4beb6ad6906da3b445d7cb19538903c6a930ec62ad966e3d8d0"
+    },
+    "transport/transportship_texture_126.png": {
+      "bytes": 80034,
+      "sha256": "65afa66cf6f7695cc7d08ad6cc36444292e0b4c5319fdfbb244181d015251f11"
+    },
+    "transport/transportship_texture_232.png": {
+      "bytes": 269252,
+      "sha256": "64a3efd5187c89240b1bb924217dde90615cdf663751805c7add7dfdab0aeba4"
+    },
+    "transport/transportship_texture_233.png": {
+      "bytes": 186041,
+      "sha256": "f097fb7055cec10aa26069767c9ef9cce9ec864026ca897fb90f657730da1e2d"
+    },
+    "transport/transportship_texture_234.png": {
+      "bytes": 96970,
+      "sha256": "f0c71169fb3cb43c642a2ddf79ce9bdde4b65989572fc5140a86b48d96e652df"
+    },
+    "transport/transportship_texture_70.png": {
+      "bytes": 103715,
+      "sha256": "12f610aaa34d331a01e2074abbf1bfe3ab7c6c1750e48219f7207fcb90ce1a20"
+    },
+    "transport/transportship_texture_71.png": {
+      "bytes": 113850,
+      "sha256": "2c2dca7ae7f7618eaf6d764950f122a6dfe4ed1e9e1f4a06ecd74f511a640924"
+    },
+    "transport/transportship_texture_73.png": {
+      "bytes": 80114,
+      "sha256": "08b631c584a847ae86862f9087c922f6dd91bd86597fc648e9d953b1df5cf86b"
+    },
+    "transport/transportship_texture_74.png": {
+      "bytes": 85833,
+      "sha256": "897e4f70036856f6787130d6c72fbb040bd39158604f833bc6f21176011bd466"
+    },
+    "transport/transportship_texture_75.png": {
+      "bytes": 108914,
+      "sha256": "27472cb4bf55f8897b6fdbc02133fe595506fb31fdd2ecdddfba09a657cfb604"
+    },
+    "transport/transportship_texture_76.png": {
+      "bytes": 85066,
+      "sha256": "e9d282f97d1b7e91ce9c369604b8a3d56dc26ca2ea29d100690a312d54141489"
+    },
+    "transport/transportship_texture_77.png": {
+      "bytes": 109083,
+      "sha256": "d6867bd7254dd0be6137152534ef6b1615cf47f45c20bcae54cee535c9ea8b55"
+    },
+    "transport/transportship_texture_78.png": {
+      "bytes": 47960,
+      "sha256": "436ec4cb41be229e760ec0bf33fdd75bc2ab0e67f718312bbe24cdf9de576425"
+    },
+    "transport/transportship_texture_79.png": {
+      "bytes": 73013,
+      "sha256": "a5c053780f7d948a1e33d31c8a14a30a573bcfd027c5600a64cd92668a245cbc"
+    },
+    "transport/transportship_texture_80.png": {
+      "bytes": 125088,
+      "sha256": "a4ea552d0247c6195ceda255687d948637b002bd8e3b3cbb1ca126f975a7e222"
+    },
+    "transport/transportship_texture_81.png": {
+      "bytes": 105420,
+      "sha256": "2ead0304b5292bbbb3fa166d9c09ce9e926b8ac79b941237910d4ff45493379e"
+    },
+    "transport/transportship_texture_82.png": {
+      "bytes": 108422,
+      "sha256": "fa79a2312ef139611c6e2421cb45b0e4bdd2b40143eedfb9e7e07a787437a92f"
+    },
+    "transport/transportship_texture_83.png": {
+      "bytes": 89452,
+      "sha256": "e616e2ea9c6f159cd3ef8fff8b1af63edbb106ce5abecf1e507d6e44a8ad9076"
+    },
+    "transport/transportship_texture_84.png": {
+      "bytes": 92071,
+      "sha256": "76698506c1ef2281d2fe2ff315d2d13b2b79f6550b07b1b03b1c2b9275ca5b51"
+    },
+    "transport/transportship_texture_85.png": {
+      "bytes": 68443,
+      "sha256": "335cc23c9ab89326bf31aa6551849430710b360676ad48a8aadbde1ad6464e64"
+    },
+    "transport/transportship_texture_86.png": {
+      "bytes": 9261,
+      "sha256": "30fb5c7b170ca065aaf06d153b046be6309841abfcdeb2cb84422f143669c55b"
+    },
+    "transport/transportship_texture_87.png": {
+      "bytes": 46234,
+      "sha256": "a23a4d2b711225d0fcd9123fbf97b434c19595f725458214cc71bfd44397cd48"
+    },
+    "transport/transportship_texture_88.png": {
+      "bytes": 115023,
+      "sha256": "8f8d6893dc87dcbc130e9a95e6161af3d73e6386c0b8003c6caf5abd27e5be50"
+    },
+    "transport/transportship_texture_90.png": {
+      "bytes": 92404,
+      "sha256": "118f6501d5f44f5c43bf2b761533d2ddf69d1b497c09dd3742b32d0434f681f4"
+    },
+    "transport/transportship_texture_91.png": {
+      "bytes": 70858,
+      "sha256": "88d8606034296bf99499e64235aa79410de585e9811d1e307ce79aceb07ca7c6"
+    },
+    "transport/transportship_texture_92.png": {
+      "bytes": 46410,
+      "sha256": "84091e491a08ca0cde21d286ea97224c30eec3868da190433c2a8709dd8dd503"
+    },
+    "transport/transportship_texture_93.png": {
+      "bytes": 87458,
+      "sha256": "a78629304bc437f0366b808da586419784e23ec8e46dc10189121866123a6950"
+    },
+    "transport/transportship_texture_94.png": {
+      "bytes": 88439,
+      "sha256": "34a6db7aa1d426beee9611dd81c4274d1a9b7f5083f8ae7ff7beb34b6ef05c86"
+    },
+    "transport/transportship_texture_95.png": {
+      "bytes": 56472,
+      "sha256": "fd887786c9372e97e84236e1e75495304587c4320628a6720de775fe6767d03c"
+    },
+    "transport/transportship_texture_98.png": {
+      "bytes": 95988,
+      "sha256": "c2e58388d2cee64a12d55e85da0beb41f2895f24ad923eec90707a8f828e6800"
+    },
+    "transport/transportship_texture_99.png": {
+      "bytes": 51092,
+      "sha256": "c261d15a6432c6a17bcf90ddaf258da14c5d778e4fc656e28986d78fd5bead47"
+    },
+    "transport/transportship_verde.png": {
+      "bytes": 5695,
+      "sha256": "58e2de94ade00858b205d8cd4b70440ae8c22d4b2c4cf67e2d263a7890ae78ab"
+    },
+    "grenades/smoke/PV-FLASHBANG.png": {
+      "bytes": 388229,
+      "sha256": "4f1223f91bbf853d4a36ef05e6ecd944ed971b50911e3f2e49a69649f220d429"
+    },
+    "grenades/smoke/view.json": {
+      "bytes": 8382,
+      "sha256": "a5eb4802442ff3017d9fc33bcfc25e31a8363d46858cb4403a320576ea8106ca"
+    },
+    "grenades/smoke/FVIEW_HAND_GR.png": {
+      "bytes": 175166,
+      "sha256": "a4d5ab2ee394107129646b940e1a6ba8445f3020f1272e6a3af06dd1f852aa04"
+    },
+    "grenades/smoke/FVIEW_ARM_GR.png": {
+      "bytes": 124831,
+      "sha256": "1109fc3bc594eb3881264dfcbefabd56ed586e918d6b758a160d2c1aa6452aa3"
+    },
+    "grenades/smoke/view.bin": {
+      "bytes": 637528,
+      "sha256": "6c84d9368effa389473be8011958632efe6c674215a340130a7bfe7b08624784"
+    },
+    "grenades/flash/PV-FLASHBANG.png": {
+      "bytes": 403059,
+      "sha256": "c25345634909a0c6f3abc37080e947d3fa731b2b5fde7934ec670867f798b605"
+    },
+    "grenades/flash/view.json": {
+      "bytes": 8382,
+      "sha256": "a5eb4802442ff3017d9fc33bcfc25e31a8363d46858cb4403a320576ea8106ca"
+    },
+    "grenades/flash/FVIEW_HAND_GR.png": {
+      "bytes": 175166,
+      "sha256": "a4d5ab2ee394107129646b940e1a6ba8445f3020f1272e6a3af06dd1f852aa04"
+    },
+    "grenades/flash/FVIEW_ARM_GR.png": {
+      "bytes": 124831,
+      "sha256": "1109fc3bc594eb3881264dfcbefabd56ed586e918d6b758a160d2c1aa6452aa3"
+    },
+    "grenades/flash/view.bin": {
+      "bytes": 637528,
+      "sha256": "6c84d9368effa389473be8011958632efe6c674215a340130a7bfe7b08624784"
+    },
+    "grenades/frag/view.json": {
+      "bytes": 8617,
+      "sha256": "4af40eec10789435ea2e78207e03bde3ade07e5bfa96500084f061f8853aec24"
+    },
+    "grenades/frag/FVIEW_HAND_GR.png": {
+      "bytes": 175166,
+      "sha256": "a4d5ab2ee394107129646b940e1a6ba8445f3020f1272e6a3af06dd1f852aa04"
+    },
+    "grenades/frag/FVIEW_ARM_GR.png": {
+      "bytes": 124831,
+      "sha256": "1109fc3bc594eb3881264dfcbefabd56ed586e918d6b758a160d2c1aa6452aa3"
+    },
+    "grenades/frag/view.bin": {
+      "bytes": 737240,
+      "sha256": "ec425c7866cbbe3f4e7023da2ccd36ce1c2ba42555a91b47e914243e52659089"
+    },
+    "grenades/frag/PV-HEGRENADE.png": {
+      "bytes": 452446,
+      "sha256": "c9a86518ddc2df1b3cb46fa6debec398b12cd5f83666dccc391a6ec12a3fd6a1"
+    },
+    "../../audio/classic/grenade_flash.wav": {
+      "bytes": 105466,
+      "sha256": "04743ba58860fe896596af1b9aaf2638c03280cecd26d28f0884b47b34f85c54"
+    },
+    "../../audio/classic/grenade_smoke.wav": {
+      "bytes": 461706,
+      "sha256": "da6e43076e372f1cd30c9f3c23512bb269f7a93d5631072031c49254ee51e30d"
+    },
+    "../../audio/classic/grenade_pin.wav": {
+      "bytes": 12018,
+      "sha256": "c86294f19603cb5b10701c60a7b8fbfc2d263ebdefe826b3375824ae2c1079c4"
+    },
+    "../../audio/classic/grenade_explode.wav": {
+      "bytes": 150060,
+      "sha256": "b7e4ab957be37d8035336851b6960b3a4943596355a3629ce9f43beb73265c1a"
+    }
+  },
+  "audioFiles": {
+    "audio/classic/ak47_bolt.wav": {
+      "bytes": 19146,
+      "sha256": "1a3fa9bf0ca56cc4d23aa74a3d88bc97087e4d00c8ec5f809d5b8e968e26b3f6"
+    },
+    "audio/classic/ak47_fire.wav": {
+      "bytes": 87130,
+      "sha256": "931d2797a547ebbee5af7090ac9e87d05be4c56078ce6768fed47303b2792e50"
+    },
+    "audio/classic/ak47_in.wav": {
+      "bytes": 18852,
+      "sha256": "46e4b48ebb5ef58156853ac2034c2cb9fcb0ccd95adcb0fc56cce2a79d4a56a0"
+    },
+    "audio/classic/ak47_out.wav": {
+      "bytes": 20040,
+      "sha256": "bdde38bf63204c23f85944826ea4fe265f6818fa937ad56e7a031a742d544872"
+    }
+  }
+}

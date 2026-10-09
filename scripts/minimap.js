@@ -79,11 +79,24 @@ function segHitsBox(x0, z0, dx, dz, c) {
 //   · `c.y0 >= 1.78`（`ENEMY_HEAD_ROOM` / `PLAYER_TOP`）—— 栈桥 / 屋顶在人的头顶，
 //     甲板上的人的视线**从底下穿过去**，不该被它挡住；
 //   · `c.h <= MM_SIGHT_H` —— 矮掩体（木箱、舷侧走道）挡不住站立者 1.6m 的视线。
-function losBlocked(x0, z0, x1, z1, cs) {
+function losBlocked(x0, z0, x1, z1, cs, y0=1.62, y1=1.5) {
   if (!cs || !cs.length) return false;
   const dx = x1 - x0, dz = z1 - z0;
   for (let i = 0; i < cs.length; i++) {
     const c = cs[i];
+    if(c.planes) {
+      if(Math.max(y0,y1)<c.y0||Math.min(y0,y1)>c.h||!segHitsBox(x0,z0,dx,dz,c))continue;
+      let enter=0,exit=1,miss=false;
+      for(const [nx,ny,nz,d] of c.planes) {
+        const a=nx*x0+ny*y0+nz*z0-d,b=nx*x1+ny*y1+nz*z1-d;
+        if(a>0&&b>0){miss=true;break;}
+        if(a<=0&&b<=0)continue;
+        const t=a/(a-b);
+        if(a>b)enter=Math.max(enter,t);else exit=Math.min(exit,t);
+      }
+      if(!miss&&enter<=exit)return true;
+      continue;
+    }
     if (c.y0 !== undefined && c.y0 >= 1.78) continue;
     if (c.h !== undefined && c.h <= MM_SIGHT_H) continue;
     if (segHitsBox(x0, z0, dx, dz, c)) return true;
@@ -105,10 +118,9 @@ export function mmVisible(e, view) {
   const inv = dist > 1e-6 ? 1 / dist : 0;
   const dot = (dx * fx + dz * fz) * inv;
   if (dot >= Math.cos(MM_FOV_HALF)) {
-    if (!losBlocked(view.px, view.pz, e.x, e.z, view.colliders)) {
+    if (!losBlocked(view.px, view.pz, e.x, e.z, view.colliders,(view.py??0)+1.62,(e.y??0)+1.5)) {
       const sb = view.smokeBlocks;
-      // 烟雾挡视线：与 enemiesShoot 用同一个判据，取两人的眼高（敌人恒定在甲板面）。
-      const smoked = sb ? sb(view.px, 1.62, view.pz, e.x, 1.5, e.z) : false;
+      const smoked = sb ? sb(view.px, (view.py??0)+1.62, view.pz, e.x, (e.y??0)+1.5, e.z) : false;
       if (!smoked) return "fov";
     }
   }
@@ -181,26 +193,20 @@ export class Minimap {
   }
 
   // 世界 → CSS 像素。少一维的 `sy` 也要暴露给测试，所以单独给一个。
+  // Uniform metres-to-pixels scale; all deck corners fit inside the circular frame.
+  // Sharing this transform with _box prevents stretched cover or drifting enemy dots.
   toPx(wx, wz) {
     const b = this._bounds;
     if (!b || this._w <= 0) return { sx: 0, sy: 0 };
-    const p = this._opts.pad;
-    const iw = Math.max(1, this._w - p * 2), ih = Math.max(1, this._h - p * 2);
-    return {
-      sx: p + ((wx + b.hw) / (2 * b.hw)) * iw,
-      sy: p + ((wz + b.hl) / (2 * b.hl)) * ih,
-    };
+    const radius = Math.min(this._w, this._h) / 2 - this._opts.pad;
+    const scale = radius / Math.hypot(b.hw, b.hl);
+    return { sx: this._w / 2 + wx * scale, sy: this._h / 2 + wz * scale };
   }
 
   _box(e) {
-    const b = this._bounds;
-    const p = this._opts.pad;
-    const iw = Math.max(1, this._w - p * 2), ih = Math.max(1, this._h - p * 2);
-    const sx = (x) => p + ((x + b.hw) / (2 * b.hw)) * iw;
-    const sy = (z) => p + ((z + b.hl) / (2 * b.hl)) * ih;
-    const x0 = sx(e.x - e.hx), x1 = sx(e.x + e.hx);
-    const y0 = sy(e.z - e.hz), y1 = sy(e.z + e.hz);
-    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+    const a = this.toPx(e.x - e.hx, e.z - e.hz);
+    const b = this.toPx(e.x + e.hx, e.z + e.hz);
+    return { x: a.sx, y: a.sy, w: Math.max(1, b.sx - a.sx), h: Math.max(1, b.sy - a.sy) };
   }
 
   _bake() {
@@ -215,17 +221,13 @@ export class Minimap {
     const p = this._opts.pad;
 
     // 背板（斜切角与首页面板同一套轮廓语言，但这里只是个小方框，切 4px 就够）
-    g.fillStyle = MM_COLOR.bg;
-    g.beginPath();
-    if (g.roundRect) g.roundRect(0.5, 0.5, this._w - 1, this._h - 1, 4);
-    else g.rect(0.5, 0.5, this._w - 1, this._h - 1);
-    g.fill();
+    const radius = Math.min(this._w, this._h) / 2 - 2;
+    g.save();
+    g.beginPath(); g.arc(this._w / 2, this._h / 2, radius, 0, Math.PI * 2); g.clip();
+    g.fillStyle = MM_COLOR.bg; g.fillRect(0, 0, this._w, this._h);
+    const deck = this._box({ x: 0, z: 0, hx: this._bounds.hw, hz: this._bounds.hl });
+    g.fillStyle = MM_COLOR.deck; g.fillRect(deck.x, deck.y, deck.w, deck.h);
 
-    // 甲板底
-    g.fillStyle = MM_COLOR.deck;
-    g.fillRect(p, p, this._w - p * 2, this._h - p * 2);
-
-    // 结构，按层序画
     for (const kind of MM_ORDER) {
       if (kind === "deck") continue;
       g.fillStyle = MM_COLOR[kind] || MM_COLOR.container;
@@ -246,7 +248,11 @@ export class Minimap {
     // 外框
     g.strokeStyle = MM_COLOR.frame;
     g.lineWidth = 1;
-    g.strokeRect(0.5, 0.5, this._w - 1, this._h - 1);
+    g.restore();
+    g.strokeStyle = "rgba(218,220,207,.8)"; g.lineWidth = 2;
+    g.beginPath(); g.arc(this._w / 2, this._h / 2, radius, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = "#e0e1d3"; g.font = "bold 9px Arial"; g.textAlign = "center";
+    g.fillText("N", this._w / 2, 12);
 
     this._base = cv;
     this._stat.baked++;

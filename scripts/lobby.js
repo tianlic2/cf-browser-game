@@ -29,7 +29,7 @@ const KEYBINDS = [
   { keys: ["Shift"], label: "静步潜行（不触发脚步声）" },
   { keys: ["Ctrl"], label: "按住下蹲" },
   { keys: ["Space"], label: "跳跃（落地瞬间再按可连跳）" },
-  { keys: ["鼠标左键"], label: "开火 / 放出投掷物" },
+  { keys: ["鼠标左键"], label: "开火 / 按住拉环、松开投掷" },
   { keys: ["鼠标右键"], label: "开镜（AWM）· 军刀重击" },
   { keys: ["V"], label: "开镜（备用键）" },
   { keys: ["R"], label: "换弹" },

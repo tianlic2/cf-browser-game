@@ -373,8 +373,13 @@ body {
   top: 78px;
   /* 沿用 .backpack / .chat 那条先例：**永不接受点击**，挡不住准星与开火。 */
   pointer-events: none;
-  --mm-w: 164px;
-  --mm-h: 279px; /* 40 : 68 —— 与甲板的真实长宽比一致 */
+  --mm-w: 184px;
+  --mm-h: 184px;
+}
+.minimap::after {
+  content: "运输船 · 主甲板"; display: block; text-align: center;
+  font: 700 12px "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #e0e1d3; text-shadow: 0 1px 2px #000; margin-top: 5px;
 }
 .minimap canvas {
   display: block;
@@ -385,10 +390,10 @@ body {
 /* 窄屏降一档尺寸（**不用 transform: scale()** —— 缩放会让 1px 描边发虚，
    而且缩放后的 backing store 与 CSS 尺寸对不上，小地图会糊成一团）。 */
 @media (max-width: 820px) {
-  .minimap { --mm-w: 124px; --mm-h: 211px; }
+  .minimap { --mm-w: 144px; --mm-h: 144px; }
 }
 @media (max-width: 480px) {
-  .minimap { left: 14px; top: 66px; --mm-w: 98px; --mm-h: 167px; }
+  .minimap { left: 14px; top: 66px; --mm-w: 114px; --mm-h: 114px; }
 }
 
 /* ---- 右上：击杀信息条 ---- */
@@ -558,53 +563,21 @@ body {
 }
 .sb-foot b { color: #cbd5e1; }
 
-/* ---- 中上：连杀播报 ---- */
+/* Classic kill callout grouped with the medal, below the sight line. */
 .streak {
-  position: absolute;
-  left: 50%;
-  top: 24%;
-  transform: translateX(-50%);
-  font-size: 42px;
-  font-weight: 900;
-  letter-spacing: 10px;
-  color: #ffd24a;
-  text-shadow: 0 0 20px rgba(255, 180, 40, 0.8), 0 2px 6px rgba(0, 0, 0, 0.95);
-  opacity: 0;
-  white-space: nowrap;
-  /* 文案全是中文，**必须自带中文栈**：.hud 的 Consolas 没有中文字形，
-     不覆盖就掉到系统衬线体（同 .chat 那条）。 */
-  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  position: absolute; left: 50%; top: calc(64% + 87px);
+  transform: translateX(-50%); opacity: 0; white-space: nowrap;
+  font: 900 20px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif;
+  letter-spacing: 2px; color: #e5d6a8;
+  text-shadow: 0 2px 2px #151912, 1px 0 #151912, -1px 0 #151912;
+  pointer-events: none;
 }
-/* 长文案（「二十一连杀!」这种，6 字起）收一档字号，免得被顶出 480px 窄屏。
-   阈值在 main.js 的 showStreak 里（label.length > 5）。
-   **不用 transform 缩** —— 同菜单那条禁忌，缩放会把描边磨虚、也把占位一起缩掉。 */
-.streak.long { font-size: 30px; letter-spacing: 6px; }
-.streak.show { animation: streakPop 1.5s ease-out forwards; }
+.streak.long { font-size: 16px; letter-spacing: 1px; }
+.streak.show { animation: streakPop 1.35s ease-out forwards; }
 @keyframes streakPop {
-  0% { opacity: 0; transform: translateX(-50%) scale(1.7); }
-  14% { opacity: 1; transform: translateX(-50%) scale(1); }
-  72% { opacity: 1; transform: translateX(-50%) scale(1); }
-  100% { opacity: 0; transform: translateX(-50%) scale(1.06); }
-}
-/* 档位配色（r1 黄 → r5 紫金，由 main.js 的 streakRank 给）。**只改颜色与辉光，
-   不动时长** —— 让高档位的动画更长会显得「卡」。 */
-.streak.r2 { color: #ff9b1a; text-shadow: 0 0 22px rgba(255, 140, 30, 0.9), 0 2px 6px rgba(0, 0, 0, 0.95); }
-.streak.r3 { color: #ff7a2f; text-shadow: 0 0 26px rgba(255, 110, 30, 0.95), 0 2px 7px rgba(0, 0, 0, 0.95); }
-.streak.r4 { color: #ff4d4d; text-shadow: 0 0 30px rgba(255, 60, 60, 1), 0 2px 8px rgba(0, 0, 0, 0.95); }
-.streak.r5 {
-  color: #ffe6ff;
-  text-shadow: 0 0 12px #b340ff, 0 0 34px rgba(160, 60, 255, 0.95), 0 2px 8px rgba(0, 0, 0, 0.95);
-}
-/* 高档位另配一条更「炸」的弹入：带一点旋转抖动，收尾多停一拍。
-   选择器三节 > `.streak.show` 的两节，所以一定压得住，与书写顺序无关。 */
-.streak.r4.show, .streak.r5.show { animation: streakPopBig 1.7s ease-out forwards; }
-@keyframes streakPopBig {
-  0% { opacity: 0; transform: translateX(-50%) scale(2.4) rotate(-4deg); }
-  12% { opacity: 1; transform: translateX(-50%) scale(1) rotate(2deg); }
-  18% { transform: translateX(-50%) scale(1.06) rotate(-1.4deg); }
-  24% { transform: translateX(-50%) scale(1) rotate(0deg); }
-  78% { opacity: 1; transform: translateX(-50%) scale(1) rotate(0deg); }
-  100% { opacity: 0; transform: translateX(-50%) scale(1.1) rotate(0deg); }
+  0% { opacity: 0; transform: translateX(-50%) translateY(5px); }
+  12%, 73% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-3px); }
 }
 
 /* ---- 中上：连杀窗口倒计时（常驻）----
@@ -613,7 +586,7 @@ body {
 .sk-timer {
   position: absolute;
   left: 50%;
-  top: calc(24% + 56px);
+  top: calc(64% + 116px);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -659,210 +632,28 @@ body {
   50% { border-color: rgba(239, 68, 68, 0.18); }
 }
 
-/* ---- 高档连杀的全屏边缘辉光 ----
-   只压边缘、中央留空，不挡准星（同 .damage 那条）。一次性动画，
-   重触发靠 JS 的「重写类名 → 回流 → 加 show」。 */
-.fx-layer .streak-flash {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  background: radial-gradient(ellipse at center, transparent 46%, rgba(255, 120, 30, 0.5) 100%);
-}
-/* 高档只把**颜色**推浓，`transparent` 的那圈不能往里收太多：收到 38% 时整屏都会被
-   染上一层（实测 r5 紫金时甲板都在发紫），那就不是「边缘辉光」而是「戴墨镜」了。 */
-.fx-layer .streak-flash.f4 { background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 50, 50, 0.58) 100%); }
-.fx-layer .streak-flash.f5 { background: radial-gradient(ellipse at center, transparent 44%, rgba(170, 70, 255, 0.62) 100%); }
-.fx-layer .streak-flash.show { animation: streakFlashAnim 0.75s ease-out forwards; }
-@keyframes streakFlashAnim {
-  0% { opacity: 0; }
-  16% { opacity: 1; }
-  100% { opacity: 0; }
-}
+/* Legacy FX nodes remain inert for debug/API compatibility. */
+.fx-layer .killburst, .fx-layer .streak-flash { display: none; pointer-events: none; opacity: 0; }
 
-/* ---- 击杀冲击波（#killBurst，由 showKillIcon 与击杀图标一起点亮）----
-   一个节点承载三个动画，分别挂在**元素本身 + 两个伪元素**上：
-     元素本身 = 主冲击环（最锐、收得最快；靠 box-shadow 撑成一根发光的管子）
-     ::before  = 放射速度线（repeating-conic-gradient 出条 + radial-gradient 当遮罩）
-     ::after   = 向外扫过的光带（一整圈柔光，三层里铺得最开的一层）
-   **中心必须留空**：速度线那条 mask 的 `transparent 30%` 就是干这个的 —— 520px 的锥形条
-   若一直铺到中心，准星正下方会糊成一片，开镜（fov 7.5°）时尤其难看。光环同理（它只有
-   一圈 border）、光带的渐变中心本来就透。
-   三档只换 `color` 与 `--kb`（强度倍率）：同一套 keyframes 吃 calc() 出来的数字，
-   不复制三份动画（复制就一定会漂）。配色沿用杀伤反馈的金/红 —— 这是 DESIGN.md
-   「避免大面积高饱和」那条的既有例外，不是新开的颜色。
-
-   **「一圈细线」在白昼甲板上一眼就没了**（实测第一版：4px 的环 + 0.9deg 的射线，
-   冻结帧上读作几道淡米色的斜杠，区域亮度只涨了 2.8/255）。三处补偿都是从这条来的：
-     ① 环加 `box-shadow` 双层外发光。**这里能安全用 box-shadow** —— 与 .menu-panel
-        那条「clip-path 会连 box-shadow 一起裁掉」不同，本元素没有 clip-path。
-     ② 射线加宽到 1.4deg，且两段的**间距做成不等**（7.2deg / 11deg，见 ::before 的色标）——
-        等距密排的细线读起来是一把伞骨，「宽窄不一 + 疏密不一」才像炸开。
-     ③ `::after` 从「一圈模糊的边」改成**一整条向外扫的光带**：它的实际半径 =
-        母元素 scale × 自身 scale × 280px，两个 scale 都在涨 ⇒ 单调外扩。
-
-   ⚠️ **尺度上限定在「准星周围的一记爆发」，不是「糊满全屏的一层光」。** 上面那三处补偿
-   曾经把三层同时推得过大（父 scale 3.4、射线/光带的自身 scale 又各乘一遍 `--kb`
-   ⇒ 合成尺度是 kb 的**平方**），实测最坏帧（`/tmp/cfkbsweep2.mjs before`）：
-   **屏幕外圈 30.9% 被糊到、全屏 36.2% 的像素被点亮、准星 ±28 方框 Δ25.69（峰值 209.63）**，
-   用户报的「过于浮夸、挡视野」就是这一帧。
-   收敛的办法（判据与量法见 AGENTS.md「击杀冲击波」一节，脚本 `/tmp/cfkbsweep2.mjs`）：
-     · `--kb` **只乘父元素的 scale 一处**（不再是父子各乘一遍）⇒ 三档的差距回到线性；
-     · 父 scale 上限 3.4 → 1.6（gold 2.4），射线 1.25 → 0.62、光带 2 → 0.62；
-     · 峰值不透明度 0.95/1/0.5 → 0.80/0.55/0.28（射线与光带是「铺开」的那两层，先压它们）；
-     · 外发光收一档、时长各缩 ~0.1s（糊在屏幕上的总时长也一起降）。
-   收敛后同一套量法（`cfkbsweep2.mjs final`，只开冲击波那一档 `burst`）：
-   **屏幕外圈 ≤0.1%（已到采样噪声地板）、全屏 1.6%、准星 ±28 Δ1.51（峰值 22.3）** —— 瞄准点那一格基本回到
-   静息水平。三层结构与中心留空一个字没动，它仍然是一记「砸在准星上的爆」，只是不再盖住视野。
-   （图标那一侧还单独收过两轮 —— 见下面 `.killicon` 上方那段注释，那里有两轮各自的读数。）
-   ⚠️ 伪元素**同时吃母元素的 `transform` 与 `opacity`**（它们是母元素的子树）——
-   所以 kbRing 的 opacity 不能太早归零，否则光带会被一起掐掉（现在 62% 还留 0.42）。 */
-.fx-layer .killburst {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 200px;
-  height: 200px;
-  margin: -100px 0 0 -100px;
-  border: 4px solid currentColor;
-  border-radius: 50%;
-  box-shadow: 0 0 12px 1px currentColor, 0 0 30px 6px currentColor;
-  color: #ffd24a;            /* 普通击杀：金（与 .killicon.hit 同色） */
-  --kb: 1;                   /* 强度倍率，只被下面两档改写 */
-  opacity: 0;
-}
-.fx-layer .killburst.head { color: #ff4d4d; --kb: 1.2; }
-.fx-layer .killburst.gold { color: #ffe9a0; --kb: 1.5; }   /* 黄金爆头：更亮、最大 */
-.fx-layer .killburst::before {
-  content: "";
-  position: absolute;
-  left: -260px;
-  top: -260px;
-  width: 520px;
-  height: 520px;
-  background: repeating-conic-gradient(from 0deg,
-    currentColor 0deg 1.4deg, transparent 1.4deg 8.6deg,
-    currentColor 8.6deg 10deg, transparent 10deg 21deg);
-  -webkit-mask-image: radial-gradient(closest-side, transparent 30%, #000 46%, #000 72%, transparent 96%);
-  mask-image: radial-gradient(closest-side, transparent 30%, #000 46%, #000 72%, transparent 96%);
-  opacity: 0;
-}
-.fx-layer .killburst::after {
-  content: "";
-  position: absolute;
-  left: -180px;
-  top: -180px;
-  width: 560px;
-  height: 560px;
-  background: radial-gradient(closest-side, transparent 30%, currentColor 46%, transparent 74%);
-  opacity: 0;
-}
-.fx-layer .killburst.show { animation: kbRing 0.5s cubic-bezier(0.15, 0.75, 0.25, 1) forwards; }
-.fx-layer .killburst.show::before { animation: kbRays 0.42s ease-out forwards; }
-.fx-layer .killburst.show::after { animation: kbHalo 0.46s ease-out forwards; }
-@keyframes kbRing {
-  0% { opacity: 0.80; transform: scale(0.16); }
-  62% { opacity: 0.42; }
-  100% { opacity: 0; transform: scale(calc(1.6 * var(--kb))); }
-}
-/* 射线与光带的自身 scale **不带 `--kb`**：kb 已经在母元素的 scale 里乘过一次，
-   这里再乘一遍等于把三档的差距平方（gold 曾经是 hit 的 2.25 倍面积）。 */
-@keyframes kbRays {
-  0% { opacity: 0; transform: scale(0.34) rotate(-7deg); }
-  14% { opacity: 0.55; }
-  100% { opacity: 0; transform: scale(0.62) rotate(5deg); }
-}
-@keyframes kbHalo {
-  0% { opacity: 0; transform: scale(0.24); }
-  14% { opacity: 0.28; }
-  100% { opacity: 0; transform: scale(0.62); }
-}
-
-/* ---- 屏幕中心：击杀图标（武器剪影 + 爆头徽记）----
-   从「一行文字」改成了内联 SVG（见 scripts/icons.js）：
-   容器只负责居中与动画，图形与配色全在 SVG 里。
-   **`text-shadow` 对 SVG 无效** —— 发光必须走 `filter: drop-shadow()`
-   （同一类坑见 `.menu-title` 那条：`background-clip:text` 不能配 `text-shadow`）。 */
+/* Crisp stamped medal: short impact, steady reading time, then fade. */
 .killicon {
-  position: absolute;
-  left: 50%;
-  top: calc(50% - 92px);
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #ffd24a;                       /* 剪影的 currentColor */
-  filter: drop-shadow(0 0 7px rgba(255, 180, 40, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95));
-  opacity: 0;
+  position: absolute; left: 50%; top: 64%; width: 170px; height: 95px;
+  transform: translateX(-50%); opacity: 0; pointer-events: none;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,.8));
 }
-/* 尺寸与外发光一共收过两档（84→72→62 / 12px→10px→7px 光晕）。
-   起因是「击杀特效挡视野」：`killicon` 的 top 锚在准星正上方 92px，高度一涨、光晕一糊，
-   它的**下缘就探进准星**。两轮都是照 `/tmp/cfkbsweep2.mjs` 那个准星方框（±28）的读数收的：
-     · 第一轮（84→72、0% 缩放 2.3→1.7）之后，准星 ±28 方框里最坏 Δ13.33 / 峰值 206.2（@t=0.32），
-       而**同一时刻**冲击波自己只贡献 Δ0.10 / 峰值 3.07 —— 也就是说那一格全是图标
-       （grep `/tmp/kb-after/rows.json` 的 `t=0.32` 三行即可自证）。别把冲击波**自己**的最坏帧
-       （Δ1.51 / 峰值 22.3 @t=0.08）搬到这一句里：两者的最坏帧不在同一时刻，混着比就是错的。
-     · 本轮（72→62、光晕 10→7px、0% 缩放 1.7→1.4、时长 0.92→0.80s）把下缘从
-       `cy-20` 推到 `cy-30`：准星方框是 ±28，收完图标就不再压住瞄准点。
-   **`top: calc(50% - 92px)` 不能再往上挪** —— 再高就与连杀计时条（`calc(24% + 56px)`，
-   713px 高下约 227px）撞上，两者的间隙只剩约 10px。要再收只能继续缩图形与光晕。 */
-.killicon .ki-gun { width: 62px; height: 62px; }
-.killicon .ki-hs { width: 29px; height: 29px; align-self: flex-start; margin-top: 4px; }
-/* 爆头：红；黄金爆头：金 + 更强的外发光。图形不变，只换色（与 CF 一致）。
-   `.gold` 那两层辉光（14px / 24px）是全场最糊的一处，收成 10px / 18px —— 它铺得最开，
-   最容易被读成「一晃眼白了一片」，而色相本身已经足够把黄金爆头与普通爆头分开。 */
-.killicon.head { color: #ff4d4d; filter: drop-shadow(0 0 7px rgba(255, 60, 60, 0.85)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
-.killicon.gold { color: #ffd24a; filter: drop-shadow(0 0 10px rgba(255, 200, 60, 1)) drop-shadow(0 0 18px rgba(255, 160, 20, 0.7)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.95)); }
-/* 扫光带：一条斜的白 → 透明 → 白，从左扫到右。
-   **它必须夹在 `.ki-clip` 这个 overflow:hidden 的裁剪盒里** —— 渐变本身贯穿整块，
-   不裁就会横扫整个屏幕。而裁剪盒不能直接做在 .killicon 上：那会连它自己那圈
-   `filter: drop-shadow()` 一起裁掉（发光画在盒子外面），击杀图标会突然变成没有光的
-   一个平面图形。裁剪盒是绝对定位的兄弟节点，不参与 flex 排布，图标居中不受影响。 */
-.killicon .ki-clip {
-  position: absolute;
-  inset: -10px;
-  overflow: hidden;
-  pointer-events: none;
-}
-.killicon .ki-shine {
-  position: absolute;
-  top: -20%;
-  bottom: -20%;
-  left: 0;
-  width: 34%;
-  background: linear-gradient(100deg,
-    rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.92) 50%, rgba(255, 255, 255, 0) 100%);
-  transform: translateX(-190%) skewX(-16deg);
-}
-.killicon.show .ki-shine { animation: kiSweep 0.46s 0.14s ease-out forwards; }
-@keyframes kiSweep {
-  0% { transform: translateX(-190%) skewX(-16deg); }
-  100% { transform: translateX(420%) skewX(-16deg); }
-}
-/* 入场：从大得多的位置**过冲**砸下来（1.4 → 0.86 → 1.08 → 1.0），带一点回正的角度，
-   最后一边放大一边上浮淡出。`cubic-bezier(0.16,1,0.3,1)` 是「快出慢收」那条，
-   与线性/`ease-out` 的区别就在前 26% 那一下够狠 —— 平稳的 scale 曲线读起来是
-   「淡入的一张图」，过冲才读成「砸出来的一下」。**过冲幅度是准星约束、不是口味旋钮**：
-   2.3 时下缘越过准星、1.7 时贴住（实测 t=0.03 盒子底边 371 > 准星 357），现压到 1.4。
-   时长同步从 0.92s 收到 0.80s —— 图小了一圈还留同样的驻留时间，读起来就成了「挂得久」。
-   `translateX(-50%)` 是居中用的，**每一帧都得带着**（漏了图标就会每帧横跳半个身位）。 */
-.killicon.show { animation: killIconAnim 0.80s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.ki-medal { display: block; width: 100%; height: 100%; }
+.killicon.show { animation: killIconAnim 1.15s ease-out forwards; }
 @keyframes killIconAnim {
-  0% { opacity: 0; transform: translateX(-50%) scale(1.4) rotate(-11deg); }
-  26% { opacity: 1; transform: translateX(-50%) scale(0.86) rotate(3deg); }
-  38% { transform: translateX(-50%) scale(1.08) rotate(-1deg); }
-  50% { transform: translateX(-50%) scale(0.98) rotate(0deg); }
-  62% { opacity: 1; transform: translateX(-50%) scale(1); }
-  100% { opacity: 0; transform: translateX(-50%) scale(1.18) translateY(-8px); }
+  0% { opacity: 0; transform: translateX(-50%) scale(1.20); }
+  10% { opacity: 1; transform: translateX(-50%) scale(.96); }
+  20%, 76% { opacity: 1; transform: translateX(-50%) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(5px) scale(.98); }
 }
 
-/* 「减少动态」下这些装饰性的一次性全屏动效只留最短的一闪：它们是体感，不是信息 ——
-   真正不可省的击杀反馈（图标本身、命中信息条、连杀播报）一个都没有被去掉。 */
+/* Reduced motion keeps the medal readable with a short fade, without impact scaling. */
 @media (prefers-reduced-motion: reduce) {
-  .fx-layer .killburst.show { animation-duration: 0.16s; }
-  .fx-layer .killburst.show::before,
-  .fx-layer .killburst.show::after { animation: none; }
   .killicon.show { animation-duration: 0.4s; }
-  .killicon.show .ki-shine { animation: none; }
+  .killicon.show { animation-name: streakPop; }
 }
 
 /* ---- 受击方向指示：绕屏幕中心旋转的红色弧 ----
@@ -1049,7 +840,7 @@ body {
 .hud-toast {
   position: absolute;
   left: 50%;
-  bottom: 22%;
+  top: 38%;
   transform: translateX(-50%);
   font-size: 20px;
   letter-spacing: 4px;
@@ -1562,7 +1353,7 @@ body {
   .hud-bottom-left { left: 18px; bottom: 18px; transform: scale(0.85); transform-origin: left bottom; }
   .hud-bottom-right { right: 18px; bottom: 18px; width: 200px; transform: scale(0.85); transform-origin: right bottom; }
   .killfeed { transform: scale(0.88); transform-origin: top right; }
-  .streak { font-size: 32px; letter-spacing: 6px; }
+  .streak { font-size: 18px; letter-spacing: 1px; }
   .death-title { font-size: 22px; letter-spacing: 5px; }
   .death-k { font-size: 17px; }
   .death-bar { width: 180px; }
@@ -2061,4 +1852,149 @@ body {
   .lv-cards { grid-template-columns: 1fr; }
   .menu.lobby .menu-btn { min-width: 0; width: 100%; }
   .lobby-ticker { padding: 8px 12px; }
+}
+
+@media (max-height: 600px) {
+  .killicon { top: 60%; width: 140px; height: 78px; }
+  .streak { top: calc(60% + 74px); font-size: 16px; }
+  .sk-timer { top: calc(60% + 96px); padding: 2px 6px; }
+}
+
+/* Match HUD uses the restrained olive / steel palette of the classic client. */
+.roundbar { gap: 12px; padding: 4px 18px; background: rgba(25,31,29,.78); border-color: #8b8d7b; }
+.rb-score { font-size: 27px; }
+.rb-time { font-size: 19px; color: #dfdfcb; }
+.rb-team { letter-spacing: 1px; color: #d5d8cc; font-family: Arial, "Microsoft YaHei", sans-serif; }
+.rb-a .rb-score { color: #b8cbd1; }
+.rb-b .rb-score { color: #dbbc95; }
+.kf-row { background: rgba(20,25,22,.25); border-right: 0; text-shadow: 0 1px 2px #000; }
+.kf-k { color: #d7b975; }
+
+/* Reference HUD: narrow score strip, outlined white vitals and yellow/white ammo.
+   Scoped to the match HUD; the lobby and end-of-match panels retain their styles. */
+@font-face {
+  font-family: "Tactical HUD";
+  src: url("../assets/hud/numerals.woff") format("woff");
+  font-display: swap;
+}
+.hud { --cf-outline: -1px -1px 0 #18201f, 1px -1px 0 #18201f, -1px 1px 0 #18201f, 1px 1px 0 #18201f, 0 2px 1px #111; }
+.hud .hud-match-details { display: none; }
+.hud .hud-top {
+  top: 3px;
+  flex-direction: column;
+  align-items: center;
+  transform: none;
+  color: #e0e2d6;
+  text-shadow: var(--cf-outline);
+}
+.hud .roundbar {
+  width: clamp(180px, 31vw, 360px);
+  height: clamp(19px, 2.7vw, 28px);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 1fr 19% 1fr;
+  gap: 0;
+  padding: 0;
+  border: 1px solid #898779;
+  border-bottom-color: #303c40;
+  background: linear-gradient(180deg, rgba(30,42,47,.88), rgba(13,23,27,.82));
+  box-shadow: inset 0 1px 0 #a1a394, 0 1px 2px #111;
+  clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 100%, 0 100%);
+}
+.hud .rb-side { min-width: 0; height: 100%; gap: 7px; padding: 0 8px; justify-content: space-between; }
+.hud .rb-side.rb-b { background: linear-gradient(90deg, rgba(129,107,71,.4), transparent); }
+.hud .rb-side.rb-a { background: linear-gradient(90deg, transparent, rgba(45,78,101,.42)); }
+.hud .rb-team { font: 13px/1 "Microsoft YaHei", "PingFang SC", sans-serif; letter-spacing: 0; white-space: nowrap; color: #d8dbd0; }
+.hud .rb-b .rb-team { color: #ece3cc; }
+.hud .rb-a .rb-team { color: #b0c1c9; }
+.hud .rb-score { font: 19px/1 "Tactical HUD", monospace; color: #f0eee0; min-width: 2ch; text-align: center; }
+.hud .rb-mid { align-self: stretch; min-width: 0; justify-content: center; padding: 0; border-inline: 1px solid #6e797a; background: rgba(76,106,126,.42); }
+.hud .rb-mid b { font: 17px/1 "Tactical HUD", monospace; color: #b9cbd3; }
+.hud .rb-time { margin-top: 3px; font: 12px/1 "Tactical HUD", monospace; letter-spacing: 1px; color: #efefdc; }
+.hud .rb-time.low { color: #f77b61; }
+.hud .hud-bottom-left {
+  left: 20px; bottom: 15px; width: auto;
+  display: flex; align-items: flex-end; gap: 15px;
+  transform: none;
+  color: #ecede3;
+  filter: drop-shadow(0 1px 1px #111);
+}
+.hud-soldier { width: 45px; height: 77px; opacity: .86; }
+.hud-vitals { width: 100px; padding-bottom: 3px; }
+.hud-ace {
+  display: block; visibility: hidden; margin: 0 0 9px 16px;
+  font: italic 900 20px/1 Arial, sans-serif;
+  letter-spacing: -1px; color: #d2d5cb; text-shadow: var(--cf-outline);
+}
+.hud-ace.active { visibility: visible; }
+.hud .vital-row { display: flex; align-items: baseline; gap: 12px; margin: 0; height: 23px; text-shadow: var(--cf-outline); }
+.vital-label { font: 700 11px/1 Arial, sans-serif; letter-spacing: 1px; }
+.hud .vital-num, .hud .hp-num { font: 22px/1 "Tactical HUD", monospace; letter-spacing: 1px; color: #f1f0e7; text-shadow: var(--cf-outline); }
+.hud .hp-num.low { color: #ff9d87; animation: none; }
+.hud .vital-track, .hud .hud-bottom-left .hud-bar {
+  height: 3px; margin: 0 0 3px; border: 0;
+  background: rgba(20,26,27,.72);
+  box-shadow: 0 1px 0 rgba(237,239,223,.5);
+}
+.armor-track i { display: block; height: 100%; width: 0; }
+.hud #hpFill { background: repeating-linear-gradient(90deg, #e5e7db 0 9px, #737b72 9px 10px); }
+.hud #hpFill.low { background: #e5a28e; animation: none; }
+.hud .hud-bottom-right { right: 22px; bottom: 17px; width: 280px; transform: none; text-shadow: var(--cf-outline); }
+.hud .wname { font: 12px/1.3 Arial, "Microsoft YaHei", "PingFang SC", sans-serif; letter-spacing: .2px; color: #d7e7e5; text-shadow: var(--cf-outline); }
+.hud-weapon-shape { height: 32px; padding-right: 61px; color: #eef0e3; filter: drop-shadow(0 1px 1px #141a18); }
+.hud-gun-icon { width: 84px; height: 32px; }
+.hud-ammo-row { display: flex; align-items: center; justify-content: flex-end; gap: 9px; padding-right: 38px; }
+.hud .bp-badge { display: grid; place-items: center; width: 17px; height: 19px; box-sizing: border-box; padding: 0; margin: 0; border: 1px solid #d6d9ca; border-radius: 5px 5px 3px 3px; background: rgba(20,31,32,.42); color: #dedfce; font: 11px/1 "Tactical HUD", monospace; letter-spacing: 0; }
+.ammo-label { font: 700 9px/1 Arial, sans-serif; color: #c7cfcc; }
+.hud .ammo-num { display: flex; align-items: baseline; font: 23px/1 "Tactical HUD", monospace; color: #f1f0de; letter-spacing: 0; text-shadow: var(--cf-outline); white-space: pre; }
+.ammo-mag { color: #e6e894; }
+.ammo-divider { font-size: 19px; padding: 0 2px; }
+.hud .ammo-num.low .ammo-mag { color: #ffb070; }
+@media (max-width: 820px) {
+  .hud .rb-team { font-size: 11px; }
+  .hud .rb-side { gap: 3px; padding-inline: 4px; }
+  .hud .rb-score { font-size: 16px; }
+  .hud .rb-mid b { font-size: 15px; }
+  .hud .rb-time { font-size: 10px; }
+  .hud .hud-bottom-left { left: 12px; bottom: 10px; gap: 9px; }
+  .hud-soldier { width: 34px; height: 60px; }
+  .hud-vitals { width: 74px; }
+  .hud .vital-row { height: 18px; gap: 8px; }
+  .hud .vital-num, .hud .hp-num { font-size: 17px; }
+  .vital-label { font-size: 9px; }
+  .hud-ace { font-size: 16px; margin-bottom: 6px; margin-left: 12px; }
+  .hud .hud-bottom-right { right: 12px; bottom: 14px; width: 226px; }
+  .hud .wname { font-size: 10px; }
+  .hud-weapon-shape { height: 26px; padding-right: 42px; }
+  .hud-gun-icon { width: 68px; height: 26px; }
+  .hud-ammo-row { gap: 6px; padding-right: 26px; }
+  .hud .ammo-num { font-size: 18px; }
+  .ammo-divider { font-size: 15px; }
+  .ammo-label { font-size: 8px; }
+  .hud .bp-badge { width: 15px; height: 16px; font-size: 9px; }
+}
+@media (max-width: 540px) {
+  .hud .rb-team { font-size: 9px; }
+  .hud .rb-side { padding-inline: 3px; gap: 1px; }
+  .hud .rb-score, .hud .rb-mid b { font-size: 13px; }
+  .hud .rb-time { font-size: 8px; }
+  .hud .hud-bottom-left { left: 10px; gap: 7px; }
+  .hud .hud-bottom-right { right: 10px; width: 200px; }
+  .hud .wname { font-size: 9px; }
+}
+@media (max-width: 600px) {
+  .hud .hud-bottom-left { gap: 13px; }
+  .hud-soldier { width: 32px; height: 54px; }
+  .hud-vitals { width: 56px; }
+  .hud .vital-row { height: 14px; gap: 8px; }
+  .hud .vital-num, .hud .hp-num { font-size: 12px; letter-spacing: .3px; }
+  .vital-label { font-size: 8px; }
+  .hud-ace { font-size: 13px; margin: 0 0 7px 11px; }
+  .hud .vital-track, .hud .hud-bottom-left .hud-bar { height: 2px; margin-bottom: 2px; }
+  .hud .ammo-num { font-size: 14px; }
+  .ammo-divider { font-size: 12px; }
+  .hud-ammo-row { padding-right: 54px; gap: 5px; }
+  .hud-weapon-shape { padding-right: 56px; height: 23px; }
+  .hud-gun-icon { height: 23px; }
+  .hud .bp-badge { width: 13px; height: 14px; font-size: 8px; }
 }

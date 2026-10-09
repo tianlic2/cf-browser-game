@@ -113,3 +113,19 @@ export function weaponIconSvg(weaponId, cls) {
 export function headshotBadgeSvg(golden, cls) {
   return svg('<path d="' + SKULL + '"/>', (cls || "ico-hs") + (golden ? " gold" : ""), true);
 }
+
+// Original vector artwork in the classic military-medal vocabulary, not a game asset rip.
+// Only one central medal exists, so the gradient id cannot collide with kill-feed icons.
+export function killMedalSvg(weaponId, headshot, golden) {
+  const metal = golden ? ["#fff3b9", "#b7862e", "#ead798"] : ["#eef0e6", "#777f7c", "#bdc2b7"];
+  const wing = '<path d="M62 30 18 12 24 28 54 39 21 31 29 43 55 47 29 46 38 57 59 56 43 60 52 69 67 62Z"/>';
+  return '<svg class="ki-medal" viewBox="0 0 180 100" aria-hidden="true">' +
+    '<defs><linearGradient id="kill-metal" x1="0" y1="0" x2="0.2" y2="1"><stop stop-color="' + metal[0] + '"/><stop offset=".45" stop-color="' + metal[1] + '"/><stop offset=".52" stop-color="' + metal[0] + '"/><stop offset="1" stop-color="' + metal[2] + '"/></linearGradient></defs>' +
+    '<g fill="url(#kill-metal)" stroke="#262925" stroke-width="2" stroke-linejoin="round">' + wing +
+    '<g transform="translate(180 0) scale(-1 1)">' + wing + '</g>' +
+    '<path d="M90 8 122 27 117 62 90 84 63 62 58 27Z"/><path d="M90 14 116 30 111 59 90 76 69 59 64 30Z" fill="#303831" stroke="#d4cfb0" stroke-width="1"/></g>' +
+    (headshot
+      ? '<g class="ki-hs' + (golden ? ' gold' : '') + '" transform="translate(65 19) scale(2.08)" fill="' + (golden ? '#edcf83' : '#d8d6c5') + '" fill-rule="evenodd"><path d="' + SKULL + '"/></g><path d="M90 11V24 M90 61V74 M60 42H72 M108 42H120" stroke="' + (golden ? '#e6c866' : '#a8362e') + '" stroke-width="3"/>'
+      : '<g class="ki-gun" transform="translate(64 22) scale(2.2)" fill="#dadccd">' + ICON_BODY[iconKindFor(weaponId)] + '</g>') +
+    '<path d="M51 72H129L123 88H57Z" fill="#292e29" stroke="' + metal[2] + '"/><text x="90" y="83" text-anchor="middle" fill="' + metal[0] + '" font-family="Arial,sans-serif" font-weight="bold" font-size="9" letter-spacing="1">' + (headshot ? 'HEAD SHOT' : 'KILL') + '</text></svg>';
+}

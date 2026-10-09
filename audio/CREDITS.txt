@@ -1,9 +1,9 @@
 音频素材署名 / Audio asset credits
 =================================
 
-本目录下的音频文件分三类，全部允许商用、允许修改、无需署名（但我们照做）。
+本目录的素材按来源分别列示。Freesound 录音适用所列 CC0；用户提供的大厅音乐与第四节 CF 游戏语音、第五节 CF AK 音效不据此宣称 CC0 或商用授权。
 
-所有文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
+除第五节保留原 WAV 外，已有转码文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
   <stem>.ogg  —— Ogg Vorbis。Chrome / Firefox / Edge 走这一份。
   <stem>.m4a  —— MP4 容器 + AAC。Safari 走这一份（Chrome/Firefox 也认）。
   **ui/ 与 sw/ 下的 14 个 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
@@ -111,3 +111,59 @@ ui/lobby_theme               <- 用户提供的「大厅音效.wav」（仓库�
 原始规格 2 ch / 11025 Hz / Int16 / 28.34 s。处理：峰值 0.511 → 归一化到 0.90，
 重采样到 22050 Hz（11 kHz 是电话级，提采样不增加信息量，只是为了让 AAC 编码器
 接受这个采样率），AAC 64 kbps 立体声。
+
+
+------------------------------------------------------------
+四、CF 经典保卫者英文连杀语音（游戏素材，非 CC0）
+------------------------------------------------------------
+按用户指定的经典端游英文男声接入。来源包标记为 CrossFire Global Risk (#8)。
+来源仓库：https://github.com/MeteorTheLizard/Meteors-Multikill-Announcer
+固定版本：6ed19181c014ed010518ffebd738f3e71284b9d9
+来源说明：https://steamcommunity.com/sharedfiles/filedetails/?id=1659142161
+原语音权利归原游戏的权利人；来源作者注明声音归各自所有者/公司，未提供
+这些游戏录音的独立 CC0 或商用许可。不能与第一、二节 CC0 素材混为一谈。
+
+OGG 原样保留；M4A 由浏览器解码为单声道 PCM 后以 AAC 96kbps 转码，供格式回退。
+不裁剪、不变调、不加混响；播放增益 0.65。上游编号 1..7 对应游戏连杀数 2..8：
+  announcer/cf_gr_2 <- sound/meteorsmultikill/8/announcer1.ogg — Double Kill
+    OGG SHA-256: 846944f86e0eb66ae1295a24b8837fe0c02a573777c38ea072eaebc9fc90a794
+  announcer/cf_gr_3 <- sound/meteorsmultikill/8/announcer2.ogg — Multi Kill
+    OGG SHA-256: ae083031911131805fd354cb2025ff6cb7a8e370de302d4f959f773eefac1691
+  announcer/cf_gr_4 <- sound/meteorsmultikill/8/announcer3.ogg — Ultra Kill
+    OGG SHA-256: 4cd813815c1a78a7a6a4b2cf1bf91d8373390c2dbe427cae67e6e88c59391cb7
+  announcer/cf_gr_5 <- sound/meteorsmultikill/8/announcer4.ogg — Unbreakable
+    OGG SHA-256: 309f4201e87dcce0e25a104bbbccd76623198c10b8396aedcd1d09fb24769308
+  announcer/cf_gr_6 <- sound/meteorsmultikill/8/announcer5.ogg — Unbelievable
+    OGG SHA-256: b6c3c8575c4bb3af4bc00cefa6c03de2cc6b3094d46d10aafd241772bdb02b24
+  announcer/cf_gr_7 <- sound/meteorsmultikill/8/announcer6.ogg — You Want a Piece of Me?
+    OGG SHA-256: cfd136af0f2c1a28cae839a338a255d46d842ee39032306ddcb6301e9ff8e79d
+  announcer/cf_gr_8 <- sound/meteorsmultikill/8/announcer7.ogg — Come and Get Some!
+    OGG SHA-256: 006f9babfc79ecd7312b4d1e7f7b10575b519882f42e62a5e8927fb57f38ba43
+
+
+------------------------------------------------------------
+五、CF 经典 AK-47 原声音（非 CC0）
+------------------------------------------------------------
+来源：https://gamebanana.com/mods/592174 （CrossFire AK-47）
+文件：cf_ak47.7z，GameBanana 文件编号 1432478。
+原声音：Smilegate；移植包修正/编译：kupidzhy。
+页面标注 CC BY-NC-ND 4.0；原游戏素材权利不因社区转载转为本项目所有。
+本地直接复制默认声音，未使用包内其他作者的可选替换声音。
+
+classic/ak47_fire.wav <- ak47-1.wav
+classic/ak47_out.wav  <- G_MZC_AK47_CLIPOUT.WAV
+classic/ak47_in.wav   <- G_MZC_AK47_CLIPIN.WAV
+classic/ak47_bolt.wav <- G_RELOAD_AK47.WAV
+
+原速播放；AK 第一人称改用导入骨架后，换弹事件按来源 QC 的第 39、102、202 帧（共 299）映射到本项目换弹周期。其他枪械/敌人通用枪声仍走既有声音。
+完整资产记录：assets/classic/CREDITS.md。
+
+Classic CF grenade sounds (not CC0)
+Source: Crossfire Classic Grenades — https://gamebanana.com/mods/557024
+Original models/textures/sounds: Smilegate; port: HLXX50.
+Source page labels CC BY-NC-ND 4.0. Local adaptation only; no publication in this change.
+classicgrenades.rar, GameBanana file 1325980:
+  Grenades/sound/weapons/T_HEGRENADE_PIN.WAV -> classic/grenade_pin.wav
+  Grenades/sound/weapons/explode3.WAV -> classic/grenade_explode.wav
+  Flashbang/sound/weapons/flashbang-1.WAV -> classic/grenade_flash.wav
+  Smokegrenade/sound/weapons/sg_explode.WAV -> classic/grenade_smoke.wav

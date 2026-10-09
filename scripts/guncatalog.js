@@ -19,7 +19,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
-import { paintSkin, skinsFor, findSkin } from "./skins.js";
+import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js";
 
 // 会出现在世界里的枪。前三把是敌人随机携带的池子；手枪只用于「玩家丢掉副武器」。
 const WORLD_GUN_IDS = ["ak", "m4", "awm", "pistol"];
@@ -165,7 +165,7 @@ function darkenForEnemy(root) {
 }
 
 // 启动时调一次。guns = { ak: Object3D, m4: …, awm: …, pistol: … }（传 owned[id].gun）
-export function buildGunCatalog(guns) {
+export function buildGunCatalog(guns, models = {}) {
   for (const id of WORLD_GUN_IDS) {
     const src = guns[id];
     if (!src) continue; // 某把枪加载失败就跳过，掉落时按 null 处理
@@ -173,12 +173,15 @@ export function buildGunCatalog(guns) {
     const world = {};
     const enemy = {};
     for (const skin of skinsFor(id)) {
-      const w = makeVariant(src, yaw, 0);
+      // Classic loadouts use the same geometry in hand, on enemies and on deck.
+      const model=models[id]?.[skin.id] || src;
+      const modelYaw=model===src ? yaw : model.rotation.y;
+      const w = makeVariant(model, modelYaw, 0);
       paintSkin(w, id, skin.id);
       mergeByMaterial(w); // 必须在 paintSkin **之后**：分组键 matName 与属性核验都要看上完漆的结果
       world[skin.id] = w;
 
-      const e = makeVariant(src, yaw + Math.PI, RIFLE_LEN);
+      const e = makeVariant(model, modelYaw + Math.PI, RIFLE_LEN);
       paintSkin(e, id, skin.id);
       darkenForEnemy(e); // 必须在 paintSkin **之后**（上漆会覆盖颜色）
       mergeByMaterial(e); // 同上，且必须在 darkenForEnemy 之后（压暗是逐材质的）
@@ -214,17 +217,9 @@ export function enemyModel(id, skinId) {
   return pick(id, skinId, "enemy");
 }
 
-// 抽一份敌人配装：型号等概率抽一个，再在该型号的皮肤列表里等概率抽一款。
-// 组合数 = 每个型号的皮肤款数之和（不是型号数 × 款数）：ak 2 + m4 6 + awm 3 = **11** 种。
-// 全部能持枪的皮肤加 pistol 的 1 款 = **12**（`worldModels()` 断言的数就是它）。
-// 表里只剩「原厂 + 模型皮肤」两类（见 skins.js 开头那条），所以这四个数就是
-// 「型号的条目数」：ak 2 / m4 6 / awm 3 / pistol 1 / knife 1。
-// 匕首不计入这里（`randomGunRoll` 也不抽匕首）。
-// 注意这里**不排除模型皮肤**：敌人拿的仍是基础低模（目录只从 baseGun 派生），
-// 但配色用的是那款模型皮肤的 `slots`。
+// Classic battlefield palette, including enemy drops. Catalog entries for the
+// modern skins remain available, but do not enter the default match pool.
 export function randomGunRoll() {
   const id = ENEMY_GUN_IDS[(Math.random() * ENEMY_GUN_IDS.length) | 0];
-  const list = skinsFor(id);
-  const skin = list.length ? list[(Math.random() * list.length) | 0] : null;
-  return { id, skin: skin ? skin.id : null };
+  return { id, skin: DEFAULT_SKIN[id] };
 }

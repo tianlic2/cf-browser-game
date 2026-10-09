@@ -23,11 +23,8 @@
     <!-- 命中/受击反馈层（血雾 / 命中标记 / 闪光白屏） -->
     <div id="fx-layer" class="fx-layer">
       <div class="flash-overlay" id="flashOverlay"></div>
-      <!-- 高档连杀的全屏边缘辉光（一次性 CSS 动画，重触发靠 classList 移除/回流/加回） -->
+      <!-- Legacy FX nodes kept inert for debug compatibility. -->
       <div class="streak-flash" id="streakFlash"></div>
-      <!-- 击杀冲击波（同 .streak-flash 的重触发惯用法）。同一个节点复用：元素本身 =
-           主冲击环、::before = 放射速度线、::after = 向外扫过的光带，见 styles/game.css。
-           class 由 showKillIcon 按击杀档位写成 hit / head / gold（三档只换 color 与 --kb）。 -->
       <div class="killburst" id="killBurst"></div>
     </div>
 
@@ -54,20 +51,20 @@
       <!-- 顶部：团队竞技比分 + 回合倒计时（时间到按比分判胜负） -->
       <div class="hud-top">
         <div class="roundbar">
-          <div class="rb-side rb-a">
-            <span class="rb-team">我方</span>
-            <span class="rb-score" id="teamScoreVal">0</span>
-          </div>
-          <div class="rb-mid">
-            <span class="rb-time" id="roundTime">10:00</span>
-            <span class="rb-limit">目标击杀 <b id="limitVal">40</b></span>
-            <span class="rb-limit">敌人数 <b id="enemyNumVal">8</b></span>
-          </div>
           <div class="rb-side rb-b">
+            <span class="rb-team">潜伏者</span>
             <span class="rb-score" id="enemyScoreVal">0</span>
-            <span class="rb-team">敌方</span>
+          </div>
+          <div class="rb-mid" aria-label="目标击杀">
+            <b id="limitVal">40</b>
+          </div>
+          <div class="rb-side rb-a">
+            <span class="rb-score" id="teamScoreVal">0</span>
+            <span class="rb-team">保卫者</span>
           </div>
         </div>
+        <span class="rb-time" id="roundTime">10:00</span>
+        <span class="hud-match-details">敌人数 <b id="enemyNumVal">8</b></span>
       </div>
 
       <!-- 右上：击杀信息条 -->
@@ -79,11 +76,10 @@
         <canvas id="mmCanvas"></canvas>
       </div>
 
-      <!-- 中上：连杀播报（主标题 = 阶梯称号，见 main.js 的 streakLabel）。高档位会另起一层
-           全屏边缘辉光（#streakFlash，在 .fx-layer 里）。 -->
+      <!-- 准星下方：经典军徽与英文连杀播报。 -->
       <div class="streak" id="streak"></div>
 
-      <!-- 中上：连杀窗口倒计时（只要身上有连杀就一直挂着，条走完 = 连杀断）
+      <!-- 军徽下方：连杀窗口倒计时（只要身上有连杀就一直挂着，条走完 = 连杀断）
            位置钉在播报标题正下方，两者同时在场时不打架。 -->
       <div class="sk-timer" id="streakTimer">
         <span class="sk-timer-num" id="streakTimerNum"></span>
@@ -91,7 +87,7 @@
         <span class="sk-timer-track"><i id="streakTimerFill"></i></span>
       </div>
 
-      <!-- 屏幕中心：击杀图标 -->
+      <!-- 准星下方：击杀军徽 -->
       <div class="killicon" id="killIcon"></div>
 
       <!-- 屏幕中心：受击方向指示 -->
@@ -106,20 +102,37 @@
         </div>
       </div>
 
-      <!-- 左下：生命值 -->
+      <!-- 左下：人物轮廓、AC / HP。AC=0 表示当前未装备护甲。 -->
       <div class="hud-bottom-left">
-        <div class="hp-row">
-          <span class="hp-icon">✚</span>
-          <span class="hp-num" id="hpVal">100</span>
+        <svg class="hud-soldier" viewBox="0 0 52 88" aria-hidden="true">
+          <g fill="rgba(26,34,35,.38)" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round">
+            <path d="M18 15 17 9 20 3 26 1 33 4 35 10 33 16 31 21 21 21Z"/>
+            <path d="m18 11 17 0-1 5-6 3-8-3Z" fill="rgba(215,225,217,.28)"/>
+            <path d="M21 21 20 26 12 29 8 42 4 55 9 59 15 44 17 39 17 56 34 56 35 39 38 46 44 59 49 56 43 40 40 29 32 26 31 21"/>
+            <path d="M17 56 15 70 13 83 11 86 22 86 25 66 28 66 31 86 42 86 38 82 37 70 34 56Z"/>
+            <path d="m19 29 6 4 8-4 0 23-14 0Z"/>
+            <path d="M20 36h11m-11 5h11m-11 5h11M17 57h18M18 71h6m5 0h7" fill="none"/>
+          </g>
+        </svg>
+        <div class="hud-vitals">
+          <span class="hud-ace" id="aceBadge" aria-label="当前击杀领先">ACE</span>
+          <div class="vital-row armor-row"><span class="vital-label">AC</span><span class="vital-num" id="armorVal">0</span></div>
+          <div class="vital-track armor-track" aria-hidden="true"><i></i></div>
+          <div class="vital-row hp-row"><span class="vital-label">HP</span><span class="hp-num" id="hpVal">100</span></div>
+          <div class="hud-bar"><div class="hud-bar-fill" id="hpFill"></div></div>
         </div>
-        <div class="hud-bar"><div class="hud-bar-fill" id="hpFill"></div></div>
       </div>
 
       <!-- 右下：武器名 + 弹药 -->
       <div class="hud-bottom-right">
-        <div class="hud-weapon"><span class="bp-badge" id="bpBadge">背包 1</span><span class="wname" id="weaponName">AK-47</span></div>
-        <div class="ammo-num" id="ammoVal">30 / 120</div>
-        <div class="hud-bar"><div class="hud-bar-fill" id="ammoFill"></div></div>
+        <div class="hud-weapon"><span class="wname" id="weaponName">AK-47</span></div>
+        <div class="hud-weapon-shape" id="hudWeaponIcon" aria-hidden="true"></div>
+        <div class="hud-ammo-row">
+          <span class="bp-badge" id="bpBadge" title="当前背包">1</span>
+          <span class="ammo-label">AMMO</span>
+          <div class="ammo-num" id="ammoVal"><span class="ammo-mag" id="ammoMag">30</span><span class="ammo-divider"> / </span><span class="ammo-reserve" id="ammoReserve">90</span></div>
+        </div>
+        <div class="hud-match-details" aria-hidden="true"><div id="ammoFill"></div></div>
       </div>
 
       <!-- 背包面板（B 开合；再用数字键 1/2/3 选背包，选完自动收起） -->

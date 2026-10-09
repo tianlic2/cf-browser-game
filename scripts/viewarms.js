@@ -1,4 +1,6 @@
 // ===== 第一人称手臂（视模）+ 换弹动作 =====
+// 当前默认：classic_arms.js 从 AK 原视模烘出同一副手套/袖子，复用本文件的握点与动作。
+// 下方 fps_arms.glb 的材质、烘焙和说明保留为素材加载失败时的回退路径。
 //
 // 为什么要有这个模块：武器是挂在相机下的一个 Group，`animateWeapon()` 每帧写它的位移/旋转，
 // 于是枪看起来是**从右下角凭空浮出来**的 —— 没有手、也没有「人在操作它」的证据。
@@ -49,6 +51,7 @@
 // 所以装载时要先把它转正到 -Y，否则 setFromUnitVectors 会把它指歪 —— 见 FPS_SRC 的注释。
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
+import { bakeClassicArms } from './classic_arms.js';
 // 只 import 这份文件**真的用到**的原语（纹理管线的实现全在那边）：
 // 袖口束带那套程序化贴图（vnoise/field/lowField/buildMaps）＋ 重映射用的色彩转换
 // （hexLin 线性化、lin2srgb 回写、makeCanvas/texFrom 出贴图）。
@@ -749,11 +752,12 @@ function cuffGeo(rad, len, tile) {
 // 那是不撕焊缝的分量，等价于改烘焙期的 `FPS_ARM_ROLL`，但它只能调「掌心朝哪、拇指倒向哪边」，
 // **改不了通道轴的方向**（通道轴躺在 ⊥ 前臂的那个平面里，绕前臂滚只是在平面内转）。
 export const ARM_ANCHORS = {
+  ak_cf: { r: [0.014,-0.028,0.14], l: [-0.012,0.045,-0.145], s: 0.743, m: [0,-0.11,-0.02] },
   ak:     { r: [ 0.006,  0.001,  0.155], l: [-0.025,  0.041, -0.146], s: 0.743 },
   m4:     { r: [ 0.018, -0.045,  0.175], l: [-0.025, -0.003, -0.190], s: 0.743 },
   awm:    { r: [ 0.018, -0.045,  0.160], l: [-0.025, -0.030, -0.230], s: 0.743 },
   pistol: { r: [-0.028, -0.100,  0.160], l: [-0.048, -0.135,  0.115], s: 0.800, m: [ 0.0, -0.230, 0.140] },
-  knife:  { r: [ 0.0369, -0.0946,  0.0638], s: 0.743, l: null },
+  knife:  { r: [ 0.0369, -0.0946,  0.0638], s: 0.743, l: [-.62,-.18,.04] },
   frag:   { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
   flash:  { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
   smoke:  { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
@@ -835,6 +839,16 @@ const _dirR = new THREE.Vector3();
 const _dirL = new THREE.Vector3();
 
 export class ViewArms {
+  loadClassic(view) {
+    const parts=bakeClassicArms(view);
+    this.classic=true;
+    for(const side of ['R','L']) {
+      const p=parts[side];FPS_SRC.handPivot[side]=p.pivot;FPS_SRC.armWrist[side]=[0,0,0];
+      FPS_SRC.armDir[side]=p.axis;ELBOW_DIR[side.toLowerCase()]=p.axis;
+      this._install(side==='R'?this.armR:this.armL,new THREE.Mesh(p.hand,parts.material.hand),new THREE.Mesh(p.fore,parts.material.fore),parts.material);
+    }
+    this.handsReady=true;this.configure(this.weaponId);return true;
+  }
   constructor() {
     const G = geo();
     // 材质每个实例一份（与 SoldierRig 同理：将来若要做「受击/变色」不会互相串）。
@@ -965,7 +979,7 @@ export class ViewArms {
     // 不写死数字 —— 换了源模型（换手）它自己就跟着变。
     // **必须在下面那个打标循环之前造出来并挂上**，否则它不进 collectMeshes、拿不到
     // `userData.viewArms`，会被 meshMats() 当成武器材质导出去（皮肤测试的条数断言会红）。
-    const cuff = this._cuff(armMesh, axis, new THREE.Vector3().fromArray(aw), arm.armLen, side);
+    const cuff = this.classic?null:this._cuff(armMesh, axis, new THREE.Vector3().fromArray(aw), arm.armLen, side);
     if (cuff) arm.fore.add(cuff);
 
     for (const o of [...collectMeshes(handMesh), ...collectMeshes(armMesh)]) {
@@ -1099,11 +1113,20 @@ export class ViewArms {
     if (a.m) this.magwell.fromArray(a.m);
     else this.magwell.copy(MAGWELL);
     if (this.hasLeft) this.anchorL.fromArray(a.l);
+    if(this.classic) {
+      if(weaponId.startsWith('m4'))this.anchorL.add(new THREE.Vector3(.025,.035,0));
+      if(weaponId.startsWith('awm'))this.anchorL.x+=.015;
+      if(weaponId==='pistol'){this.anchorR.y+=.05;this.anchorL.y+=.05;}
+    }
     // 手部缩放：缩的是 grp，而 grp 的原点就是腕点 —— 所以整只手（含前臂、弹匣）
     // 是「绕腕点缩小」，腕点本身不动、仍然咬在握把上。
     const s = a.s || 1;
     this.armR.grp.scale.setScalar(s);
     this.armL.grp.scale.setScalar(s);
+    for(const arm of [this.armR,this.armL]) {
+      arm.restFore ||= arm.fore.position.clone();
+      arm.fore.position.copy(arm.restFore);arm.armStretch.scale.y=1;
+    }
     // 每把枪的手部姿态修正（CS 的手是照它那把枪烘的，换到我们的枪上角度不完全吻合）
     this.armR.palm.rotation.fromArray(a.hr || [0, 0, 0]);
     this.armL.palm.rotation.fromArray(a.hl || [0, 0, 0]);
@@ -1189,9 +1212,41 @@ export class ViewArms {
    * @param invM      武器组矩阵的逆（相机空间 → 组局部）。换弹时组的俯仰很大，
    *                  腰袋点必须走这个逆变换才能钉在屏幕上；省略则退化为旧的纯组局部行为。
    */
+  poseGrenade(action,invM) {
+    // The right hand stays on the body while the left reaches the pin, pulls
+    // away, then clears the throwing arm. Elbows remain below the camera.
+    _tmpR.set(.62,-.70,-.10).applyMatrix4(invM);
+    this._aim(this.armR,this.anchorR,_tmpR);
+    this.armR.armStretch.scale.y=Math.max(1,this.anchorR.distanceTo(_tmpR)/(this.armR.armLen*this.armR.grp.scale.x)+.15);
+    this.armL.grp.visible=!!action&&!action.thrown;
+    this.magL.visible=false;
+    if(!action||action.thrown)return;
+    const pull=smooth(Math.min(1,Math.max(0,(action.t-.08)/.25)));
+    _tmpL.copy(this.anchorR).add(new THREE.Vector3(-.015-.25*pull,.12+.015*pull,-.025));
+    _tmpE.set(-.52,-.70,-.13).applyMatrix4(invM);
+    this._aim(this.armL,_tmpL,_tmpE);
+    this.armL.armStretch.scale.y=Math.max(1,_tmpL.distanceTo(_tmpE)/(this.armL.armLen*this.armL.grp.scale.x)+.15);
+  }
+
   update(reloading, p, invM) {
     this._aim(this.armR, this.anchorR, this.elbR);
     if (!this.hasLeft) return;
+    if (this.weaponId==='knife' && invM) {
+      // Elbows stay near the player's shoulders while the wrist turns the knife.
+      // Rotating the whole forearm with the blade would expose its cut-off end.
+      _tmpR.set(.68,-.62,-.10).applyMatrix4(invM);
+      this._aim(this.armR,this.anchorR,_tmpR);
+      this.armR.armStretch.scale.y=Math.max(1,this.anchorR.distanceTo(_tmpR)/(this.armR.armLen*this.armR.grp.scale.x)+.2);
+      // The free hand guards the lower left; it does not sweep with the blade.
+      _tmpL.set(-.24,-.29,-.60).applyMatrix4(invM);
+      _tmpE.set(-.43,-.63,-.22).applyMatrix4(invM);
+      this._aim(this.armL,_tmpL,_tmpE);this.magL.visible=false;
+      this.armL.palm.quaternion.setFromRotationMatrix(invM);
+      this.armL.fore.position.copy(this.armL.restFore).applyQuaternion(this.armL.palm.quaternion);
+      this.armL.armStretch.scale.y=Math.max(1,_tmpL.distanceTo(_tmpE)/(this.armL.armLen*this.armL.grp.scale.x)+.2);
+      return;
+    }
+    this.armL.palm.rotation.fromArray((ARM_ANCHORS[this.weaponId]||ARM_ANCHORS.ak).hl||[0,0,0]);
     if (reloading) {
       this._reloadLeft(p, _tmpL, invM);
       // 左肘要跟着「手还在不在枪上」在两套锚点之间过渡：

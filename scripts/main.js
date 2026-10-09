@@ -4,6 +4,13 @@ import { makeGLTFLoader } from "./gltf.js";
 import { SFX } from "./audio.js";
 import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js";
 import { buildMap } from "./map.js";
+import { ClassicView } from "./classic_view.js";
+import { KNIFE, knifePose } from "./melee.js";
+import { GRENADE, advanceGrenade, sweepGrenade, grenadePose } from "./grenades.js";
+import { buildClassicMap } from "./classic_map.js";
+import { loadClassicSoldier } from "./classic_soldier.js";
+import { GroundNavigation } from "./navigation.js";
+import { intersectsBrush, brushSupport, brushBottom } from "./brush_collision.js";
 import { ViewArms, ARM_ANCHORS, ELBOWS, MAGWELL } from "./viewarms.js";
 import {
   SKINS, STOCK, DEFAULT_SKIN, DEFAULT_MUZZLE,
@@ -14,7 +21,7 @@ import { Chat } from "./chat.js";
 import { makeBlobShadow } from "./blobshadow.js";
 // IBL 去蓝的唯一实现（规则、推导与**实测的剂量–反应**都在 envtame.js 的文件头）
 import { tameEnvIntensity as tameWorldEnv } from "./envtame.js";
-import { weaponIconSvg, headshotBadgeSvg } from "./icons.js";
+import { weaponIconSvg, headshotBadgeSvg, killMedalSvg } from "./icons.js";
 import { Minimap, mmVisible } from "./minimap.js";
 import { Lobby } from "./lobby.js";
 
@@ -32,6 +39,10 @@ const cross = document.getElementById("crosshair");
 const hpVal = document.getElementById("hpVal");
 const hpFill = document.getElementById("hpFill");
 const ammoVal = document.getElementById("ammoVal");
+const ammoMag = document.getElementById("ammoMag");
+const ammoReserve = document.getElementById("ammoReserve");
+const hudWeaponIcon = document.getElementById("hudWeaponIcon");
+const aceBadge = document.getElementById("aceBadge");
 const ammoFill = document.getElementById("ammoFill");
 const teamScoreVal = document.getElementById("teamScoreVal");
 const enemyScoreVal = document.getElementById("enemyScoreVal");
@@ -212,6 +223,7 @@ function mmFeedEnemies() {
     let slot = mmEnemyBuf[out.length];
     if (!slot) { slot = { x: 0, z: 0, combatAt: -Infinity }; mmEnemyBuf[out.length] = slot; }
     slot.x = e.group.position.x;
+    slot.y = e.group.position.y;
     slot.z = e.group.position.z;
     slot.combatAt = e.combatAt;
     out.push(slot);
@@ -348,30 +360,24 @@ const WEAPON_DEFS = {
     // 0.5 时拳宽/柄宽只有 0.58（拳比柄还窄，等于捏不住），0.35 时恰好 1.07、拳/柄长 0.82。
     // 收到 0.35 之后全刀 ≈35cm，正是战斗匕首的真实尺寸。
     rotY: 0, targetLen: 0.35, key: "3",
-    // CS 口径：轻击 40（背后 90）、重击 65（背后 180），够得着 0.91m。
-    // **距离比旧值（2.2m）短得多** —— 旧值等于「隔着一个人挥刀还能中」。这是有意的收紧。
-    stats: {
-      range: 0.91,
-      light: { dmg: 40, backstab: 90, interval: 0.4 },
-      heavy: { dmg: 65, backstab: 180, interval: 1.0 },
-    },
+    stats: KNIFE,
     pattern: [[0, 0]], recoilReset: 0.55, punchHold: 0.15, viewTrack: 0, punchDecay: { exp: 6, lin: 10 },
   },
   // ---- 投掷物三件套（CF 的 4 号槽循环切换）----
   frag: {
     id: "frag", slot: "grenade", type: "grenade", nade: "frag", name: "手雷",
     model: "./models/grenade.glb", rotY: 0, targetLen: 0.22, key: "4", tint: 0x4a5a3a,
-    stats: { count: 2, throwCooldown: 0.85, radius: 6.5, dmg: 100, fuse: 2.2 },
+    stats: { count: 1, throwCooldown: 0.85, radius: 6.5, dmg: 100, fuse: 2.2 },
   },
   flash: {
     id: "flash", slot: "grenade", type: "grenade", nade: "flash", name: "闪光弹",
     model: "./models/grenade.glb", rotY: 0, targetLen: 0.22, key: "4", tint: 0xb9c2c8,
-    stats: { count: 2, throwCooldown: 0.85, radius: 22, blind: 4.5, fuse: 1.7 },
+    stats: { count: 1, throwCooldown: 0.85, radius: 22, blind: 4.5, fuse: 1.7 },
   },
   smoke: {
     id: "smoke", slot: "grenade", type: "grenade", nade: "smoke", name: "烟雾弹",
     model: "./models/grenade.glb", rotY: 0, targetLen: 0.22, key: "4", tint: 0x555c62,
-    stats: { count: 2, throwCooldown: 0.85, radius: 5.4, life: 14, fuse: 1.5 },
+    stats: { count: 1, throwCooldown: 0.85, radius: 4.6, life: 25, fuse: 1.5 },
   },
 };
 const PRIMARY_IDS = ["ak", "m4", "awm"];
@@ -380,9 +386,7 @@ const NADE_IDS = ["frag", "flash", "smoke"];
 // owned[id] = { group, gun, baseGun, baseMuzzle, muzzleLocal, models, modelMuzzles,
 //               modelLoads, state, def, glowMats }
 // `gun` = **当前挂着的**模型子树；`baseGun` = 出厂低模（模型皮肤会换掉前者，但永不换后者）。
-// 单存 `baseGun` 是为了世界模型目录（scripts/guncatalog.js）能从中派生掉落物/敌人手持的变体 ——
-// **只能从 baseGun 派生**：模型皮肤那把是高精度模型、朝向/标尺/材质名全都不同，
-// 拿它去建目录会把敌人手里的枪也换成模型，而 AGENTS.md 的约定是「仅玩家用模型」。
+// `baseGun` 保留出厂回退模板；世界目录另外接收预加载模型，保证经典枪械外观一致。
 // 也不能靠 group.children[0] 现取：group 后面还会被 viewArms.attach / attachMuzzleTo
 // 塞进别的子节点，第一个孩子是谁就不确定了。
 const owned = {};
@@ -673,7 +677,7 @@ function loadWeapon(def) {
           throwCd: 0,
         };
 
-        // `baseGun` 是**永不替换**的那一份，也是世界枪械目录的唯一来源（见 init 的 buildGunCatalog）。
+        // `baseGun` 是**永不替换**的那一份，也是世界枪械目录的回退来源（见 init 的 buildGunCatalog）。
         // `gun` 的语义是「当前挂着的模型」—— 模型皮肤会把它换成另一棵树（mountGunModel），
         // 所以任何「枪的几何长什么样」的问询都必须显式说明自己要的是哪一份。
         // `models`/`modelMuzzles`/`modelLoads` 按皮肤 id 缓存「已装好的模型树 / 它的枪口锚点 /
@@ -880,6 +884,9 @@ let enemyScore = 0;
 let locked = false;
 let time = 0;
 let fireEnabled = false;
+let knifeHeavyHeld = false, knifeChain = 0, meleeState = null, meleeHold = null;
+let classicView = null, classicFireT = Infinity;
+let knifeBind = null;
 let strideAcc = 0;
 let curFov = BASE_FOV;
 let sbAcc = 0; // 战绩面板的刷新节流
@@ -1051,6 +1058,7 @@ const chat = new Chat({
     keys[IS_CROUCH] = false;
     crouchDownAt = -1;   // 它喂给 isSecondaryClick，留着会把手感判断带偏
     fireEnabled = false; // 别让打字期间续火
+    cancelMelee();cancelGrenade();
   },
   getSpeakerNames: () => {
     // 只读 name 字符串、绝不留 Enemy 引用：对象池会反复易主，bindRoster 每次复用都会改写 name
@@ -1167,27 +1175,13 @@ function pushKillFeed(killer, weapon, victim, headshot, foe, weaponId) {
   setTimeout(() => row.remove(), 6500);
 }
 
-// 连杀播报（文字 + 浏览器语音合成，失败静默降级）
-//
-// **这个阶梯不封顶。** 旧版是 `{2:双杀,3:三杀,4:四杀,5:五杀}` 加一句 `Math.min(n,5)` ——
-// 于是 6 连杀往上全都在喊「五杀!」（用户实测报的问题）。现在分两段：
-//   2~9 是**称号档**（双杀/三杀/四杀/五杀 → 暴走/主宰/超神/弑神，取自 DotA 血统的中文习惯，
-//        CF 玩家一眼认得），10 往上直接落到**中文数字连杀**（「十连杀!」「十一连杀!」…），
-//   所以任何 n 都有专属文案，永远不会跟别的档撞车、也永远不会封顶。
-//
-// 称号档**必须连着数**：2~9 中间不许留空。`__tactical.streakLabel(n)` 就是读它的口子。
+// Classic English titles match the first five announcer calls. Higher streaks
+// show an explicit count; the counter remains uncapped independently of voice clips.
 const STREAK_TITLES = {
-  2: "双杀!", 3: "三杀!", 4: "四杀!", 5: "五杀!",
-  6: "暴走!", 7: "主宰!", 8: "超神!", 9: "弑神!",
+  2: "DOUBLE KILL", 3: "MULTI KILL", 4: "ULTRA KILL", 5: "UNBREAKABLE",
+  6: "UNBELIEVABLE", 7: "7 KILLS", 8: "8 KILLS", 9: "9 KILLS",
 };
 const STREAK_TITLE_MAX = 9;   // 超过它就改用中文数字连杀
-
-// 语音（英文 TTS，用户可以完全忽略 —— 说话失败是静默降级）。
-// 6 档往上没有「官方」叫法了，就用经典的那串 DotA 播报往上顶，听感依旧在升级。
-const STREAK_VOICE = {
-  2: "Double kill", 3: "Triple kill", 4: "Quadra kill", 5: "Penta kill",
-  6: "Rampage", 7: "Dominating", 8: "Godlike", 9: "Beyond godlike",
-};
 
 const CN_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
 // 中文数字（够用即可：连杀数上百是不可能事件，超过 99 就退化成阿拉伯数字，不至于出错）
@@ -1207,56 +1201,17 @@ function streakLabel(n) {
   if (n <= STREAK_TITLE_MAX) return STREAK_TITLES[n];
   return cnNumber(n) + "连杀!";
 }
-function streakVoice(n) {
-  if (n <= STREAK_TITLE_MAX) return STREAK_VOICE[n];
-  if (n < 13) return "Unstoppable";
-  if (n < 17) return "Wicked sick";
-  return "Legendary";
-}
-
-// 颜色/特效档位 r1~r5（与文案档**故意分开**：文案是给眼睛读的数，档位是配色，
-// 将来加文案不该连带改配色）。n 越大档位只增不减。
-function streakRank(n) {
-  if (n <= 3) return 1;    // 基础黄
-  if (n <= 5) return 2;    // 橙
-  if (n <= 7) return 3;    // 深橙（起全屏辉光）
-  if (n <= 9) return 4;    // 赤红
-  return 5;                // 紫金
-}
-let speechOk = true;
-function speak(text) {
-  if (!speechOk || !text || !window.speechSynthesis) return;
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.rate = 1.15;
-    u.volume = 0.9;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  } catch (e) {
-    speechOk = false;
-  }
-}
 function showStreak(n) {
   if (n < 2) return;
   const label = streakLabel(n);
-  const rank = streakRank(n);
   // className 整条重写会把上一发的 `show` 一起抹掉，正好用来重触发动画；
   // 顺序不能反 —— 先摆好类名、强制一次回流，再加 `show`。
-  // 长文案收一档字号。阈值定在 6 个字：10~19 的「十二连杀!」正好 5 个字（42px×5 ≈ 260px，
-  // 480px 窄屏也放得下），20 往上的「二十一连杀!」是 6 个，再按 42px 排会顶到屏幕边。
-  streakEl.className = "streak r" + rank + (label.length > 5 ? " long" : "");
+  // Long English callouts use the smaller type size, keeping the medal group compact.
+  streakEl.className = "streak" + (label.length > 10 ? " long" : "");
   streakEl.textContent = label;
   void streakEl.offsetWidth;
   streakEl.classList.add("show");
   sfx.streak(n);
-  speak(streakVoice(n));
-  // 高档位再来一层全屏边缘辉光（r3 起）。同样是「重写类名 → 回流 → 加 show」。
-  if (rank >= 3 && streakFlashEl) {
-    streakFlashEl.className = "streak-flash f" + rank;
-    void streakFlashEl.offsetWidth;
-    streakFlashEl.classList.add("show");
-  }
 }
 
 // 连杀窗口倒计时（常驻 HUD）：只要身上挂着连杀就显示，进度条按 STREAK_WINDOW 走完。
@@ -1281,48 +1236,14 @@ function updateStreakHud() {
   // 快断了（1.2s 内）就转红闪一下，提示「再不杀就断了」。单杀不给提示（还没成串）。
   streakTimerEl.classList.toggle("low", remain <= 1.2 && streakCount >= 2);
 }
-// 屏幕中央的击杀图标：**从一行文字换成武器剪影 +（爆头时）骷髅徽记**，与 CF 一致。
-//
-// `golden` = 黄金爆头，见 onKill 那条注释（判定口径写在伤害入口那一侧）。
-// 三档只差一个 class：`.hit`（普通，黄）/ `.head`（爆头，红）/ `.gold`（黄金，金）。
-// 重触发沿用既有的 `remove → 强制回流 → add` 惯用法（同 `.streak` / `#streakFlash`）。
+// Classic medal below the reticle. A single reusable node restarts on each kill.
 function showKillIcon(headshot, weaponId, golden) {
   if (!killIconEl) return;
   const kind = !headshot ? "hit" : golden ? "gold" : "head";
   killIconEl.className = "killicon " + kind;
-  // 扫光带（.ki-shine）**必须夹在一个 overflow:hidden 的裁剪盒里**：它是贯穿整块的斜向
-  // 渐变，不裁就会横扫整个屏幕。而裁剪盒又不能直接做在 .killicon 上 —— 那会把它自己那圈
-  // `filter: drop-shadow()` 一起裁掉（发光是画在盒子外面的）。裁剪盒是绝对定位的兄弟节点、
-  // 不参与 flex 排布，所以图标居中不受影响。
-  killIconEl.innerHTML =
-    '<span class="ki-clip"><span class="ki-shine"></span></span>' +
-    weaponIconSvg(weaponId || currentId, "ki-gun") +
-    (headshot ? headshotBadgeSvg(golden, "ki-hs") : "");
+  killIconEl.innerHTML = killMedalSvg(weaponId || currentId, headshot, golden);
   void killIconEl.offsetWidth;
   killIconEl.classList.add("show");
-  // 图标与冲击波**同源触发**（都在这里），所以任何"击杀发生了"的路径都必然两个都亮，
-  // 不会出现"图标闪了但屏幕没炸"这种半截状态。
-  spawnKillBurst(kind);
-}
-
-// 击杀冲击波：从屏幕中心向外扩散的光环 + 放射速度线。三档强度递增（hit < head < gold）。
-//
-// 为什么另开一层、而不是把 `.hitmark.kill` 做大：两者的读法**方向相反** ——
-// 准星上的四斜线是「收拢」（scale 1.9 → 0.72，读作「这一下定了」），屏幕级的爆发是
-// 「扩散」。收拢与扩散叠在一起才有「打爆了」的体量；把 hitmark 改成扩散会把准星那一下
-// 的安定感弄丢（CF 的四斜线本来就是收的）。所以这里是**加一层**，不是改那一层。
-//
-// 强度分档是刻意的：**每一次击杀都来一发满屏是最容易腻的做法**。普通击杀是中等金环，
-// 黄金爆头才顶到满屏。它与连杀辉光（`#streakFlash`，r3 起）是两条独立的强度轴 ——
-// 「单发的质量」×「连续的数量」—— 所以两者叠加时不会互相淹没。
-//
-// 重触发沿用既有的 `重写类名 → 强制回流 → 加 show` 惯用法（同 `.streak` / `#streakFlash`）。
-// 一个节点复用，不做 createElement/remove：连杀时高频触发的就是它，别让 DOM 抖动。
-function spawnKillBurst(kind) {
-  if (!killBurstEl) return;
-  killBurstEl.className = "killburst " + (kind || "hit");
-  void killBurstEl.offsetWidth;
-  killBurstEl.classList.add("show");
 }
 
 // ---------- 死亡界面 ----------
@@ -1356,11 +1277,11 @@ function updateDeathBar(p) {
 // CF 式多背包：3 个背包各带一把主武器，副武器/近战/投掷物三件套共用。
 // 数字键 1/2/3/4 切的是「当前背包内的槽位」，不是背包编号 —— 切背包走 B + 数字键，
 // 与 CF 一致（CF 里这也是两件不同的事）。
-// 三个背包默认穿的都是**模型皮肤**（ak/m4/awm 各一款），因为那三把枪只保留了这一类皮肤。
+// Classic loadout; modern model skins remain available to the existing skin API.
 const BACKPACKS = [
-  { primary: "ak", skin: "classic" },   // 背包 1 —— AK-47 老兵
-  { primary: "m4", skin: "thor" },      // 背包 2 —— M4A1 雷神
-  { primary: "awm", skin: "volt" },     // 背包 3 —— AWM 紫电
+  { primary: "ak", skin: DEFAULT_SKIN.ak },   // 背包 1 —— AK-47 老兵
+  { primary: "m4", skin: DEFAULT_SKIN.m4 },       // 背包 2 —— 黑色 M4A1
+  { primary: "awm", skin: DEFAULT_SKIN.awm },      // 背包 3 —— 军绿 AWM
 ];
 let curBp = 0;
 
@@ -1442,7 +1363,7 @@ function applySkinTo(id, skinId) {
 
 // ---------- 模型皮肤：懒加载 + 换模型 ----------
 // 一款皮肤可以自带一棵 GLB（`skin.model`，见 skins.js）。挂上去的那棵树放在 `owned[id].gun`
-// 里，而 `owned[id].baseGun` 是**永不替换**的出厂低模 —— 世界枪械目录只能从它派生。
+// 里，而 `owned[id].baseGun` 是**永不替换**的出厂低模 —— 世界枪械目录可从它派生回退变体。
 //
 // 为什么懒加载：六个模型合计 ≈11.6 MiB（贴图占大头），进战场就全下会在开局卡出一个
 // 明显的空窗，而绝大多数对局根本不会碰其中任何一款。所以选中模型皮肤时**先保持 baseGun 挂着**、
@@ -1556,7 +1477,13 @@ function updateSkinGlow(vid) {
 const SPAWN_SAFE_R = 9;
 let actedThisLife = false;
 function inSpawnZone() {
-  // 复活点就是 respawnPlayer()/gameStart() 用的那个 (0, bounds.hl - 6)
+  // 原图有多个出生点；用其包围矩形覆盖整间出生舱，避免边缘出生时不能换背包。
+  const spawns = mapData.spawns?.player;
+  if (spawns?.length) {
+    const xs=spawns.map(p=>p[0]), zs=spawns.map(p=>p[2]);
+    return player.pos.x>=Math.min(...xs)-2 && player.pos.x<=Math.max(...xs)+2
+      && player.pos.z>=Math.min(...zs)-2 && player.pos.z<=Math.max(...zs)+2;
+  }
   return Math.hypot(player.pos.x, player.pos.z - (bounds.hl - 6)) <= SPAWN_SAFE_R;
 }
 function canSwapBackpack() {
@@ -1641,6 +1568,7 @@ function commitWeaponVisual(id) {
 // **不调 commitWeaponVisual** —— 那会把手臂/枪口火光重新搬一遍，而调用方紧接着的
 // switchWeapon(…, {draw:true}) 本来就要完整挂一次，重复只是浪费。
 function resetSwitchState() {
+  cancelMelee();cancelGrenade();classicFireT=Infinity;
   switchState = null;
   switchHoldP = null;
   // 时间线被整体丢弃 ⇒ 任何还挂在未来时刻的换弹/拉栓 foley 也一并作废
@@ -1707,6 +1635,7 @@ function updateSwitch(dt) {
 function updateMinimap(dt) {
   if (!minimap) return;
   mmView.px = player.pos.x;
+  mmView.py = player.pos.y;
   mmView.pz = player.pos.z;
   mmView.yaw = player.yaw;
   mmView.time = time;
@@ -1724,8 +1653,10 @@ function updateMinimap(dt) {
 // 否则 debug 钩子 switchWeapon("m4") 这类调用会悄悄改掉玩家的背包。
 function switchWeapon(id, force, opts) {
   if (!owned[id] || (id === currentId && !force)) return;
+  cancelMelee();cancelGrenade();
   const draw = !!(opts && opts.draw);
   const prev = owned[currentId];
+  if(WEAPON_DEFS[currentId].type!=="grenade")grenadeReturnId=currentId;
   const type = WEAPON_DEFS[id].type;
   // ---- 逻辑层：与拆分之前逐字一致（curId / 弹药 HUD / 退镜都是即时的）----
   currentId = id;
@@ -2007,7 +1938,7 @@ function spawnGroundGun(id, skin, slotKind, x, z, deckY, armed, ammo) {
   const tier = new THREE.Group();
   tier.rotation.z = Math.PI / 2;
   // clone(true) 与目录**共享材质** —— 所以回收只能 scene.remove()，绝不能 dispose
-  // （见 guncatalog.js 顶部那段；这与 grenadePool 的「用完即 dispose」正好相反）。
+  // （见 guncatalog.js 顶部那段；手雷世界模型同样共享缓存几何与材质）。
   tier.add(tpl.clone(true));
   root.add(tier);
   // 落点高度：贴着甲板面 + 「躺倒后的半高」。**量一次包围盒**而不是写死常数 ——
@@ -2317,8 +2248,42 @@ function cycleScope() { applyScope(scoped ? (scopeStage >= 2 ? 0 : 2) : 1); }
 
 // ---------- 手雷 / 闪光弹 / 烟雾弹 ----------
 const grenadePool = [];
+const classicNades={};
+let grenadeAction=null;
+let grenadeReturnId='ak';
+function cancelGrenade(){grenadeAction=null;}
+function primeGrenade(){
+  const c=cur();
+  if(grenadeAction||WEAPON_DEFS[currentId].type!=='grenade'||dead||state!=='playing'||switchBlocking()||c.state.throwCd>0)return;
+  if(c.state.count<=0){sfx.empty();return;}
+  grenadeAction={id:currentId,t:0,releaseAt:Infinity,thrown:false,pinSound:false};
+}
+function releaseGrenade(){
+  if(grenadeAction&&!Number.isFinite(grenadeAction.releaseAt))grenadeAction.releaseAt=Math.max(GRENADE.prime,grenadeAction.t)+GRENADE.release;
+}
+function updateGrenadeAction(dt){
+  const a=grenadeAction;if(!a)return;
+  if(dead||state!=='playing'||chat.isTyping()||currentId!==a.id){cancelGrenade();return;}
+  a.t+=dt;
+  if(!a.pinSound&&a.t>=.3){sfx.grenadePin();a.pinSound=true;}
+  if(!a.thrown&&a.t>=a.releaseAt){
+    const g=throwGrenade();if(g)g.firstDelay=Math.max(0,a.releaseAt-(a.t-dt));a.thrown=true;
+  }
+  if(a.t>=a.releaseAt+GRENADE.recover){
+    cancelGrenade();
+    const next=owned[grenadeReturnId]&&!emptySlot[WEAPON_DEFS[grenadeReturnId].slot]?grenadeReturnId:(slotWeapon('primary')||slotWeapon('secondary')||'knife');
+    switchWeapon(next||'pistol');
+  }
+}
+
+// Same world geometry blocks both flash exposure and explosive damage.
+function grenadeExposure(from,to){
+  const d=from.distanceTo(to);if(d<.02)return true;
+  raycaster.set(from,new THREE.Vector3().subVectors(to,from).divideScalar(d));raycaster.far=Math.max(0,d-.03);
+  return raycaster.intersectObjects(obstacleFlat,false).length===0;
+}
 const smokes = [];
-const SMOKE_PUFFS = 14;
+const SMOKE_PUFFS = 28;
 const smokePool = [];
 
 function smokeTexture() {
@@ -2389,7 +2354,7 @@ function updateSmokes(dt) {
       );
       const sc = s.userData.baseScale * (0.45 + (c.radius / c.target) * 0.85);
       s.scale.set(sc, sc, 1);
-      s.material.opacity = 0.34 * a;
+      s.material.opacity = 0.48 * a;
     }
     if (c.t >= c.life) {
       for (const s of c.sprites) { s.visible = false; smokePool.push(s); }
@@ -2418,9 +2383,9 @@ function smokeBlocks(ax, ay, az, bx, by, bz) {
   return false;
 }
 
-function applyFlashEffect(intensity) {
+function applyFlashEffect(intensity,duration) {
   flashIntensity = Math.max(flashIntensity, Math.min(1, intensity));
-  flashDur = 2.2 + 3.4 * flashIntensity;
+  flashDur = duration??(2.2 + 3.4 * flashIntensity);
   flashT = 0;
 }
 
@@ -2446,8 +2411,9 @@ function clearFlash() {
 }
 
 function detonateFlash(p) {
+  let exposureDuration=0;
   const eye = new THREE.Vector3(player.pos.x, player.pos.y + player.eyeH, player.pos.z);
-  const dx = p.x - eye.x, dy = p.y + 0.4 - eye.y, dz = p.z - eye.z;
+  const dx = p.x - eye.x, dy = p.y - eye.y, dz = p.z - eye.z;
   const dist = Math.hypot(dx, dy, dz);
   const R = WEAPON_DEFS.flash.stats.radius;
   if (dist < R && dist > 1e-3) {
@@ -2459,66 +2425,51 @@ function detonateFlash(p) {
       const fwd = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(player.pitch, player.yaw, 0, "YXZ"));
       const facing = Math.max(0, (dx * fwd.x + dy * fwd.y + dz * fwd.z) / dist);
       const intensity = Math.max(0, 1 - dist / R) * (0.35 + 0.65 * facing);
-      if (intensity > 0.05) applyFlashEffect(intensity);
+      if (intensity > 0.05) {
+        exposureDuration=WEAPON_DEFS.flash.stats.blind*(1-dist/R)*(.12+.88*facing);
+        applyFlashEffect(intensity,exposureDuration);
+      }
     }
   }
   // 敌人也会被闪瞎
-  enemyManager.blindAll(p.x, p.z, 16, WEAPON_DEFS.flash.stats.blind);
-  sfx.flashbang(3.2);
-  emit(new THREE.Vector3(p.x, player.groundY + 0.3, p.z), 0xffffff, true);
+  for(const e of enemyManager.enemies){
+    if(e.dead)continue;
+    const eye=e.group.position.clone().add(new THREE.Vector3(0,1.55,0)),dist=eye.distanceTo(p);
+    if(dist<R&&grenadeExposure(p,eye))e.blind(WEAPON_DEFS.flash.stats.blind*(1-dist/R)+.35);
+  }
+  sfx.flashbang(exposureDuration,p);
+  emit(p, 0xffffff, true);
 }
 
 function updateGrenades(dt) {
   for (let i = grenadePool.length - 1; i >= 0; i--) {
     const g = grenadePool[i];
-    g.t += dt;
-    g.vel.y -= 16 * dt;
-    g.mesh.position.addScaledVector(g.vel, dt);
-    g.mesh.rotation.x += dt * 7;
-    g.mesh.rotation.z += dt * 5;
-    // 落点每帧重算：从集装箱顶上扔出去的雷要落到甲板/箱顶，而不是弹在一块
-    // 「玩家扔雷那一刻站着的高度」延伸出来的隐形平面上。
-    g.groundY = supportAt(g.mesh.position.x, g.mesh.position.z, g.mesh.position.y);
-
-    // 落地弹跳：CF 里投掷物是「弹几下等引信」，不是一碰地就炸。
-    // 阻尼必须只在真正撞击的那一帧施加 —— 写成每帧乘一次的话，贴地那几帧会把
-    // 水平速度迅速压成 0，手雷扔出去两秒只挪十几厘米。
-    if (g.mesh.position.y < g.groundY) {
-      g.mesh.position.y = g.groundY;
-      if (g.vel.y < -0.5) {
-        g.vel.y = -g.vel.y * 0.38; // 一次弹跳
-        g.vel.x *= 0.72;
-        g.vel.z *= 0.72;
-      } else {
-        g.vel.y = 0;               // 贴地滑行：按时间衰减，不按帧
-        const fric = Math.max(0, 1 - dt * 2.2);
-        g.vel.x *= fric;
-        g.vel.z *= fric;
-      }
-    }
+    advanceGrenade(g,Math.max(0,dt-(g.firstDelay||0)),colliders,(p,speed)=>sfx.grenadeBounce(p,speed),mapData?.floorY??0);g.firstDelay=0;
     if (g.t < g.fuse) continue;
 
     const p = g.mesh.position.clone();
-    p.y = g.groundY + 0.1;
+    // Keep the actual detonation height, including airbursts and box tops.
 
     if (g.kind === "frag") {
       spawnImpact(p, false);
       emit(new THREE.Vector3(p.x, p.y + 0.3, p.z), 0xffaa44, true);
-      emit(new THREE.Vector3(p.x, p.y + 0.8, p.z), 0xff55aa, true);
-      sfx.explosion();
+      emit(new THREE.Vector3(p.x, p.y + 0.8, p.z), 0x766451, true);
+      sfx.explosion(p);
       const eff = WEAPON_DEFS.frag.stats;
       for (const e of enemyManager.enemies) {
         if (e.dead) continue;
-        const dist = Math.hypot(e.group.position.x - p.x, e.group.position.z - p.z);
-        if (dist < eff.radius) {
+        const target=e.group.position.clone().add(new THREE.Vector3(0,.9,0));
+        const dist = target.distanceTo(p);
+        if (dist < eff.radius && grenadeExposure(p,target)) {
           const dmg = Math.round(eff.dmg * (1 - dist / eff.radius));
           // 挨了打也是暴露：小地图上无视视野锥与掩体、1.5s 内亮一个红点（同开火那条）。
           e.combatAt = time;
           if (e.takeDamage(dmg)) onEnemyDeath(e, false, "手雷");
         }
       }
-      const pdist = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
-      if (pdist < eff.radius * 0.75) {
+      const playerTarget=player.pos.clone().add(new THREE.Vector3(0,.9,0));
+      const pdist = playerTarget.distanceTo(p);
+      if (pdist < eff.radius * 0.75 && grenadeExposure(p,playerTarget)) {
         damagePlayer(Math.round(eff.dmg * 0.35 * (1 - pdist / eff.radius)), false);
       }
     } else if (g.kind === "flash") {
@@ -2529,8 +2480,7 @@ function updateGrenades(dt) {
     }
 
     scene.remove(g.mesh);
-    g.mesh.geometry.dispose();
-    g.mesh.material.dispose();
+    // Projectile clones share cached weapon geometry/materials; do not dispose them.
     grenadePool.splice(i, 1);
   }
 }
@@ -2552,87 +2502,70 @@ function throwGrenade() {
   const dir = new THREE.Vector3(0, 0, -1).applyEuler(
     new THREE.Euler(player.pitch + recoilPitch, player.yaw + recoilYaw, 0, "YXZ")
   );
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.09, 10, 10),
-    new THREE.MeshStandardMaterial({
-      color: def.nade === "flash" ? 0xcfd6da : def.nade === "smoke" ? 0x4a5055 : 0x33424f,
-      metalness: 0.3,
-      roughness: 0.6,
-    })
-  );
+  const mesh=classicNades[currentId]?classicNades[currentId].projectile():cur().gun.clone(true);
+  mesh.visible=true;
+  // Launch from the hand side, but sweep the offset so a close wall cannot
+  // spawn the projectile behind cover.
+  const offset=new THREE.Vector3(.16,-.13,-.24).applyEuler(camera.rotation);
+  const proposed=origin.clone().add(offset),blocked=sweepGrenade(origin,proposed,colliders,GRENADE.radius,mapData?.floorY??0);
+  if(blocked)origin.lerp(proposed,Math.max(0,blocked.t-.02));else origin.copy(proposed);
   mesh.position.copy(origin);
-  mesh.scale.set(1, 1, 1.3);
+  mesh.rotation.set(0,player.yaw,0);
   scene.add(mesh);
   grenadePool.push({
     mesh, kind: def.nade, t: 0,
-    vel: dir.multiplyScalar(11).add(new THREE.Vector3(0, 3.4, 0)),
+    vel: dir.multiplyScalar(GRENADE.speed).add(new THREE.Vector3(0,GRENADE.lift,0)).addScaledVector(player.vel,.55),
     fuse: st.fuse,
-    // 落点每帧按脚下实际台面重算（见 updateGrenades）。这里**不能**抄 player.groundY：
-    // 那是「玩家站在哪」，雷飞出去之后跟它没关系，抄过来会得到一个 2.43m 高的隐形地板。
-    groundY: 0,
   });
   updateAmmoHud();
+  return grenadePool[grenadePool.length-1];
 }
 
-// ---------- 近战 ----------
-// 轻击 / 重击两档（CS 口径：轻 40·背后 90，重 65·背后 180，够得着 0.91m）。
-// `heavy` 只在右键按下时为真（见 mousedown 那条分支）。
-//
-// **命中方式刻意保留我们的单射线**，不搬 CS 的 `sweep()` 外壳命中 ——
-// 我们的敌人骨架没有 `sweep()`，而为了一个近战要给它加一套外壳体不划算。
-// 代价是「贴着敌人侧身挥刀」比 CS 更容易落空，这是明确的观感折衷（已写进 AGENTS.md）。
-function meleeAttack(heavy) {
-  // 这道闸门**必须在函数内部**：右键重击那条路是直调 `meleeAttack(true)` 的
-  // （见 mousedown 那条分支），只堵 fire() 会把它漏掉 —— 切刀途中右键照样能挥出去。
-  if (state !== "playing" || dead || switchBlocking()) return;
-  const st = WEAPON_DEFS.knife.stats;
-  const mode = heavy ? st.heavy : st.light;
-  const now = performance.now();
-  // 近战也用自己的射速闸门（cur() 就是匕首，因为 melee 类型只有它）
-  const ks = cur().state;
-  if (now < ks.nextFireAt) return;
-  ks.nextFireAt = now + mode.interval * 1000;
-  actedThisLife = true; // 本回合已行动 → 锁定背包切换（CF 规则）
-  ks.cooldown = heavy ? 0.7 : 0.3;
-  sfx.melee(!!heavy);
-  triggerKick("knife"); // 挥刀：大幅偏转 + 小位移
-  const dir = new THREE.Vector3(0, 0, -1).applyEuler(
-    new THREE.Euler(player.pitch + recoilPitch, player.yaw + recoilYaw, 0, "YXZ")
-  );
-  const origin = new THREE.Vector3();
-  camera.getWorldPosition(origin);
-  raycaster.set(origin, dir);
-  raycaster.far = st.range;
-  const hits = raycaster.intersectObjects(flatTargets(), false);
-  if (hits.length > 0) {
-    const h = hits[0];
-    spawnTracer(h.point);
-    if (h.object.userData.enemy) {
-      const enemy = h.object.userData.enemy;
-      if (!enemy.dead) {
-        const head = h.object.userData.part === "head";
-        // 背刺：敌人的**前向**（骨架的 +z，经 group.rotation.y 转进世界）与我们这一刀的
-        // 方向同向 —— 也就是他背对着我们。CS 的判据是 `dot > 0.5`（±60° 的扇面），照抄。
-        // 自杀那一侧不需要特判：`killer === null` 的路径只存在于手雷自伤。
-        const ef = new THREE.Vector3(Math.sin(enemy.group.rotation.y), 0, Math.cos(enemy.group.rotation.y));
-        const backstab = ef.dot(dir) > 0.5;
-        // 「击杀前满血」必须在 takeDamage() **之前**取 —— 那一句之后 health 已经是 0 了。
-        // 黄金爆头的口径见 onKill 那条注释。
-        const golden = head && enemy.health >= enemy.maxHealth;
-        const dmg = head ? enemy.maxHealth : backstab ? mode.backstab : mode.dmg;
-        enemy.combatAt = time;   // 挨打即暴露（小地图），见 enemiesShoot 那条
-        spawnBlood(h.point);
-        if (enemy.takeDamage(dmg)) onEnemyDeath(enemy, head, "军用匕首", golden);
-        else { addHitMark(head ? "head" : backstab ? "kill" : "hit", { golden: golden }); head ? sfx.headshot() : sfx.hit(); enemy.setFlash(); }
-        // 刀入肉：`sfx.melee()`（挥风）在上面**开火之前**就发了，那时还不知道砍没砍中 ——
-        // 所以「砍中什么」只能在这里补。两者是**两段独立的声音**，不是二选一。
-        sfx.impact(h.point, "knife_flesh");
-      }
-    } else {
-      spawnSparks(h.point);
-      sfx.impact(h.point, "knife_wall");
+// ---------- 近战：前摇 → 有效刀刃窗口 → 收刀 ----------
+function cancelMelee() { meleeState=null;meleeHold=null;knifeHeavyHeld=false;knifeChain=0; }
+function meleeAttack(heavy=false, followup=false) {
+  if (currentId!=="knife" || state!=="playing" || dead || switchBlocking() || meleeState || cur().state.cooldown>0) return;
+  const kind=heavy?'heavy':followup&&knifeChain%2?'thrust':'light';
+  const mode=KNIFE[kind];
+  meleeState={kind,t:0,hit:false,sounded:false};
+  knifeChain=heavy?0:knifeChain+1;
+  cur().state.cooldown=mode.interval;
+  actedThisLife=true;
+}
+function updateMelee(dt) {
+  if(!meleeState)return;
+  if(currentId!=="knife"||dead||state!=="playing"||switchBlocking()){cancelMelee();cancelGrenade();return;}
+  const a=meleeState,mode=KNIFE[a.kind],before=a.t;a.t+=dt;
+  if(!a.sounded&&a.t>=mode.hitStart*.65){sfx.melee(a.kind==='heavy');a.sounded=true;}
+  if(!a.hit&&a.t>=mode.hitStart&&before<=mode.hitEnd) {
+    scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);
+    const from=Math.max(before,mode.hitStart),to=Math.min(a.t,mode.hitEnd);
+    // Subdivide the swept interval so a slow frame cannot skip the entire cut.
+    const steps=Math.max(1,Math.ceil((to-from)*120)),targets=flatTargets();
+    const origin=camera.getWorldPosition(new THREE.Vector3());
+    for(let i=0;i<=steps&&!a.hit;i++) {
+      const u=(from+(to-from)*i/steps-mode.hitStart)/(mode.hitEnd-mode.hitStart);
+      const yaw=player.yaw+mode.arc*(1-2*u);
+      const dir=new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(player.pitch,yaw,0,"YXZ"));
+      raycaster.set(origin,dir);raycaster.far=KNIFE.range;
+      const hit=raycaster.intersectObjects(targets,false)[0];
+      if(hit){a.hit=true;resolveKnifeHit(hit,dir,mode);}
     }
   }
+  if(a.t>=mode.interval)meleeState=null;
+}
+function resolveKnifeHit(h,dir,mode) {
+  const enemy=h.object.userData.enemy;
+  if(enemy&&!enemy.dead) {
+    const head=h.object.userData.part==='head';
+    const ef=new THREE.Vector3(Math.sin(enemy.group.rotation.y),0,Math.cos(enemy.group.rotation.y));
+    const backstab=ef.dot(dir)>.5,golden=head&&enemy.health>=enemy.maxHealth;
+    const dmg=head?mode.head:backstab?mode.backstab:mode.dmg;
+    enemy.combatAt=time;spawnBlood(h.point);
+    if(enemy.takeDamage(dmg))onEnemyDeath(enemy,head,"军用匕首",golden);
+    else {addHitMark(head?"head":"hit",{golden});head?sfx.headshot():sfx.hit();enemy.setFlash();}
+    sfx.impact(h.point,"knife_flesh");
+  } else if(!enemy){spawnSparks(h.point);sfx.impact(h.point,"knife_wall");}
 }
 
 // ---------- 射击 ----------
@@ -2656,7 +2589,7 @@ function fire() {
   // switchBlocking() 对它返回 false，所以开局第一枪不会被吃掉。
   if (switchBlocking()) return;
   if (def.type === "melee") { meleeAttack(); return; }
-  if (def.type === "grenade") { throwGrenade(); return; }
+  if (def.type === "grenade") { primeGrenade(); return; }
 
   if (WEAPON_STATE.reloading || WEAPON_STATE.cooldown > 0) return;
   // 拉栓中不许开火（AWM）。门放在这里而不是 `nextFireAt` 上：`nextFireAt` 只管射速节奏，
@@ -2675,6 +2608,7 @@ function fire() {
   // （AK 原速、M4 变调 + 收短窗口 + 叠一层更高的机匣爆音，见 audio.js 的 GUN 表）。
   sfx.shoot(def.type, def.id);
 
+  if(currentId==='ak')classicFireT=0;
   triggerKick(currentId);
   // 连发惩罚（**只喂准星张开**）。上限对齐 CS 的 `_baseInaccuracy` 在做完整梭时的量级。
   WEAPON_STATE.inaccPenalty = Math.min(WEAPON_STATE.inaccPenalty + (def.inacc?.fire ?? 0.008), 0.09);
@@ -2774,7 +2708,8 @@ function onKill(headshot, enemyName, weaponName, golden) {
   chat.taunt(streakCount >= 2 ? "multikill" : headshot ? "headshot" : "kill", { name: enemyName });
   addHitMark("kill", { golden: golden });
   showKillIcon(headshot, currentId, golden);
-  sfx.kill();
+  // 连杀时只播经典人声，避免再叠一层合成击杀音抢开头。
+  if (streakCount < 2) sfx.kill();
   pushKillFeed("你", weaponName || WEAPON_DEFS[currentId].name, enemyName || "敌人",
                !!headshot, false, currentId);
   if (streakCount >= 2) showStreak(streakCount);
@@ -3014,6 +2949,8 @@ function normAngle(a) {
 
 // 进入死亡视角：**不再当帧瞬移**。先把镜头交给击杀者，DEATH_DELAY 秒后才真正复活。
 function beginDeath(killer, byEnemy = true) {
+  cancelMelee();cancelGrenade();
+  sfx.cancelStreak();
   dead = true;
   // 击杀者的嘲讽。自雷（killer === null）没有发言人，退化成系统播报一句。
   // 这里**不收聊天输入框** —— CF 允许死后继续打字，死亡视角只有 3 秒，
@@ -3111,7 +3048,9 @@ function respawnPlayer() {
   clearFlash();
   setScoped(false);
   player.hp = 100;
-  player.pos.set((Math.random() - 0.5) * 10, 0, bounds.hl - 6);
+  const spawn=mapData.spawns?.player?.[Math.floor(Math.random()*mapData.spawns.player.length)];
+  if (spawn) player.pos.fromArray(spawn);
+  else player.pos.set((Math.random() - 0.5) * 10, 0, bounds.hl - 6);
   actedThisLife = false; // 复活回到安全区，重新开放背包切换（CF 规则）
   // 复活恢复**完整配装**：丢枪留下的空槽一起清掉。地上的枪不动 ——
   // 它们留在原地等人捡（包括自己刚丢的那把）。
@@ -3250,7 +3189,7 @@ document.addEventListener("keyup", (e) => {
 });
 // 切走窗口时 keyup 收不到，战绩面板会一直挂着，所以失焦也要收起来。
 // 聊天同理：失焦后 keyup 收不到、输入框也丢了焦点，typing 会一直挂着。
-window.addEventListener("blur", () => { showScoreboard(false); chat.cancel(); });
+window.addEventListener("blur", () => { fireEnabled=false;cancelMelee();cancelGrenade();showScoreboard(false);chat.cancel(); });
 
 function requestLock() { viewport.requestPointerLock(); }
 document.getElementById("startBtn").addEventListener("click", () => { sfx.ensure(); sfx.ui("click"); requestLock(); });
@@ -3268,7 +3207,9 @@ document.addEventListener("pointerlockchange", () => {
     // （下一次真的显示大厅时不会残留上一次的「返回战场」）。
     if (lobby) lobby.setResume(false);
   } else {
+    fireEnabled=false;cancelMelee();cancelGrenade();
     hud.classList.add("hidden");
+    sfx.cancelStreak();
     setScoped(false);
     clearFlash();
     showScoreboard(false);
@@ -3328,17 +3269,18 @@ document.addEventListener("mousedown", (e) => {
   if (!locked || state !== "playing" || dead || chat.isTyping()) return;
   if (isSecondaryClick(e)) {
     e.preventDefault();
-    // 刀出鞘时右键 = **重击**（CS 的轻/重两档）。这一句必须问在 `cycleScope()` 之前：
+    // 刀出鞘时右键 = **重击**（经典小刀翻握下刺）。这一句必须问在 `cycleScope()` 之前：
     // `isSecondaryClick` 对没有 `stats.zoom` 的武器本来就返回 false，只有**真右键**
     // （`button === 2`）能走到这里，所以刀的重击不会被 Mac 那条 Ctrl+单击的判定搅进来。
-    if (WEAPON_DEFS[currentId].type === "melee") { meleeAttack(true); return; }
+    if (WEAPON_DEFS[currentId].type === "melee") { knifeHeavyHeld=true;fireEnabled=false;meleeAttack(true);return; }
     cycleScope();
     return;
   }
-  if (e.button === 0) { fireEnabled = true; fire(); }
+  if (e.button === 0) { knifeChain=0;knifeHeavyHeld=false;fireEnabled = true; fire(); }
 });
 document.addEventListener("mouseup", (e) => {
-  if (e.button === 0 || e.which === 1) fireEnabled = false;
+  if (e.button === 0 || e.which === 1) {fireEnabled = false;knifeChain=0;releaseGrenade();}
+  if (e.button === 2) knifeHeavyHeld=false;
 });
 // pointer lock 下右键仍会冒泡出右键菜单。这里不再只看 locked：
 // 只要已经进了战场就挡掉，避免「锁掉了 → 菜单弹出 → 右键像没反应」。
@@ -3358,6 +3300,7 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- 开始 / 结束 ----------
 function gameStart() {
+  sfx.cancelStreak();
   state = "playing";
   kills = 0;
   enemyScore = 0;
@@ -3375,7 +3318,8 @@ function gameStart() {
   updateStreakHud();   // 立刻收掉倒计时条（别等下一帧；新一局可以是暂停中开的）
   player.hp = 100;
   player.invuln = 0;
-  player.pos.set(0, 0, bounds.hl - 6);
+  if (mapData.spawns?.player?.length) player.pos.fromArray(mapData.spawns.player[0]);
+  else player.pos.set(0, 0, bounds.hl - 6);
   actedThisLife = false;
   emptySlot.primary = false;   // 新一局恢复完整配装（同 respawnPlayer）
   emptySlot.secondary = false;
@@ -3400,7 +3344,7 @@ function gameStart() {
   grenadePool.forEach((g) => scene.remove(g.mesh));
   grenadePool.length = 0;
   // 地上的枪同理清空。**注意只 scene.remove**，不 dispose —— 几何/材质是目录里的
-  // 共享对象（见 guncatalog.js 顶部）。grenadePool 的雷是自己 new 的材质，可以 dispose；
+  // 共享对象（见 guncatalog.js 顶部）。手雷也共享素材缓存，只移除场景实例；
   // 掉落物不是。
   clearGroundItems();
   for (const c of smokes) for (const s of c.sprites) { s.visible = false; smokePool.push(s); }
@@ -3464,6 +3408,7 @@ function gameStart() {
 
 // result: "win" | "lose" | "draw"
 function endTDM(result) {
+  sfx.cancelStreak();
   if (result === true) result = "win";
   if (result === false) result = "lose";
   if (result === "draw" && kills !== enemyScore) result = kills > enemyScore ? "win" : "lose";
@@ -3509,19 +3454,27 @@ function updateAmmoHud() {
   // 这段判断现在收进 gunDisplayName()，与拾取/丢弃 toast、击杀信息条共用一份。
   document.getElementById("weaponName").textContent = gunDisplayName(currentId);
   const badge = document.getElementById("bpBadge");
-  if (badge) badge.textContent = "背包 " + (curBp + 1);
+  if (badge) { badge.textContent = curBp + 1; badge.title = "背包 " + (curBp + 1); }
+  if (hudWeaponIcon.dataset.weapon !== currentId) {
+    hudWeaponIcon.innerHTML = weaponIconSvg(currentId, "hud-gun-icon");
+    if (["ak", "m4", "awm"].includes(currentId)) hudWeaponIcon.firstElementChild.setAttribute("viewBox", "0 7 24 14");
+    hudWeaponIcon.dataset.weapon = currentId;
+  }
   if (def.type === "grenade") {
-    ammoVal.textContent = cur().state.count + " 颗";
+    ammoMag.textContent = cur().state.count;
+    ammoReserve.textContent = "0";
     ammoVal.classList.toggle("low", cur().state.count <= 0);
     ammoFill.style.width = Math.min(100, (cur().state.count / cur().state.maxCount) * 100) + "%";
     ammoFill.classList.toggle("low", cur().state.count <= 1);
   } else if (def.type === "melee") {
-    ammoVal.textContent = "-- / --";
+    ammoMag.textContent = "--";
+    ammoReserve.textContent = "--";
     ammoVal.classList.remove("low");
     ammoFill.style.width = "100%";
     ammoFill.classList.remove("low");
   } else {
-    ammoVal.textContent = WEAPON_STATE.mag + " / " + WEAPON_STATE.reserve;
+    ammoMag.textContent = WEAPON_STATE.mag;
+    ammoReserve.textContent = WEAPON_STATE.reserve;
     ammoVal.classList.toggle("low", WEAPON_STATE.mag <= 6);
     ammoFill.style.width = (WEAPON_STATE.mag / WEAPON_STATE.magSize) * 100 + "%";
     ammoFill.classList.toggle("low", WEAPON_STATE.mag <= 6);
@@ -3531,6 +3484,7 @@ function updateAmmoHud() {
 function updateScoreHud() {
   teamScoreVal.textContent = kills;
   enemyScoreVal.textContent = enemyScore;
+  aceBadge.classList.toggle("active", kills > 0 && kills >= Math.max(0, ...roster.map(r => r.kills)));
 }
 function updateTimerHud() {
   const t = Math.max(0, Math.ceil(timeLeft));
@@ -3556,23 +3510,22 @@ function updateTimerHud() {
 // 判据用「底面高过玩家头顶」而不是「高过脚底」：只要 y0 ≥ 脚底 + 身高，人就从底下过。
 function blockedBy(x, z, feetY) {
   for (const c of colliders) {
-    if (c.h <= feetY + STEP_H) continue;
-    if (c.y0 !== undefined && c.y0 >= feetY + PLAYER_TOP) continue;
-    if (Math.abs(x - c.x) < c.hx + PLAYER_RADIUS && Math.abs(z - c.z) < c.hz + PLAYER_RADIUS) return c;
+    if (intersectsBrush(c,x,z,feetY,PLAYER_RADIUS,STEP_H,PLAYER_TOP)) return c;
   }
   return null;
 }
 
-// 脚底落在哪 = (x,z) 处能站上去的最高台面（箱顶 / 走道 / 舱盖），默认甲板 0。
-// **不做半径外扩**：外扩的话人站在台阶旁边 0.45m 处就会被举到台上，看着是浮空。
+// 脚底落在哪 = 当前位置能站上去的最高台面，经典图也包括甲板以下的地道。
+// 普通表面不外扩；只有导入的窄踏面使用 0.12m 脚掌接触区，避免被下一阶卡住。
 // 只取够得着的（c.h <= 脚底 + 一个台阶）—— 2.43m 高的集装箱顶不该在当前帧接住你。
 function supportAt(x, z, feetY) {
-  let top = 0;
+  let top = mapData?.floorY ?? 0;
   for (const c of colliders) {
-    if (c.h > feetY + STEP_H) continue;
+    const surface=brushSupport(c,x,z);
+    if (surface > feetY + STEP_H) continue;
     // 悬空物（y0 > 脚底 + 一个台阶）不可能被站在上面 —— 人在它下面，顶面够不着。
     if (c.y0 !== undefined && c.y0 > feetY + STEP_H) continue;
-    if (Math.abs(x - c.x) < c.hx && Math.abs(z - c.z) < c.hz) top = Math.max(top, c.h);
+    top = Math.max(top, surface);
   }
   return top;
 }
@@ -3642,6 +3595,16 @@ function movePlayer(dt) {
   player.groundY = supportAt(player.pos.x, player.pos.z, player.pos.y);
   const vyBefore = player.vel.y;
   player.pos.y += player.vel.y * dt;
+  if (vyBefore > 0) {
+    const head = prevY + PLAYER_TOP;
+    for (const c of colliders) {
+      const ceiling = brushBottom(c, player.pos.x, player.pos.z, PLAYER_RADIUS);
+      if (ceiling >= head - .001 && ceiling < player.pos.y + PLAYER_TOP) {
+        player.pos.y = ceiling - PLAYER_TOP;
+        player.vel.y = 0;
+      }
+    }
+  }
   if (player.pos.y <= player.groundY) {
     const wasAir = !player.onGround;
     player.pos.y = player.groundY;
@@ -3732,6 +3695,9 @@ function animateWeapon(dt) {
   // 发光呼吸必须在开镜早退**之前**推进，否则端着 AWM 一开镜，紫电的呼吸就停了
   // —— 开镜时枪模虽然被藏起来，但退镜那一刻的亮度会卡在半路上，看着像坏了。
   updateSkinGlow(vid);
+  if(classicView)classicView.root.visible=false;
+  for(const v of Object.values(classicNades))v.root.visible=false;
+  c.gun.visible=true;viewArms.root.visible=true;
   // 开镜 / 阵亡都不显示枪模。火光跟着一起收：Sprite 挂在武器组上，组虽然隐藏了，
   // 但 muzzleT 会停在半路（这个早退不推进它），退镜/复活时会补闪一下。
   if (scoped || dead) {
@@ -3774,7 +3740,9 @@ function animateWeapon(dt) {
   const rate = moving ? (player.crouching || player.sneaking ? 6 : hSpeed > 5.6 ? 12 : 8) : 0;
   const amp = player.crouching || player.sneaking ? 0.55 : hSpeed > 5.6 ? 1.3 : 1;
   bobT += dt * rate;
-  const m = moving ? amp : 0;
+  // 投掷物的双手更靠近镜头：仅把行走摆幅降至 30%，原拉环/投掷动画不缩放。
+  // 在共用 bob 处处理，使经典视模与加载失败后的回退手臂保持一致。
+  const m = moving ? amp * (def.type === "grenade" ? 0.3 : 1) : 0;
   const bobX = Math.sin(bobT * 2) * 0.013 * m;
   const bobY = Math.sin(bobT) * 0.013 * m;
 
@@ -3821,7 +3789,9 @@ function animateWeapon(dt) {
   if (def.type === "melee") { bx = 0.4081; by = -0.0754; bz = -0.6138; }
   else if (def.type === "grenade") { bx = 0.26; by = -0.14; bz = -0.52; }
   else if (def.type === "pistol") { bx = 0.40; by = -0.19; bz = -0.72; }
-  else { bx = 0.32; by = -0.17; bz = -0.5; }
+  else if (vid==='awm') { bx=.29;by=-.19;bz=-.59; }
+  else if (vid==='m4') { bx=.29;by=-.18;bz=-.56; }
+  else { bx = 0.30; by = -0.18; bz = -0.55; }
 
   // 换弹时的枪身位移：**往上抬、不往下沉**。
   // 这条是投影几何逼出来的，不是手感取舍 —— 弹匣井在枪局部 y=-0.155（枪身最下缘），
@@ -3836,15 +3806,25 @@ function animateWeapon(dt) {
   const swDy = sw ? sw.dy : 0, swDz = sw ? sw.dz : 0;
   const swRx = sw ? sw.rx : 0, swRz = sw ? sw.rz : 0, swRy = sw ? sw.ry : 0;
 
+  const mp=def.type==='melee'?knifePose((meleeHold||meleeState)?.kind,(meleeHold||meleeState)?.t||0):def.type==='grenade'?grenadePose(grenadeAction):[0,0,0,0,0,0];
+  const knifeFlip=def.type==='melee'&&(meleeHold||meleeState)?.kind==='heavy'?mp[5]*.88:0;
+  if(def.type==='melee') {
+    knifeBind ||= {p:c.gun.position.clone(),q:c.gun.quaternion.clone()};
+    const pivot=new THREE.Vector3().fromArray(ARM_ANCHORS.knife.r);
+    const flip=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),knifeFlip);
+    // Reverse the knife inside the grip; the wrist need not rotate 180 degrees.
+    c.gun.position.copy(knifeBind.p).sub(pivot).applyQuaternion(flip).add(pivot);
+    c.gun.quaternion.copy(flip).multiply(knifeBind.q);
+  }
   c.group.position.set(
-    bx + bobX,
-    by + bobY + kUp + rDip * 0.09 + swDy,
-    bz + kBack + rDip * 0.05 + swDz
+    bx + bobX + mp[0],
+    by + bobY + kUp + rDip * 0.09 + swDy + mp[1],
+    bz + kBack + rDip * 0.05 + swDz + mp[2]
   );
   c.group.rotation.set(
-    kPitch - rRot * 0.22 + swRx,
-    bobX * 0.5 + kYaw - rYaw + swRy,
-    bobX + kRoll + rRoll * 0.30 + swRz
+    kPitch - rRot * 0.22 + swRx + mp[3],
+    bobX * 0.5 + kYaw - rYaw + swRy + mp[4],
+    bobX + kRoll + rRoll * 0.30 + swRz + mp[5] - knifeFlip
   );
 
   // 组矩阵先算好：手臂与枪口光都要用它。
@@ -3858,9 +3838,35 @@ function animateWeapon(dt) {
   // 屏幕位置才钉得住（否则整段下探被甩到画面外，见 viewarms.js 里 POUCH 的注释）。
   _invGroup.copy(c.group.matrix).invert();
   viewArms.update(reloading, reloadP, _invGroup);
+  if(def.type==='grenade'){viewArms.poseGrenade(grenadeAction,_invGroup);c.gun.visible=!(grenadeAction?.thrown)&&c.state.count>0;}
   _muzzleLocal.copy(c.muzzleLocal).applyMatrix4(c.group.matrix);
   muzzleLight.position.copy(_muzzleLocal);
 
+  if(classicNades[vid]) {
+    const v=classicNades[vid],a=grenadeAction?.id===vid?grenadeAction:null;
+    c.gun.visible=false;viewArms.root.visible=false;v.root.visible=true;
+    v.root.position.set(bobX,bobY+swDy,swDz);v.root.rotation.set(swRx,swRy,swRz);
+    // Authored fire starts with the grenade already released. Keep the held
+    // pose through the release delay, then start that clip with the projectile.
+    const fireStart=a?a.releaseAt:Infinity;
+    const clip=a?(a.t>=fireStart?'fire':'prefire'):'idle_0';
+    v.sample(clip,a?(clip==='fire'?a.t-fireStart:a.t):time%v.duration('idle_0'));
+    v.gun.visible=!a?.thrown&&c.state.count>0;
+  }
+  classicFireT+=dt;
+  if(classicView&&vid==='ak'&&activeSkinId('ak')==='classic') {
+    c.gun.visible=false;viewArms.root.visible=false;
+    classicView.root.visible=true;
+    classicView.root.position.set(bobX, bobY+swDy, swDz);
+    classicView.root.rotation.set(swRx,swRy,swRz);
+    // Original reload contains its own gun/hand movement; do not add IK offsets.
+    const clip=reloading?'reload':classicFireT<classicView.duration('fire')?'fire':'idle_0';
+    const t=reloading?reloadP*classicView.duration('reload'):clip==='fire'?classicFireT:time%classicView.duration('idle_0');
+    classicView.sample(clip,t);
+    classicView.muzzle(_muzzleLocal);c.group.worldToLocal(_muzzleLocal);
+    muzzleShot.position.copy(_muzzleLocal);
+    muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
+  }
   // 枪口焰的涨消。放在最后：它不改枪/手的位姿，但要用本帧的 dt。
   updateMuzzleFlash(dt);
 }
@@ -3964,8 +3970,14 @@ function update(dt, rawDt) {
   if (fireEnabled && WEAPON_DEFS[currentId].fullAuto && !WEAPON_STATE.reloading && !dead && !chat.isTyping() && !switchBlocking()) fire();
   if (player.invuln > 0) player.invuln -= dt;
   if (WEAPON_STATE.cooldown > 0) WEAPON_STATE.cooldown -= dt;
+  updateMelee(dt);
+  if(currentId==='knife'&&!dead&&!chat.isTyping()&&!switchBlocking()) {
+    if(knifeHeavyHeld)meleeAttack(true,true);
+    else if(fireEnabled)meleeAttack(false,true);
+  }
   if (WEAPON_STATE.throwCd > 0) WEAPON_STATE.throwCd -= dt;
   updateReload(dt);
+  updateGrenadeAction(dt);
   updateGrenades(dt);
   // 地面掉落物：自转 + 起伏 + 拾取判定。这里**必须显式挡死亡** ——
   // update() 的死亡分支是往下穿透的（不会提前 return），不挡的话尸体飘过去也能捡枪。
@@ -4202,7 +4214,11 @@ async function init() {
   vmCamera.updateProjectionMatrix();
 
   // 天空贴图由 map.js 生成并同时用作 background / environment
-  mapData = await buildMap(scene);
+  try { mapData = await buildClassicMap(scene); }
+  catch (error) {
+    console.warn('经典地图加载失败，使用内置场景：', error);
+    mapData = await buildMap(scene);
+  }
   colliders = mapData.colliders;
   obstacleMeshes = mapData.obstacles;
   obstacleFlat = [];
@@ -4211,6 +4227,8 @@ async function init() {
     else o.traverse((m) => { if (m.isMesh) obstacleFlat.push(m); });
   }
   bounds = mapData.bounds;
+  enemyManager.spawnPoints = mapData.spawns?.enemy || null;
+  enemyManager.navigation = mapData.source ? new GroundNavigation(colliders,bounds) : null;
   // 小地图：布局来自 map.js 的 topdown（构建期顺手推入的大件，**不是从 colliders 反推**）。
   // 尺寸不在这里给 —— Minimap 每帧从 canvas 的 clientWidth 现读，`#hud` 在菜单里隐藏时
   // 那一读为 0、它会跳过烘图并保留上次的底图，进入战场第一帧自动补上。
@@ -4234,35 +4252,41 @@ async function init() {
   }
 
   await Promise.all([
+    ClassicView.load().then(async v=>{
+      classicView=v;
+      if(v){vmScene.add(v.root);v.root.visible=false;handsOk=viewArms.loadClassic(v);}
+      else await loadHands();
+    }),
+    ...['frag','flash','smoke'].map(async id=>{
+      const v=await ClassicView.load('grenades/'+id);
+      if(v){classicNades[id]=v;v.root.name='cf-grenade-'+id;v.root.visible=false;v.projectile();vmScene.add(v.root);}
+    }),
+    loadClassicSoldier(),
     loadAK(),
     loadWeapon(WEAPON_DEFS.pistol),
     loadWeapon(WEAPON_DEFS.knife),
     loadWeapon(WEAPON_DEFS.frag),
     loadWeapon(WEAPON_DEFS.flash),
     loadWeapon(WEAPON_DEFS.smoke),
-    // 双手（CS 的 HandR/ArmR/HandL/ArmL，见 viewarms.js）。**必须在第一帧之前就位** ——
-    // 晚一步，开局那一帧就是「枪浮在空中、手还没长出来」。失败不 reject（resolve(false)）。
-    loadHands(),
   ]);
   // 手臂加载失败是**明确降级**（枪照常、只是没有手），所以必须让玩家看见，
   // 不能像别的失败路径那样静默 —— 那会变成「画面里手没了，控制台之外无提示」。
   if (!handsOk) showToast("手臂模型加载失败，已降级为无手（枪械照常）", true);
+  // Load the three default models before making the shared world catalog, so
+  // picking up a dropped gun preserves its actual appearance.
+  for (const id of ["ak","m4","awm"]) mountGunModel(id,DEFAULT_SKIN[id]);
+  await Promise.all(["ak","m4","awm"].map(id=>owned[id]?.modelLoads[DEFAULT_SKIN[id]]));
   // 世界模型目录（敌人手持 + 地面掉落）。**必须在全部武器加载完之后** ——
   // 它从玩家这几把枪派生「枪型 × 皮肤」的全部变体。建目录这一步不存在异步，
   // 几毫秒的事（就是一批 clone + 上漆）。
-  // **必须显式喂 `baseGun`**：`gun` 是「当前挂着的模型」，而模型皮肤是高精度模型，
-  // 拿它建目录会把敌人手里的枪也换成模型（与「仅玩家用模型」的约定相反），
-  // 而且背包 2 的默认皮肤恰好就是模型皮肤（雷神），开局那一刻 `gun` 随时可能是它。
+  // 第一个参数给回退模板，第二个参数给已加载的精细模型。
   buildGunCatalog({
     ak: owned.ak && owned.ak.baseGun,
     m4: owned.m4 && owned.m4.baseGun,
     awm: owned.awm && owned.awm.baseGun,
     pistol: owned.pistol && owned.pistol.baseGun,
-  });
-  // 敌人**每次刷出**都抽一份配装：型号先等概率抽，再在该型号的皮肤列表里等概率抽一款。
-  // **模型皮肤也在这个池子里** —— 但目录里产出的永远是「基础低模 + 材质上漆」，
-  // 换模型只发生在玩家这边（见 `mountGunModel`）。所以模型皮肤必须自带 `slots`，
-  // 否则敌人在抽到它时会拿到一把没上漆的原厂枪。组合数见 guncatalog.js 的注释。
+  }, {ak:owned.ak?.models,m4:owned.m4?.models,awm:owned.awm?.models});
+  // 敌人每次刷出都随机抽一把经典主武器；世界目录与玩家共用已加载几何。
   // 挂在 picker 上而不是一次性发下去：敌人是对象池复用的，acquire() 每次都调它
   // （见 enemies.js），所以池里捞出来的旧敌人也会换上新枪。
   enemyManager.loadoutPicker = () => {
@@ -4318,7 +4342,14 @@ async function init() {
     window.__tactical = {
       chat, enemyManager, player, fire, WEAPON_STATE, camera, obstacleMeshes, THREE, scene,
       renderer, owned, cur, WEAPON_DEFS, smokes, grenadePool,
+      primeGrenade, releaseGrenade, cancelGrenade,
+      grenadeState:()=>grenadeAction?{...grenadeAction}:null,
+      grenadeStep:(dt)=>{updateGrenadeAction(dt);updateGrenades(dt);updateSmokes(dt);updateFlash(dt);animateWeapon(0);},
+      flashState:()=>({intensity:flashIntensity,duration:flashDur}),clearFlash,
+      grenadeExposure, detonateFlash, classicNades,
       ready: () => gameReady,
+      movementStep: (dt) => movePlayer(dt),
+      supportAt,
       curId: () => currentId,
       // 主循环的仿真时钟（`time += dt`）。与连杀窗口、小地图的交火暴露同一份 ——
       // 想给 `minimapProbe` 造一个「刚开过火」的时刻就得拿它，别用 performance.now()。
@@ -4347,7 +4378,7 @@ async function init() {
         mmView.colliders = colliders;
         mmView.smokeBlocks = smokeBlocks;
         return mmVisible({ x, z, combatAt: combatAt === undefined ? -Infinity : combatAt },
-                         { px: player.pos.x, pz: player.pos.z, yaw: player.yaw, time,
+                         { px: player.pos.x, py: player.pos.y, pz: player.pos.z, yaw: player.yaw, time,
                            colliders, smokeBlocks });
       },
       // ---- 大厅（scripts/lobby.js）----
@@ -4444,7 +4475,7 @@ async function init() {
         return activeSkinId(weaponId);
       },
       // ---- 模型皮肤 ----
-      // 全部「模型皮肤」的清单。测试用它断言「目录里绝不该出现这些模型」。
+      // 全部「模型皮肤」的清单。用于检查模型皮肤与世界目录的对应关系。
       modelSkins: () =>
         allModelSkins().map((m) => ({
           weaponId: m.weaponId,
@@ -4666,6 +4697,11 @@ async function init() {
       // 这条 TTK 变化必须能**数值**核对，而不是靠读一遍公式。
       dmgAt: (id, dist) => damageAt(WEAPON_DEFS[id || currentId], dist),
       melee: (heavy) => meleeAttack(!!heavy),
+      meleeState:()=>meleeState?{...meleeState}:null,
+      meleeStep:dt=>{if(owned.knife)owned.knife.state.cooldown=Math.max(0,owned.knife.state.cooldown-dt);updateMelee(dt);animateWeapon(0);},
+      poseMelee:(kind,t)=>{meleeHold=kind?{kind,t}:null;animateWeapon(0);},
+      knifeStats:()=>JSON.parse(JSON.stringify(KNIFE)),
+      classicViewState:()=>classicView?{visible:classicView.root.visible,clip:classicView.clip,bones:classicView.bones.length}:null,
       // 配表的读口（深拷贝，别让测试改到真表）。刀的 `stats` 是 `{range, light, heavy}`，
       // 与枪的 `{magSize, reserve, ...}` 不同形，调用方自己认。
       weaponStats: (id) => JSON.parse(JSON.stringify(WEAPON_DEFS[id || currentId].stats)),
@@ -4744,14 +4780,7 @@ async function init() {
           animating: killIconEl.classList.contains("show"),
         };
       },
-      // 击杀冲击波：与 killIcon **同源触发**（都在 showKillIcon 里），但**分开读** ——
-      // 两边的 class 各自独立，只断 killIcon 证明不了爆发层真的被点亮、是哪个档
-      // （一个"忘了调 spawnKillBurst"的实现能让 killIcon 全绿）。
-      // 三层里有两层是**伪元素**（DOM 里没有子节点可数，同 .hitdir 那条），所以真值只能
-      // 从 computed style 取：`ringW` 非 0（主环画出来了）、`rayMask` 为真（速度线带遮罩、
-      // 不会糊住准星）、`haloBg` 非 none（外层扫光带画出来了）。`ringLevel` 读的是
-      // CSS 自定义属性 `--kb` —— 它是三档强度的**唯一**旋钮，读它才能证明 hit/head/gold
-      // 真的不同（只读 kind 证明的是 class 字符串，不是画出来的东西）。
+      // Legacy diagnostic shape; the classic theme keeps this FX node inert.
       killBurst: () => {
         if (!killBurstEl) return { ok: false };
         const ring = getComputedStyle(killBurstEl);
@@ -5032,7 +5061,7 @@ async function init() {
       // 目录自检：每个「枪型 × 皮肤」组合是否都产出了世界模型/敌人模型。
       // 四个可持有枪型相加是 **12**（ak 2 / m4 6 / awm 3 / pistol 1）—— 皮肤表里只剩
       // 「原厂 + 模型皮肤」两类，所以这就是各型号的条目数。
-      // 模型皮肤照样得有世界/敌人变体（敌人和掉落物只认基础低模 + 材质上漆）。
+      // 模型皮肤照样得有世界/敌人变体（已预加载的经典模型优先，其余采用基础模型配色）。
       // 断言时**一定要把条目数一并打出来**：`world` 全 false 的空跑也是「全绿」。
       worldModels: (id) => skinsFor(id).map((s) => ({
         skin: s.id, world: !!worldModel(id, s.id), enemy: !!enemyModel(id, s.id),

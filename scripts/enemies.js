@@ -1,9 +1,9 @@
-// ===== 敌人系统（自建骨架模型 + 点射走位 AI + 倒地尸体 + 对象池）=====
-// 模型不再是 GLB：soldier.glb 是静态单网格、无骨骼无动画，四肢永远垂着、枪只能飘在胸前。
-// 现在用 scripts/enemy_model.js 里自建的关节骨架，走位/瞄准/开火/受击/倒地全程序化。
+// ===== 敌人系统（CF SWAT 蒙皮 + 点射走位 AI + 倒地尸体 + 对象池）=====
+// ClassicSoldierRig 把既有程序化 IK 重定向到导入骨架，资源失败时回退自建人物。
 import * as THREE from "three";
-import { SoldierRig } from "./enemy_model.js";
+import { ClassicSoldierRig as SoldierRig } from "./classic_soldier.js";
 import { makeBlobShadow } from "./blobshadow.js";
+import { intersectsBrush } from "./brush_collision.js";
 
 // 敌人血量恒定：HP 必须固定，否则「AK 3 枪死」的数值不成立 —— 所以难度**不碰血量**，
 // 只缩放下面这份 ENEMY_TUNING 里的乘数。
@@ -35,10 +35,8 @@ const pauseFor = (min, span, mul = 1) => (min + Math.random() * span) * ENEMY_TU
 const AIM_TOL = 0.35;
 
 // ---- 碰撞尺寸：**与 main.js 的 PLAYER_RADIUS / STEP_H / PLAYER_TOP 必须一致** ----
-// 敌人和玩家共用同一套实体判据（main.js 的 blockedBy(x, z, feetY)），唯一的区别是
-// **敌人的脚底恒为 0**：它不跳、不爬梯、不上栈桥与屋顶（enemies 从不写 group.position.y），
-// 所以 blockedBy(x, z, 0) 就是它的完整规则。两边数一旦不一致，
-// 就会出现「玩家过不去、敌人却能穿」或反过来的不对称。
+// 敌人和玩家共用实体尺寸与脚底高度判据；经典图寻路会跟随甲板、楼梯及地道地板。
+// AI 不跳箱，地道内的玩家通过出生区楼梯路线接近。
 // 贴地假影的基准尺寸（肩宽 × 前后深）。**刻意比包围盒略小**：假影是「脚底压着甲板的暗区」，
 // 撑满整个人形会变成一圈黑边。深度取自前臂到背心的实际纵深，不是随手填的。
 const BLOB_W = 1.34;
@@ -237,6 +235,8 @@ export class Enemy {
         this.strafeBlend += (0 - this.strafeBlend) * k(3.0);   // 远距离只压上，不横着飘
       }
     }
+    const route=!blind&&this.navigation?.steer(gp,player.pos);
+    if(route) { wx=route.x;wz=route.z;this.detourT=0; }
     const wl = Math.hypot(wx, wz);
     const sp = this.speed * (blind ? 0.4 : 1);
     const tx = wl > 1e-4 ? (wx / wl) * sp : 0;
@@ -389,15 +389,13 @@ export class Enemy {
     return [-sz * this.detourSide, sx * this.detourSide];
   }
 
-  // 玩家同款判据（main.js blockedBy 的 enemies 版，脚底恒为 0）：返回挡路的碰撞体或 null。
+  // 玩家同款判据，使用当前脚底高度，支持甲板以下的地道。
   // 三个条件与玩家逐条对应：顶面矮于一个台阶不挡、y0 高过头顶的悬空物不挡、其余按矩形外扩。
   blockedAt(x, z) {
     const colliders = this.colliders;
     if (!colliders) return null;
     for (const c of colliders) {
-      if (c.h <= ENEMY_STEP_H) continue;
-      if (c.y0 !== undefined && c.y0 >= ENEMY_HEAD_ROOM) continue;
-      if (Math.abs(x - c.x) < c.hx + ENEMY_RADIUS && Math.abs(z - c.z) < c.hz + ENEMY_RADIUS) return c;
+      if (intersectsBrush(c,x,z,this.group.position.y,ENEMY_RADIUS,ENEMY_STEP_H,ENEMY_HEAD_ROOM)) return c;
     }
     return null;
   }
@@ -482,7 +480,8 @@ export class Enemy {
     // 放平后的高度 = 「身体的腰线离地多高」。绕腰转 90° 后，身体前方变成下方，
     // 所以这个值必须 ≥ 身体前表面的深度（胸甲 0.125 / 头盔脸罩 ~0.18），
     // 否则整个前半身会插进甲板。0.26 是实测出来的平衡点（见 enemy_model.js 的倒地段）。
-    this.tilt.position.y = BODY_PIVOT * (1 - ease) + 0.26 * ease;
+    const restHeight=this.rig.corpseHeight || .26;
+    this.tilt.position.y = BODY_PIVOT * (1 - ease) + restHeight * ease;
     // 假影跟着尸体放平：绕腰转 90° 后身体沿 +z 铺开（躯干落在约 +0.35），所以影子要
     // 一边往前挪一边沿 z 拉长。**每一帧都从基准尺寸重设，绝不用 `*= ` 累乘** ——
     // 累乘在 60fps 与 20fps 下会漂到不同的值（这正是 AGENTS.md 那条「平滑一律用
@@ -490,7 +489,7 @@ export class Enemy {
     this.blob.scale.set(BLOB_W * (1 - 0.14 * ease), 1, BLOB_D * (1 + 0.85 * ease));
     this.blob.position.z = 0.30 * ease;
     if (this.corpseT > CORPSE_HOLD) {
-      this.tilt.position.y -= dt * (0.26 / CORPSE_SINK) * 3;
+      this.tilt.position.y -= restHeight * Math.min(1,(this.corpseT-CORPSE_HOLD)/CORPSE_SINK);
       // 尸身正沉进甲板，影子必须跟着收掉 —— 否则尸体没了、地上一块黑斑还留着。
       // **只能改 scale**：材质是全敌人共享的（见 blobshadow.js 第三条约束）。
       const k = Math.max(0, 1 - (this.corpseT - CORPSE_HOLD) / CORPSE_SINK);
@@ -552,8 +551,9 @@ export class EnemyManager {
     const hw = bounds ? bounds.hw : 26;
     const hl = bounds ? bounds.hl : 68;
     for (let i = 0; i < count; i++) {
-      const x = (Math.random() - 0.5) * (hw * 2 - 6);
-      const z = -(hl - 4 - Math.random() * 6);
+      const point=this.spawnPoints?.[Math.floor(Math.random()*this.spawnPoints.length)];
+      const x = point ? point[0] : (Math.random() - 0.5) * (hw * 2 - 6);
+      const z = point ? point[2] : -(hl - 4 - Math.random() * 6);
       this.enemies.push(this.acquire(x, z));
     }
     return this.enemies.length;
@@ -569,6 +569,7 @@ export class EnemyManager {
   update(dt, player, colliders, bounds) {
     this._colliders = colliders || null;
     this._bounds = bounds || this._bounds || null;
+    this.navigation?.update(player.pos);
 
     // 先推进尸身。本帧刚死的下一帧才开始倒地，避免同一帧被推进两次
     for (let i = this.corpses.length - 1; i >= 0; i--) {
@@ -584,7 +585,9 @@ export class EnemyManager {
       for (const e of this.enemies) {
         e.colliders = this._colliders;
         e.bounds = this._bounds;
+        e.navigation = this.navigation;
         e.update(dt, player);
+        if(this.navigation) e.group.position.y=this.navigation.heightAt(e.group.position.x,e.group.position.z,e.group.position.y);
       }
     }
 

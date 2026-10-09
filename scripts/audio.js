@@ -4,16 +4,16 @@
 //   ① **现实里存在的声音**（枪声 / 脚步 / 换弹 / 命中 / 近战 / 爆炸 / 倒地 / 拉栓 /
 //      **切枪收出 / 空枪干击 / 开镜退镜 / 按钮与页签 / 面板开合**）走 `audio/`
 //      里的 CC0 真实录音（逐文件署名见 `audio/CREDITS.txt`）；
-//   ② **现实里不存在的奖励音调**（连杀播报 / 回合结束 / 命中标记 / 击杀音）保留程序化合成
-//      —— 换成录音只会变浑浊，而且玩家需要一个**每次一模一样**的奖励反馈。
-//      分界线是「这个声音在现实里存不存在」，不是「重不重要」。
+//   ② 回合结束 / 命中标记 / 单杀奖励音保持合成；连杀按用户要求使用 CF 经典英文男声采样。
+//      连杀是明确例外：固定的人声演绎才是还原目标，不使用系统 TTS 或电子音阶。
+//      announcer/ 的游戏语音不是 CC0，来源与归属单列在 audio/CREDITS.txt。
 //
-// 每个采样入口都写成「采样优先、合成兜底」，且**兜底函数是 _playMapped() 的第三个参数**：
+// 叙事内采样入口采用「采样优先、合成兜底」，兜底函数是 _playMapped() 的第三个参数：
 //
 //     this._playMapped("shoot", { id: "ak47_fire" }, () => this._shootSynth(kind));
 //
 // 把兜底做成**参数**而不是 `if (this.has(x))` 分支，是为了让「加了采样就忘了回退」在结构上
-// 不可能发生 —— 采样加载失败（离线、被拦截、格式不支持）时听感只是退化，不会静音。
+// 不可能发生。连杀人声独立处理：缺失时静默降级，避免退回用户明确不想要的合成播报。
 //
 // ---------------------------------------------------------------------------
 // 三条纪律，改动本文件前先读：
@@ -48,6 +48,14 @@
 // ---- 素材表：槽位 id → 一组 stem（每个 stem 展开成 .ogg + .m4a 两个候选 URL）----
 // 变体数 > 1 的槽位在每次播放时轮换（见 _pick），这是「同一段录音听不出在重复」的前提。
 const SAMPLES = {
+  cf_ak_fire: ["classic/ak47_fire.wav"],
+  cf_ak_out: ["classic/ak47_out.wav"],
+  cf_ak_in: ["classic/ak47_in.wav"],
+  cf_ak_bolt: ["classic/ak47_bolt.wav"],
+  cf_grenade_pin: ["classic/grenade_pin.wav"],
+  cf_grenade_explode: ["classic/grenade_explode.wav"],
+  cf_grenade_flash: ["classic/grenade_flash.wav"],
+  cf_grenade_smoke: ["classic/grenade_smoke.wav"],
   ak47_fire:    ["weapons/ak47_fire"],
   ak47_distant: ["weapons/ak47_distant_a", "weapons/ak47_distant_b"],
   awp_fire:     ["weapons/awp_fire"],
@@ -102,6 +110,14 @@ const SAMPLES = {
   sw_scope_in:       ["sw/scope_in"],
   sw_scope_out:      ["sw/scope_out"],
   music:        ["ui/lobby_theme"],
+  // CF Global Risk 男声：2~8 杀七档，8 杀以上沿用最高档；计数与 HUD 不封顶。
+  cf_streak_2: ["announcer/cf_gr_2"],
+  cf_streak_3: ["announcer/cf_gr_3"],
+  cf_streak_4: ["announcer/cf_gr_4"],
+  cf_streak_5: ["announcer/cf_gr_5"],
+  cf_streak_6: ["announcer/cf_gr_6"],
+  cf_streak_7: ["announcer/cf_gr_7"],
+  cf_streak_8: ["announcer/cf_gr_8"],
 };
 
 // 只有 .m4a、没有 .ogg 的 stem（**按 stem 路径写，不是槽位 id**）。
@@ -119,7 +135,7 @@ const M4A_ONLY = new Set([
 // 自动武器只播「初始爆裂声」，丢掉 1.7 s 的尾巴（不丢的话 0.09 s 的射击间隔会堆成一团糊音）。
 // window = 0 表示整段播完（狙击的射击间隔 1.45 s，够长）。
 const GUN = {
-  ak:     { sample: "ak47_fire", rate: 1.00, window: 0.30, vol: 1.00, crack: 0 },
+  ak:     { sample: "cf_ak_fire", rate: 1.00, window: 0.8, vol: 0.85, crack: 0 },
   m4:     { sample: "ak47_fire", rate: 1.08, window: 0.26, vol: 0.92, crack: 0.55 },
   awm:    { sample: "awp_fire",  rate: 1.00, window: 0,    vol: 1.00, crack: 0 },
   pistol: { sample: "ak47_fire", rate: 1.22, window: 0.22, vol: 0.78, crack: 0.25 },
@@ -269,7 +285,7 @@ export class SFX {
   }
 
   async _loadOne(dec, id, stem) {
-    const cands = M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
+    const cands = /\.wav$/i.test(stem) ? [""] : M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
     let last = "./audio/" + stem + cands[0];
     let err = null;
     for (const ext of cands) {
@@ -288,7 +304,7 @@ export class SFX {
     this._failed.push({ id, url: last, err: String((err && err.message) || err) });
     this._done++;
     // 只在开发时提示，不是错误：整条链路会退回合成，游戏照跑
-    if (typeof console !== "undefined") console.warn("audio: 素材加载失败，改用合成回退", last, err);
+    if (typeof console !== "undefined") console.warn("audio: 素材加载失败", last, err);
   }
 
   // 同时送干声到主输出与踢入混响。`wet` 是**逐次播放**的混响量：
@@ -330,7 +346,7 @@ export class SFX {
   /**
    * 播一条采样。返回句柄 `{ src, gain, dur, at, delay, stop }` 或 null（没有这个槽位）。
    * `o` 支持：id/sample（槽位）、vol、rate、rateJitter、window、lowpass、wet、
-   *           delay、x/y/z（世界坐标 → panner）、schedule（可取消标签）
+   *           delay、x/y/z（世界坐标 → panner）、schedule（可取消标签）、volJitter、hudBus
    */
   _sample(id, o = {}) {
     if (!this.ready()) return null;
@@ -359,7 +375,8 @@ export class SFX {
 
     const gain = c.createGain();
     // ±1.5 dB 的音量抖动 —— 与变调抖动一起构成「听不出在重复」
-    const vol = Math.max(0.0001, (o.vol == null ? 1 : o.vol) * (1 + (Math.random() - 0.5) * 2 * 0.17));
+    const volJitter = o.volJitter == null ? 0.17 : o.volJitter;
+    const vol = Math.max(0.0001, (o.vol == null ? 1 : o.vol) * (1 + (Math.random() - 0.5) * 2 * volJitter));
     gain.gain.value = vol;
     if (win) {
       // 窗口末尾 20ms 的 release 斜坡：硬切会切出一声 click
@@ -369,7 +386,10 @@ export class SFX {
     }
     node.connect(gain);
 
-    if (typeof o.x === "number") {
+    if (o.hudBus) {
+      // 固定的界面人声：不受距离、闪光低通或货舱混响影响。
+      gain.connect(this.hf);
+    } else if (typeof o.x === "number") {
       // 有世界坐标 → 走 panner（左右 + 远近），这正是 FPS 里最关键的听觉信息
       const pn = this.panner(o.x, o.y == null ? 0 : o.y, o.z);
       gain.connect(pn);
@@ -427,15 +447,16 @@ export class SFX {
   }
 
   // ---- 取消：预先排出去的排程必须能收回（换枪时旧枪的换弹声不能接着响）----
-  cancelScheduled(method) {
+  cancelScheduled(method, fade = 0.03) {
     if (!this._scheduled.size) return;
     for (const h of Array.from(this._scheduled)) {
       if (method && h.method !== method) continue;
-      h.stop();
+      h.stop(fade);
     }
   }
   cancelReload() { this.cancelScheduled("reload"); }
   cancelBolt() { this.cancelScheduled("bolt"); }
+  cancelStreak() { this.cancelScheduled("streak", 0.015); }
 
   // ---- 闪光弹：听力闷住 / 耳鸣 ----
   // 快速闷住再缓慢回升（频率天然 >0，不会踩到 exponentialRamp 目标值为 0 的坑）
@@ -551,7 +572,7 @@ export class SFX {
       id: id || kind || "rifle",   // 记录的是**武器 id**，读口靠它区分 AK / M4
       sample: g.sample,
       kind: kind || "rifle",
-      rate: g.rate, window: g.window, vol: g.vol, rateJitter: 0.012, wet: 1,
+      rate: g.rate, window: g.window, vol: g.vol, rateJitter: key==='ak'?0:0.012, wet: key==='ak'?0:1,
     }, () => this._shootSynth(kind));
     // M4 / 手枪没有独立录音（用 AK 变调派生）—— 叠一层更高的合成机匣爆音把音色拉开
     if (g.crack > 0) this._crackLayer(g.crack);
@@ -577,8 +598,9 @@ export class SFX {
     if (!this.ready()) return;
     const dur = (o && o.dur) || 2.43;
     const wid = (o && o.id) || "reload";
-    const ps = [0.16, 0.58, 0.80];
-    const ids = ["reload_1", "reload_2", "reload_3"];
+    // AK's authored reload events are frames 39 / 102 / 202 of 299.
+    const ps = wid==='ak' ? [39/299,102/299,202/299] : [0.16, 0.58, 0.80];
+    const ids = wid==='ak' ? ["cf_ak_out", "cf_ak_in", "cf_ak_bolt"] : ["reload_1", "reload_2", "reload_3"];
     const fs = [900, 650, 700];
     const times = ps.map((p) => this.ctx.currentTime + p * dur);
     const hits = [];
@@ -676,14 +698,15 @@ export class SFX {
   smokeHiss(x, y, z) {
     if (!this.ready()) return;
     this._note("smokeHiss", null, "synth", 0);
-    this._smokeHissSynth(x, y, z);
+    this._playMapped('smokeHiss',{id:'cf_grenade_smoke',x,y,z,vol:.8,wet:0},()=>this._smokeHissSynth(x,y,z));
   }
 
   // 闪光弹：爆响 + 耳鸣 + 听力闷住，一次调完
-  flashbang(dur = 5) {
+  flashbang(dur = 5,position) {
     if (!this.ready()) return;
     this._note("flashbang", null, "synth", 0);
-    this._flashbangSynth(dur);
+    this._playMapped('flashbang',{id:'cf_grenade_flash',x:position?.x,y:position?.y,z:position?.z,vol:.9,wet:0},()=>this._flashbangSynth(0,position));
+    if(dur>0){this.tinnitus(dur,.075);this.muffle(dur*.9);}
   }
 
   // 子弹打在掩体或人身上。`p` 给 { x, y, z }（THREE.Vector3 也行）。
@@ -732,13 +755,26 @@ export class SFX {
   throwGrenade() {
     if (!this.ready()) return;
     this._note("throwGrenade", null, "synth", 0);
-    this._throwGrenadeSynth();
+    this._meleeSynth(false);
+  }
+
+  grenadePin() {
+    if(!this.ready())return;
+    this._playMapped('grenadePin',{id:'cf_grenade_pin',vol:.7,wet:0},()=>this._throwGrenadeSynth());
+  }
+
+  grenadeBounce(p,speed) {
+    if(!this.ready())return;
+    const t=this.ctx.currentTime,o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='triangle';o.frequency.setValueAtTime(220,t);o.frequency.exponentialRampToValueAtTime(85,t+.09);
+    g.gain.setValueAtTime(Math.min(.16,.025*speed),t);g.gain.exponentialRampToValueAtTime(.0001,t+.12);
+    o.connect(g);this.out3d(g,p.x,p.y,p.z,.15);o.start(t);o.stop(t+.13);
   }
 
   // 爆炸。**wet 0** —— c4_explode 录音自带 2.4s 的轰鸣尾音，再踢进 convolver 会糊成一片。
-  explosion() {
+  explosion(position) {
     if (!this.ready()) return;
-    this._playMapped("explosion", { id: "explosion", vol: 1.0, wet: 0, rateJitter: 0.03 },
+    this._playMapped("explosion", { id: "cf_grenade_explode", x:position?.x,y:position?.y,z:position?.z,vol: 1.0, wet: 0 },
       () => this._explosionSynth());
   }
 
@@ -802,32 +838,26 @@ export class SFX {
   }
 
   // ==========================================================================
-  // 奖励音调 / UI 提示（保持合成 —— 这些声音在现实里不存在）
+  // 连杀人声 / 奖励音调
   // ==========================================================================
 
-  // 连杀播报 stinger：音高随连杀数递增，走高频总线以免被闪光的闷音吃掉。
-  // `notes` 的档数与 `main.js` 的播报阶梯是两回事 —— 这里只是「越高越尖」，8 档之后
-  // 停在最高音（连杀 10 往上仍然是同一条 stinger，靠文案与辉光区分，听感不会退步）。
+  // CF 经典保卫者男声。每次只保留最新一档，不排成长队、不叠电子音阶。
+  // 40ms 起播窗口把同一帧的手雷多杀合并到最高档；旧句在 35ms 内淡出并停止。
+  // 缺素材只保留视觉反馈，绝不退回系统 TTS（声线随设备变）或旧方波琶音。
+  // 语音只有七档；8 杀以上复用最后一句，真实连杀计数仍由 main.js 无限递增。
   streak(n) {
-    if (!this.ready()) return;
-    this._note("streak", { kind: "streak" }, "synth", 0);
-    const ctx = this.ctx, t = ctx.currentTime;
-    const notes = [0, 4, 7, 12, 16, 19, 24, 28].map((s) => 440 * Math.pow(2, s / 12));
-    const k = Math.min(Math.max(n - 2, 0), notes.length - 1);
-    for (let i = 0; i < 3; i++) {
-      const f = notes[Math.min(k + i, notes.length - 1)];
-      const at = t + i * 0.09;
-      const o = ctx.createOscillator();
-      o.type = "square";
-      o.frequency.value = f;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(0.13, at + 0.012);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
-      o.connect(g).connect(this.hf);
-      o.start(at);
-      o.stop(at + 0.22);
-    }
+    if (!this.ready() || !Number.isFinite(n) || n < 2) return false;
+    this.cancelStreak();
+    const id = "cf_streak_" + Math.min(8, Math.floor(n));
+    const opts = {
+      id, kind: "streak", vol: 0.65, volJitter: 0,
+      rate: 1, rateJitter: 0, wet: 0, hudBus: true,
+      delay: 0.04, schedule: "streak",
+    };
+    // 独立单声道人声不受枪声池抢占；前一句已收掉，不会持续叠加声部。
+    const h = this._sample(id, opts);
+    this._note("streak", opts, h ? "sample" : "missing", h ? h.dur : 0);
+    return !!h;
   }
 
   // ⚠️ 这里曾有两个方法：`roundStart()`（开局那一下）与它的合成兜底 `_hornSynth()`
@@ -1440,7 +1470,7 @@ export class SFX {
   }
 
   // 闪光弹：爆响 + 耳鸣 + 听力闷住，一次调完
-  _flashbangSynth(dur = 5) {
+  _flashbangSynth(dur = 5,position) {
     const ctx = this.ctx, t = ctx.currentTime;
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer(0.3);
@@ -1451,13 +1481,11 @@ export class SFX {
     g.gain.setValueAtTime(1.0, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
     src.connect(f).connect(g);
-    this.send(g);
+    if(position)this.out3d(g,position.x,position.y,position.z);else this.send(g);
     src.start(t);
     src.stop(t + 0.32);
 
-    const d = Math.max(2, dur);
-    this.tinnitus(d, 0.075);
-    this.muffle(d * 0.9);
+    if(dur>0){this.tinnitus(dur,0.075);this.muffle(dur*.9);}
   }
 
   // 命中材质（impact 采样缺失时的回退）。flesh 更低更闷，wall 更脆更短。
@@ -1568,18 +1596,7 @@ export class SFX {
     osc.connect(g).connect(this.master);
     osc.start(t);
     osc.stop(t + 0.12);
-    // 落地的低声闷响
-    const thud = ctx.createOscillator();
-    thud.type = "sine";
-    thud.frequency.setValueAtTime(160, t + 0.1);
-    thud.frequency.exponentialRampToValueAtTime(80, t + 0.2);
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, t + 0.1);
-    g2.gain.exponentialRampToValueAtTime(0.2, t + 0.13);
-    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
-    thud.connect(g2).connect(this.master);
-    thud.start(t + 0.1);
-    thud.stop(t + 0.23);
+    // Landing sound is emitted by the actual collision, never on pin pull.
   }
 
   // 爆炸（c4_explode 采样缺失时的回退）

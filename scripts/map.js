@@ -307,7 +307,7 @@ const WATER_TILE = 14;      // 一砖 14m（1024/14 ≈ 73 px/m）
 const WATER_PX = 1024;
 const WATER_SPAN = 1600;    // 海面边长。相机 far=1200，对角 1131 不会被裁出硬边
 
-function waterMaps() {
+export function waterMaps() {
   const S = WATER_PX;
   const TAU = Math.PI * 2;
   // 方向波：频率必须取**整数**（一砖几个来回），否则左右接不上。六个方向叠起来
@@ -1060,13 +1060,12 @@ export async function buildMap(scene) {
   // 关于 x 镜像（c0↔c3）与 z 镜像（r0↔r3）都对称，保证两边出生点的掩体条件一致。
   //   · 外列（c0/c3）在 r1/r2 留空 —— 那里是两座**可进入的甲板建筑**（见「甲板建筑」一节）。
   //     甲板室 x 跨 ±[9.2, 14.0]、z 跨 ∓6，正好压住 (x=±11.6, z=∓6.2) 这两个格子。
-  //   · 两端两排（r0/r3）整排 2 层 —— 那是**前沿墙**，把两条出生区隔开，
-  //     也是全图仅有的天际线起伏（中央大道两侧仍是齐平的 1 层，留出对枪线）。
+  //   · 两端外列两层、内列一层：保留侧面高低错落，同时打开中路天空与对枪线。
   const STACK = [
-    [2, 2, 2, 2], // z = -15.2  敌方前沿
+    [2, 1, 1, 2], // z = -15.2  敌方前沿
     [0, 1, 1, 0], // z =  -6.2  外列让位给甲板室与爬梯
     [0, 1, 1, 0], // z =   6.2  同上
-    [2, 2, 2, 2], // z =  15.2  我方前沿
+    [2, 1, 1, 2], // z =  15.2  我方前沿
   ];
   // 上色：按 (行,列) 取确定性的色 —— 不用 Math.random，配色每次刷新一致，截图可比对。
   // 深绿仍是主色（占多数），穿插灰蓝/浅卡其/军绿；三层塔统一刷浅灰，让它们从头像里跳出来。
@@ -1082,7 +1081,7 @@ export async function buildMap(scene) {
         rot: LONG,
         stack: n,
         colors: Array.from({ length: n }, (_, L) =>
-          n >= 3 ? PAL.gray : PICK[(r * 3 + c * 5 + L * 2) % PICK.length]
+          L > 0 ? 0xa49e88 : PICK[(r * 3 + c * 5) % PICK.length]
         ),
       });
     }
@@ -1105,8 +1104,8 @@ export async function buildMap(scene) {
   // 原来那条 0.85m 的假缝也一并消掉。此时被挡区间是 x ∈ (1.575, 5.125)，
   // **可用窗口 x ∈ [-5.125, 1.575]，净宽 6.7m** —— 比一次绕行宽得多，怎么滑都能滑进窗口。
   // 两口箱心 x 相反（z 也相反），中路仍是「必须绕、且绕两侧」的 S 形交火线。
-  containers.push({ x: -3.85, z: 10.7, rot: SHORT, stack: 1, colors: [PAL.dgreen] });
-  containers.push({ x: 3.85, z: -10.7, rot: SHORT, stack: 1, colors: [PAL.dgreen] });
+  containers.push({ x: -3.85, z: 10.7, rot: SHORT, stack: 1, tarp: true, colors: [PAL.dgreen] });
+  containers.push({ x: 3.85, z: -10.7, rot: SHORT, stack: 1, tarp: true, colors: [PAL.dgreen] });
 
   const faceCache = new Map(); // 同色集装箱共用一张瓦楞贴图（全局缓存，颜色只有 6 种）
   // 材质也**按颜色**缓存。实测 container.glb 那 5 个材质彼此的差别**只有 baseColorFactor**
@@ -1134,21 +1133,38 @@ export async function buildMap(scene) {
     }
     return contMatCache.get(col);
   };
+  // Canvas-wrapped military freight: neutral fabric height field, dark green albedo,
+  // pale pallet band and tie-down seams. All maps share UVs and dimensions.
+  const tarpH = 1.90, TS = 256;
+  const tarpHeight = field(TS, (u, v) => 0.5 + 0.16 * Math.sin(u * 44 + Math.sin(v * 9) * 2) + 0.05 * fbm(u, v, 18, 3, 48));
+  const tarpBase = hexLin(0x304333), pallet = hexLin(0xaaa38a);
+  const tarpMaps = buildMaps(TS, tarpHeight, 1.2, 0.45, (i, rgb) => {
+    const u = (i % TS) / TS, v = Math.floor(i / TS) / TS;
+    const bottom = v > 0.84;
+    const seam = Math.abs(u - 0.18) < 0.012 || Math.abs(u - 0.82) < 0.012;
+    const tone = (0.68 + tarpHeight[i] * 0.5) * (seam ? 0.55 : 1);
+    const base = bottom ? pallet : tarpBase;
+    for (let j = 0; j < 3; j++) rgb[j] = base[j] * tone;
+  }, () => 0.96);
+  const tarpMat = new THREE.MeshStandardMaterial({ ...tarpMaps, roughness: 1, metalness: 0 });
   const contMeshes = []; // 待合批的全部 primitive
   const contGroups = []; // 需要从 obstacles / scene 里换掉的原对象（每箱一个 Group）
   for (const spec of containers) {
     if (!containerProto) break;
     const total = spec.stack;
     for (let L = 0; L < total; L++) {
-      const clone = containerProto.clone(true);
-      clone.scale.setScalar(CONT_SCALE);
-      clone.rotation.y = spec.rot + CONT_YAW;
+      const height = spec.tarp ? tarpH : CONT_H;
+      const clone = spec.tarp
+        ? new THREE.Mesh(new THREE.BoxGeometry(CONT_L, height, CONT_T), tarpMat)
+        : containerProto.clone(true);
+      clone.scale.setScalar(spec.tarp ? 1 : CONT_SCALE);
+      clone.rotation.y = spec.tarp ? spec.rot : spec.rot + CONT_YAW;
       // 摆位前先量一次自己的包围盒：GLB 的几何中心不在原点（实测偏在本地 z≈+0.69、
       // y≈+0.06），直接 position.set(spec.x, CONT_H/2, spec.z) 会让整箱偏出碰撞盒 1.31m
       // —— 模型和碰撞盒各站各的，就是玩家摸到的「空气墙」。
       clone.position.set(0, 0, 0);
       const cc = new THREE.Box3().setFromObject(clone).getCenter(new THREE.Vector3());
-      clone.position.set(spec.x - cc.x, CONT_H / 2 + L * CONT_H - cc.y, spec.z - cc.z);
+      clone.position.set(spec.x - cc.x, height / 2 + L * height - cc.y, spec.z - cc.z);
       const col = spec.colors[L];
       if (!faceCache.has(col)) faceCache.set(col, containerFaceTexture(col, containerLayout()));
       const faceTex = faceCache.get(col);
@@ -1156,7 +1172,7 @@ export async function buildMap(scene) {
         if (o.isMesh) {
           o.castShadow = true;
           o.receiveShadow = true;
-          if (o.material) o.material = containerMat(col, faceTex, o.material);
+          if (o.material && !spec.tarp) o.material = containerMat(col, faceTex, o.material);
           contMeshes.push(o);
         }
       });
@@ -1169,7 +1185,7 @@ export async function buildMap(scene) {
         const rot = spec.rot;
         const lx = Math.abs(CONT_L / 2 * Math.cos(rot)) + Math.abs(CONT_T / 2 * Math.sin(rot));
         const lz = Math.abs(CONT_L / 2 * Math.sin(rot)) + Math.abs(CONT_T / 2 * Math.cos(rot));
-        colliders.push({ x: spec.x, z: spec.z, hx: lx, hz: lz, h: CONT_H * total });
+        colliders.push({ x: spec.x, z: spec.z, hx: lx, hz: lz, h: height * total });
         // 小地图：每格一件（**按格画、不按层画** —— 同一格叠几层在俯视图上是同一个方块，
         // 与 colliders「每格一个」的粒度一致）。
         topdown.push({ x: spec.x, z: spec.z, hx: lx, hz: lz, kind: "container" });
@@ -1396,12 +1412,12 @@ export async function buildMap(scene) {
   // 这两个常量必须**声明在使用点之前**：右舷屋顶那间小机房在下面几行就要用 WALL_TINT 造材质，
   // 而 `const` 在同一函数作用域里是有 TDZ 的 —— 声明留在下面的立面细节节里会在开局直接抛
   // `Cannot access 'WALL_TINT' before initialization`（整张地图构建失败，页面白屏）。
-  const WALL_TINT = 0x848b92;   // 甲板室涂装色（贴图是中性的，色相全在这一档）
+  const WALL_TINT = 0xaaa38d;   // 甲板室涂装色（贴图是中性的，色相全在这一档）
   const SIDE_DOOR = 2.2;        // 东西侧墙上那道窄门的净宽
   const wallMat = plateMat(3.0, 2.3, WALL_TINT);   // 只给右舷屋顶那间小机房用
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x5d646b, roughness: 0.72, metalness: 0.18 });
   // 钢板屋顶的色调比甲板浅一档（甲板室顶棚常年被太阳晒、又被雨水冲，锈得少）
-  const ROOF_TINT = 0x8e959b;
+  const ROOF_TINT = 0x858273;
 
   // 一部直跑钢梯。**每一级台阶各进一个 collider** —— 玩家的上下楼全靠
   // supportAt/blockedBy 逐级读 c.h；给整部梯一个 AABB 的话它就是一个 4.5m 高的实心块。
@@ -1853,65 +1869,9 @@ export async function buildMap(scene) {
   scene.add(pent); obstacles.push(pent);
   colliders.push({ x: STBD_X, z: 0, hx: 1.5, hz: 1.8, h: STBD_TOP + 2.3, y0: STBD_TOP });
 
-  // ===== 空中栈桥：把两座屋顶连起来 =====
-  // 从右舷屋顶横跨中路到左舷屋顶（跨度由 PORT_X/STBD_X 派生，18.4m）。桥面 4.62m，
-  // 玩家在甲板上从桥下走过（这就是 colliders 的 y0 存在的全部理由）。
-  // 桥面 1.8m 宽、两侧 1.0m 桁架栏杆，**两侧栏杆有碰撞**（见下），所以桥上的可走带只剩
-  // |z| ≤ 0.38（1.8/2 − 0.07 栏杆半厚 − 0.45 玩家半径）——**下桥只能从两端走出去、或者跳下去**。
-  // 它同时是全场最好用的观景位和最危险的靶子 —— 桥下的人在阴影里看得见桥上的人，反之困难。
-  // **桥的净空是 HANG_Y 的上界约束**：桁架顶 ≈6.4m，所以吊箱底必须留在 8m 以上（见龙门吊一节）。
-  {
-    const BR_Y = STBD_TOP + 0.12, BR_W = 1.8;
-    const xL = PORT_X + 2.4, xR = STBD_X - 2.4, span = xR - xL;
-    // 栏杆碰撞体的高度**必须止于看得见的上弦顶端**（上弦中心 BR_Y+1.35、半厚 0.07）——
-    // 再高就成了「看不见的墙」：玩家脚底明明越过了看得见的栏杆、却还是被挡回来。
-    // 取这个高度时跳跃恰好过得去：脚底从桥面 4.74 抬到 5.54 即可（JUMP_VEL 7.5²/(2·GRAVITY 21)
-    // ⇒ 跳高 1.34m），所以「必须跳起来才能从桥上下来」是靠一道**看得见**的栏杆成立的。
-    const RAIL_TOP = BR_Y + 1.42, RAIL_T = 0.07;
-    const deckPlate = new THREE.Mesh(new THREE.BoxGeometry(span, 0.24, BR_W),
-      deckSurface(span, BR_W, ROOF_TINT, 0.12));
-    deckPlate.position.set((xL + xR) / 2, BR_Y, 0);
-    deckPlate.castShadow = true; deckPlate.receiveShadow = true;
-    scene.add(deckPlate); obstacles.push(deckPlate);
-    colliders.push({ x: (xL + xR) / 2, z: 0, hx: span / 2, hz: BR_W / 2, h: BR_Y + 0.12, y0: BR_Y - 0.12 });
-    // 小地图：栈桥带 `y0` —— 它在甲板上的人的头顶，小地图把它画出来（玩家该知道桥上有人），
-    // 但**不做视线遮挡**（与 enemies.js 的 `c.y0 >= ENEMY_HEAD_ROOM` 同一条语义）。
-    topdown.push({ x: (xL + xR) / 2, z: 0, hx: span / 2, hz: BR_W / 2, kind: "bridge", y0: BR_Y - 0.12 });
-    // 桁架：上弦 + 斜腹杆 + 三道横杆。上弦进 obstacles（挡子弹），整片桁架进 colliders（挡人）。
-    for (const sz of [-1, 1]) {
-      const top = new THREE.Mesh(new THREE.BoxGeometry(span, 0.14, 0.14), trimMat);
-      top.position.set((xL + xR) / 2, BR_Y + 1.35, sz * BR_W / 2);
-      scene.add(top); obstacles.push(top);
-      for (let i = 0; i <= span; i += 1.55) {
-        const x = xL + i;
-        const d = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.45, 0.1), trimMat);
-        d.position.set(x, BR_Y + 0.72, sz * BR_W / 2);
-        d.rotation.z = (i / 1.55) % 2 ? 0.62 : -0.62;
-        scene.add(d);
-      }
-      for (const y of [0.5, 0.95, 1.35]) {
-        const r = new THREE.Mesh(new THREE.BoxGeometry(span, 0.06, 0.06), trimMat);
-        r.position.set((xL + xR) / 2, BR_Y + y, sz * BR_W / 2);
-        scene.add(r);
-      }
-      // **这道栏杆必须有碰撞。** 原先它是纯视觉，玩家走到桥边一步就穿出去掉下桥 ——
-      // 「看得见的障碍」与「障碍逻辑」对不上。
-      // 与屋顶栏杆那条「不给碰撞」的区别就在这里：屋顶的栏杆围成四面，给了碰撞等于把整块
-      // 屋顶封死（人走不到边上）；这座桥只有两条长边，两端（x = ±span/2）仍然敞开、照样
-      // 通到屋顶，所以给碰撞不堵路。桥下那条通道也不受影响：y0 = 4.5，甲板上的玩家判
-      // 「4.5 ≥ 0 + 1.78 → 从底下过」，敌人那边 blockedAt 直接滤掉 c.y0 ≥ 1.78 的碰撞体。
-      colliders.push({
-        x: (xL + xR) / 2, z: sz * BR_W / 2, hx: span / 2, hz: RAIL_T,
-        h: RAIL_TOP, y0: BR_Y - 0.12,
-      });
-    }
-  }
-
-  // ===== 船中龙门吊（跨全船的起重机 + 悬吊集装箱）=====
-  // 两条腿落在甲板**之外**（x = ±(DECK_W+1.6) = ±21.6，在 bounds.hw=19.35 之外），
-  // 所以它不参与碰撞、也不挡路 —— 纯剪影。它给扁平的地图补上唯一一条**横跨全场的横向结构**，
-  // 并且解释了「为什么船中那块甲板是空的」。
-  // **BEAM_Y / HANG_Y 与船的长宽无关**，缩图时不要动：HANG_Y 只受栈桥桁架顶（≈6.4m）约束。
+  // Classic layout: side lookout roofs stay independent; the centre skyline is open.
+  // No bridge meshes, colliders or minimap footprint remain.
+  // The cargo gantry is background scenery beyond the north spawn apron.
   const craneGroup = new THREE.Group();
   // 格构把腿/梁从 4+3 个盒子撑成三百多个小件 —— 必须合批，否则「细节」直接变成 +300 次
   // 绘制调用。小车的 car/rope/hang 是动态的（update() 里横移），**绝不进这个数组**。
@@ -1920,7 +1880,7 @@ export async function buildMap(scene) {
   const steelPart = (m) => { craneGroup.add(m); craneParts.push(m); return m; };
   {
     const LEG_X = DECK_W + 1.6, BEAM_Y = 15.5;
-    const steel = new THREE.MeshStandardMaterial({ color: 0xd8a92e, roughness: 0.62, metalness: 0.35 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0x8a8874, roughness: 0.82, metalness: 0.35 });
     // 腿落在 x=±21.6 —— **在船体（外壁 x=±20.4~21.0）之外、水面之上**，所以每条腿下面
     // 得先有一块属于自己的舷外平台，否则四条腿就是悬空站在海面上。
     // 平台从 -2.6（没入水线 y=-2.4 以下）顶到 +0.2，与甲板齐平。
@@ -2043,6 +2003,7 @@ export async function buildMap(scene) {
     craneGroup.add(trolley);
     craneTrolley = trolley;
   }
+  craneGroup.position.z = -(DECK_L + 9);
   scene.add(craneGroup);
   // 合批必须在 `scene.add(craneGroup)` **之后**：bake() 读的是 matrixWorld，而游离在
   // 场景外的子树永远不会被 `updateMatrixWorld` 写到（同楼梯那条注释）。
@@ -2129,7 +2090,7 @@ export async function buildMap(scene) {
   // 而且这类贴地薄片**绝不能进 obstacles** —— 甲板本身不在阻挡列表里，
   // 只把这一块加进去会让「朝空地开枪」在这一段莫名其妙地打中东西。
   {
-    const zoneMat = new THREE.MeshStandardMaterial({ color: 0xd8a92e, roughness: 0.62 });
+    const zoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8874, roughness: 0.82 });
     // HW 取 8.5：向内收进「内列箱外缘 7.675」与「甲板室内墙 9.2」之间那条 2.65m 的纵向巷，
     // 于是这圈线在全新的窄甲板上既不会长进集装箱、也不会被甲板室的地板盖住。
     const HW = 8.5, HD = 4.5, LW = 0.28;

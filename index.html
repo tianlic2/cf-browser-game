@@ -135,11 +135,13 @@
         <div class="hud-match-details" aria-hidden="true"><div id="ammoFill"></div></div>
       </div>
 
-      <!-- 背包面板（B 开合；再用数字键 1/2/3 选背包，选完自动收起） -->
+      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1/2/3 确认并收起） -->
       <div id="backpack" class="backpack hidden">
-        <div class="bp-title">背包选择<small>（B 打开 · 选完自动收起 · 限复活点安全区）</small></div>
-        <div id="bpList" class="bp-list"></div>
+        <div class="bp-heading"><span class="bp-heading-icon" aria-hidden="true">▰</span><span>更换背包</span><span class="bp-title">选择背包</span></div>
+        <div id="bpList" class="bp-list" role="group" aria-label="选择背包编号"></div>
+        <div class="bp-loadout" id="bpLoadout" aria-label="当前背包装备"></div>
         <div class="bp-hint" id="bpHint"></div>
+        <div class="bp-footer"><span id="bpCurrent">当前背包 1</span><span><kbd>B</kbd> 关闭</span></div>
       </div>
 
       <!-- 提示：换弹中 / 低血量 -->
@@ -192,84 +194,74 @@
       </div>
     </div>
 
-    <!-- 开始菜单 = CF 大厅（全屏四页签；背景半透明，透出实时运输船甲板）。
+    <!-- 开始菜单 = 经典双阵营房间大厅（四页签，金属框与底部本地消息区）。
          注意：#menu 与 #gameover **共用** .menu / .menu-panel / .menu-title / .menu-sub /
          .menu-btn / .gameover-stats 这几个类，所以本大厅的样式一律另起 .lobby* 作用域
          （见 styles/game.css 末尾那一段），绝不能去改那几个共用的规则。
          页签 2/3/4 的正文由 scripts/lobby.js 生成；页签 1 里的对局设置是**原样搬家**，
          id 一个都没动（buildMenuMatch / init 里的步进器要靠它们）。 -->
+    <!-- Esc 对局菜单独立于大厅和 HUD，失去指针锁后仍可操作。 -->
+    <div id="gameMenu" class="game-menu hidden" role="dialog" aria-modal="true" aria-labelledby="gameMenuTitle" aria-describedby="gameMenuStatus">
+      <section class="game-menu-panel">
+        <header><span>TACTICAL ASSAULT</span><h2 id="gameMenuTitle">游戏菜单</h2></header>
+        <p id="gameMenuStatus" role="status">对局进行中</p>
+        <div class="game-menu-actions">
+          <button id="gameMenuResume" type="button">返回游戏</button>
+          <button id="gameMenuPause" type="button">暂停游戏</button>
+          <button id="gameMenuReset" type="button">刷新位置<span>返回复活点</span></button>
+          <button id="gameMenuEnd" class="game-menu-end" type="button">结束游戏<span>返回主界面</span></button>
+        </div>
+        <p class="game-menu-tip">Esc 返回游戏 · 暂停后可继续当前对局</p>
+      </section>
+    </div>
+
     <div id="menu" class="menu lobby">
+      <div class="lobby-shell">
       <header class="lobby-top">
-        <div class="lobby-mark" aria-hidden="true"></div>
-        <div class="lobby-id">
-          <h1 class="lobby-title">战术突击</h1>
-          <div class="lobby-brand">TACTICAL ASSAULT · TRANSPORT SHIP</div>
-        </div>
-        <div class="lobby-chips">
-          <span class="lobby-chip">运输船</span>
-          <span class="lobby-chip">团队竞技</span>
-          <span class="lobby-chip lobby-chip-hl" id="lobbyMatchChip">8 人 · 普通</span>
-        </div>
+        <div class="lobby-id"><h1 class="lobby-title">战术突击</h1><span class="lobby-brand">游戏房间</span></div>
+        <div class="lobby-chips"><span class="lobby-chip">运输船 · 团队竞技</span><span class="lobby-chip" id="lobbyMatchChip">8 人 · 普通</span></div>
       </header>
-
       <div class="lobby-body">
-        <nav class="lobby-rail" id="lobbyTabs" role="tablist" aria-label="大厅导航">
-          <button type="button" class="lobby-tab active" data-tab="play" role="tab" aria-selected="true">开始游戏</button>
-          <button type="button" class="lobby-tab" data-tab="manual" role="tab" aria-selected="false">作战手册</button>
-          <button type="button" class="lobby-tab" data-tab="arsenal" role="tab" aria-selected="false">武器库</button>
-          <button type="button" class="lobby-tab" data-tab="storage" role="tab" aria-selected="false">个人仓库</button>
-        </nav>
-
         <section class="lobby-content">
-          <!-- 页签 1：对局设置（原样搬家）+ 战况简报 + 进入战场 -->
           <div class="lobby-pane" data-pane="play">
-            <div class="lp-head">
-              <h2 class="lp-h2">作战准备</h2>
-              <p class="lp-desc">选择本局的敌人数量与难度，随后进入运输船甲板。</p>
+            <div class="room-teams-heading">
+              <div class="room-team-title room-bl"><img src="./assets/ui/room-bl.svg" alt="" /><h2>潜伏者</h2><small>BLACK LIST</small></div>
+              <span class="room-versus" aria-hidden="true">VS</span>
+              <div class="room-team-title room-gr"><h2>保卫者</h2><small>GLOBAL RISK</small><img src="./assets/ui/room-gr.svg" alt="" /></div>
             </div>
-            <div class="lp-cols">
+            <div class="room-roster" aria-label="房间成员">
+              <section class="room-team room-bl" aria-label="潜伏者电脑队伍"><div class="room-team-list" id="roomEnemyList"></div></section>
+              <section class="room-team room-gr" aria-label="保卫者队伍"><div class="room-team-list" id="roomPlayerList"></div></section>
+            </div>
+            <div class="room-match-info"><span>地图 <b>运输船</b></span><span>团队竞技</span><span><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
+            <div class="room-actions">
               <div class="menu-setup">
-                <div class="ml-title">对局设置<small>进入战场后可用 + / - 随时增减敌人</small></div>
-                <div class="ml-rows">
-                  <div class="ml-row">
-                    <span class="ml-label">敌人数量</span>
-                    <div class="ml-stepper">
-                      <button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button>
-                      <span class="ml-step-val" id="enemyCountVal">8</span>
-                      <button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button>
-                    </div>
-                  </div>
-                  <div class="ml-row">
-                    <span class="ml-label">难度</span>
-                    <div class="ml-seg" id="mlDiff"></div>
-                  </div>
-                </div>
+                <div class="ml-row"><span class="ml-label">电脑人数</span><div class="ml-stepper"><button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button><span class="ml-step-val" id="enemyCountVal">8</span><button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button></div></div>
+                <div class="ml-row"><span class="ml-label">难度</span><div class="ml-seg" id="mlDiff"></div></div>
               </div>
-              <div class="lobby-brief">
-                <div class="lb-title">战况简报</div>
-                <div class="lb-row"><span>地图</span><b>运输船</b></div>
-                <div class="lb-row"><span>模式</span><b>团队竞技</b></div>
-                <div class="lb-row"><span>目标击杀</span><b id="lobbyLimit">40</b></div>
-                <div class="lb-row"><span>回合时限</span><b id="lobbyTime">10:00</b></div>
-                <div class="lb-row"><span>我方出生点</span><b>船尾甲板</b></div>
-              </div>
+              <button class="menu-btn" id="startBtn">开始游戏</button>
             </div>
-            <button class="menu-btn" id="startBtn">进入战场</button>
           </div>
-
-          <!-- 页签 2/3/4：只读信息页，正文全部由 scripts/lobby.js 生成（单一数据源） -->
           <div class="lobby-pane hidden" data-pane="manual"></div>
           <div class="lobby-pane hidden" data-pane="arsenal"></div>
           <div class="lobby-pane hidden" data-pane="storage"></div>
         </section>
+        <nav class="lobby-rail" id="lobbyTabs" role="tablist" aria-label="大厅导航">
+          <button type="button" class="lobby-tab active" data-tab="play" role="tab" aria-selected="true">游戏房间</button>
+          <button type="button" class="lobby-tab" data-tab="manual" role="tab" aria-selected="false">作战手册</button>
+          <button type="button" class="lobby-tab" data-tab="arsenal" role="tab" aria-selected="false">武器库</button>
+          <button type="button" class="lobby-tab" data-tab="storage" role="tab" aria-selected="false">个人仓库</button>
+        </nav>
       </div>
-
-      <footer class="lobby-ticker">
-        <span class="lobby-ticker-tag">公告</span>
-        <div class="lobby-ticker-view">
-          <div class="lobby-ticker-run" id="lobbyTicker"></div>
+      <footer class="room-chat">
+        <div class="room-chat-log" id="roomChatLog" role="log" aria-label="房间消息">
+          <p class="room-message-system">欢迎进入运输船。准备就绪后，点击「开始游戏」。</p>
+          <p class="room-message-hint">可调整电脑人数与难度；按 Esc 返回房间后，可继续当前对局。</p>
+          <p class="room-message-system" id="lobbyTicker"></p>
         </div>
+        <form class="room-chat-compose" id="roomChatForm"><label for="roomChatInput">房间</label><span class="room-chat-caret" aria-hidden="true">▶</span><input id="roomChatInput" type="text" maxlength="100" autocomplete="off" placeholder="输入房间消息，按 Enter 发送" /><button type="submit">发送</button></form>
       </footer>
+      </div>
     </div>
 
     <!-- 结算画面 -->

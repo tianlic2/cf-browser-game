@@ -1,4 +1,4 @@
-// ===== 大厅（CF 风格首页：全屏四页签 + 战况简报 + 公告跑马灯）=====
+// ===== 大厅（经典双阵营房间 + 四页签 + 本地房间消息）=====
 //
 // 与 `scripts/chat.js` / `scripts/minimap.js` 同一套独立性约定：
 //   · 不 import THREE、不碰任何游戏状态；
@@ -38,7 +38,8 @@ const KEYBINDS = [
   { keys: ["3"], label: "切换到军刀" },
   { keys: ["4"], label: "循环切换手雷 / 闪光弹 / 烟雾弹" },
   { keys: ["Q"], label: "主武器 ⇄ 副武器 快速切换" },
-  { keys: ["B"], label: "背包面板（再用 1 / 2 / 3 选，选完自动收起）" },
+  { keys: ["Esc"], label: "游戏菜单：暂停 / 结束对局 / 刷新位置" },
+  { keys: ["B"], label: "背包：悬停编号预览，点击或 1 / 2 / 3 确认并关闭" },
   { keys: ["G"], label: "丢弃当前武器" },
   { keys: ["Tab"], label: "按住查看战绩" },
   { keys: ["Enter"], label: "聊天（再按一次发送）" },
@@ -46,7 +47,7 @@ const KEYBINDS = [
   { keys: ["Esc"], label: "释放鼠标，回到大厅" },
 ];
 
-const TAB_NAMES = { play: "开始游戏", manual: "作战手册", arsenal: "武器库", storage: "个人仓库" };
+const TAB_NAMES = { play: "游戏房间", manual: "作战手册", arsenal: "武器库", storage: "个人仓库" };
 
 /** 建一个元素。cls 可省，text 可省（0 与 "" 要能正常写入，所以判的是 null/undefined）。 */
 function el(tag, cls, text) {
@@ -102,6 +103,30 @@ export class Lobby {
       this._ok = false;
       return;
     }
+    const form = this._root.querySelector("#roomChatForm");
+    const input = this._root.querySelector("#roomChatInput");
+    const log = this._root.querySelector("#roomChatLog");
+    if (form && input && log) {
+      // Local room messages only. Typing here must not trigger gameplay keys.
+      for (const event of ["keydown", "keyup"]) input.addEventListener(event, e => {
+        e.stopPropagation();
+        if (event === "keydown" && e.code === "Escape") input.blur();
+      });
+      form.addEventListener("submit", e => {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (!text) return;
+        const line = el("p", "room-message-player");
+        line.append(el("b", null, "你："), document.createTextNode(text.slice(0, 100)));
+        log.append(line);
+        while (log.children.length > 50) {
+          const oldest = log.querySelector(".room-message-player");
+          if (!oldest) break;
+          oldest.remove();
+        }
+        input.value = ""; log.scrollTop = log.scrollHeight;
+      });
+    }
     this.refresh();
   }
 
@@ -137,7 +162,8 @@ export class Lobby {
     const chip = this._root.querySelector("#lobbyMatchChip");
     if (!chip) return;
     const n = match.enemies;
-    chip.textContent = `${n} 人 · ${match.difficulty || "普通"}`;
+    chip.textContent = `${n} 名电脑 · ${match.difficulty || "普通"}`;
+    this._renderRoom((this._getData() || {}).room);
   }
 
   /** 对局中按 Esc 回到大厅时，主按钮要改成「返回战场」——
@@ -148,7 +174,7 @@ export class Lobby {
     const want = !!on;
     if (want === this._resume) return;
     this._resume = want;
-    this._startBtn.textContent = want ? "返回战场" : "进入战场";
+    this._startBtn.textContent = want ? "返回战场" : "开始游戏";
   }
 
   /** 供 __tactical 读口用（`.lobbyState()`）。 */
@@ -168,9 +194,9 @@ export class Lobby {
   _renderPane(tab) {
     const pane = this._panes.get(tab);
     if (!pane) return;
-    // 开始游戏页的正文是 index.html 里写死的（对局设置那套 id 必须留在 HTML 里，
-    // buildMenuMatch 与 init 的步进器都是模块级无保护取用），只写顶栏那个徽章。
+    // 房间骨架和对局设置 id 留在 HTML；成员行从游戏数据即时生成。
     if (tab === "play") {
+      this._renderRoom((this._getData() || {}).room);
       this._rendered.play = true;
       return;
     }
@@ -187,6 +213,25 @@ export class Lobby {
     box.append(el("h2", "lp-h2", title));
     if (desc) box.append(el("p", "lp-desc", desc));
     return box;
+  }
+
+  _renderRoom(room) {
+    for (const [id, rows] of [["roomEnemyList", room?.enemies], ["roomPlayerList", room?.players]]) {
+      const list = this._root.querySelector("#" + id);
+      if (!list) continue;
+      list.replaceChildren();
+      for (let i = 0; i < 8; i++) {
+        const member = rows?.[i];
+        const row = el("div", member ? "room-member occupied" : "room-member empty");
+        if (member) {
+          const rank = el("span", "room-rank", member.role === "房主" ? "★" : "»");
+          rank.setAttribute("aria-hidden", "true");
+          row.append(rank, el("span", "room-member-name", member.name), el("span", "room-member-role", member.role), el("span", "room-member-status", member.status));
+          if (member.role === "房主") row.classList.add("is-host");
+        } else row.setAttribute("aria-label", "空位");
+        list.append(row);
+      }
+    }
   }
 
   _renderManual() {
@@ -289,15 +334,9 @@ export class Lobby {
     return frag;
   }
 
-  /** 跑马灯：写**两遍**同一段内容，配 CSS 的 translateX(-50%) 才是无缝循环。 */
+  /** 房间日志里的系统说明，保留 lobbyTicker 的既有接线。 */
   _renderTicker(text) {
     const line = typeof text === "string" && text ? text : "战术突击 · 运输船 · 团队竞技";
-    this._tickerEl.replaceChildren();
-    for (let i = 0; i < 2; i++) {
-      const span = el("span", null, line);
-      // 只有第一份要写给读屏（第二份纯属动画的补位）
-      if (i === 1) span.setAttribute("aria-hidden", "true");
-      this._tickerEl.append(span);
-    }
+    this._tickerEl.textContent = line;
   }
 }

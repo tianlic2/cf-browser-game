@@ -24,6 +24,7 @@ import { tameEnvIntensity as tameWorldEnv } from "./envtame.js";
 import { weaponIconSvg, headshotBadgeSvg, killMedalSvg } from "./icons.js";
 import { Minimap, mmVisible } from "./minimap.js";
 import { Lobby } from "./lobby.js";
+import { weaponPreview } from "./weapon_preview.js";
 
 // ---------- DOM ----------
 const viewport = document.getElementById("viewport");
@@ -882,6 +883,8 @@ let state = "menu";
 let kills = 0;
 let enemyScore = 0;
 let locked = false;
+let matchPaused = false;
+let lockRequestCancelled = false;
 let time = 0;
 let fireEnabled = false;
 let knifeHeavyHeld = false, knifeChain = 0, meleeState = null, meleeHold = null;
@@ -1048,7 +1051,7 @@ const chat = new Chat({
   logEl: document.getElementById("chatLog"),
   inputEl: document.getElementById("chatInput"),
   inputWrapEl: document.getElementById("chatInputWrap"),
-  canOpen: () => state === "playing" && locked,
+  canOpen: () => state === "playing" && locked && !backpackOpen() && !gameMenuOpen(),
   onTypingChange: (typing) => {
     if (!typing) return;
     // 打字期间键盘不该再驱动游戏。keys 是本文件的模块级变量、chat.js 碰不到，
@@ -1746,8 +1749,8 @@ function switchToSecondary() {
   switchWeapon(id);
 }
 // B + 数字键（或点击面板）切换背包。不可切换时给出具体原因，不要静默失败。
-// **它只管数据，不碰面板的显隐** —— 「选完自动收起」由两条调用路径各自去调 `closeBackpack()`
-// （keydown 的数字键、`updateBackpack` 的行点击）。收在这儿的话 `__tactical.switchBackpack`
+// **它只管数据，不碰面板的显隐** —— 鼠标与数字键由 confirmBackpack 统一确认并关闭。
+// 收在这儿的话 `__tactical.switchBackpack`
 // 这个程序化入口也会顺手把面板收掉，而它在测试里是拿来改状态的、不该带 UI 副作用。
 function switchBackpack(i) {
   if (!BACKPACKS[i]) return false;
@@ -1776,28 +1779,61 @@ function switchNade() {
   const idx = list.indexOf(currentId);
   switchWeapon(list[(idx + 1) % list.length] || list[0]);
 }
+// Preview is independent of the equipped backpack. Unlocking for this overlay
+// must not take the normal Escape → lobby path.
+let previewBp = 0;
+let backpackUnlockPending = false;
+let backpackResumePending = false;
+function clearBackpackInput() {
+  for (const k in keys) keys[k] = false;
+  fireEnabled = false;
+  cancelMelee(); cancelGrenade(); showScoreboard(false); chat.cancel();
+}
 function toggleBackpack() {
-  // 收起面板要顺手把提示语清掉（那句「按 1 / 2 / 3 切换背包」在面板关着时没有意义），
-  // 而「选完背包自动收起」那条路不能清 —— 那时调用方刚写了「切换至背包 2」。
-  // 所以清提示留在这一层，`closeBackpack()` 只做显隐。
-  if (closeBackpack()) { showToast(""); return; }
-  const b = document.getElementById("backpack");
-  b.classList.remove("hidden");
+  if (closeBackpack(true)) { showToast(""); return; }
+  if (state !== "playing" || dead || !locked) return;
+  previewBp = curBp;
+  document.getElementById("backpack").classList.remove("hidden");
+  clearBackpackInput();
   sfx.ui("open");
   updateBackpack();
-  showToast(canSwapBackpack() ? "按 1 / 2 / 3 切换背包" : "");
+  showToast(canSwapBackpack() ? "悬停编号预览 · 点击或按 1 / 2 / 3 确认" : "");
+  backpackUnlockPending = true;
+  document.exitPointerLock();
 }
-// 收起背包面板。**只做显隐**（不动 toast、不判闸门）。
-// 两个调用点：toggleBackpack 的关面板那一半、以及「数字键/点击选完背包」——
-// 后者只在 `switchBackpack()` 返回 true 时才调：被规则拦下时不收面板，
-// 玩家才看得见那句原因（toast）与面板上转黄的提示（见 updateBpHint）。
-function closeBackpack() {
+// System cleanup never requests a new pointer lock. Only a user confirmation
+// or B/Escape cancellation passes resume=true, preserving browser activation.
+function closeBackpack(resume = false) {
   const b = document.getElementById("backpack");
   if (!b || b.classList.contains("hidden")) return false;
   b.classList.add("hidden");
+  document.activeElement?.blur();
+  previewBp = curBp;
+  clearBackpackInput();
   sfx.ui("close");
   updateBackpack();
+  if (resume && state === "playing") {
+    if (backpackUnlockPending) backpackResumePending = true;
+    else requestLock();
+  }
   return true;
+}
+function confirmBackpack(i) {
+  if (!backpackOpen()) return;
+  sfx.ui("click");
+  if (switchBackpack(i)) closeBackpack(true);
+  else updateBpHint();
+}
+function previewBackpack(i) {
+  if (!backpackOpen() || !BACKPACKS[i]) return;
+  previewBp = i;
+  for (const row of document.getElementById("bpList").children) {
+    const n = Number(row.dataset.bp);
+    row.classList.toggle("active", n === previewBp);
+    row.classList.toggle("equipped", n === curBp);
+  }
+  document.getElementById("bpCurrent").textContent = "查看背包 " + (previewBp + 1) + " · 已装备 " + (curBp + 1);
+  updateBackpackLoadout();
 }
 function backpackOpen() {
   const b = document.getElementById("backpack");
@@ -1813,30 +1849,75 @@ function backpackOpen() {
 // 捡到的枪也照常带着敌人的皮肤。程序化入口只剩 `__tactical.setSkin`（它本来就不写
 // `LOADOUT_DEFAULT`，与「捡来的枪只活一局」的边界一致）。
 // 面板是「查看 + 切换」用的，改配装在开始菜单里（等价于 CF 在仓库里配好再进战场）。
-// 指针锁定时没有光标，所以这里的鼠标点击实际点不到，主路径是键盘 B + 数字键。
+// 悬停只更新预览；鼠标与数字键共用 confirmBackpack 确认。
 function updateBackpack() {
   const list = document.getElementById("bpList");
   if (!list) return;
-  list.innerHTML = "";
+  list.replaceChildren();
   BACKPACKS.forEach((bp, i) => {
     const row = document.createElement("button");
-    row.className = "bp-item bp-row" + (i === curBp ? " active" : "");
+    row.className = "bp-item" + (i === previewBp ? " active" : "") + (i === curBp ? " equipped" : "");
     row.dataset.bp = String(i);
-    // 带上皮肤名，否则两个背包都用 AK 时面板上看不出区别
-    const sk = skinLabel(bp.primary, bp.skin);
-    const skTag = isSkinned(bp.primary, bp.skin) ? '<span class="bp-skin">' + sk + "</span>" : "";
-    row.innerHTML =
-      '<span class="bp-idx">' + (i + 1) + "</span>" +
-      '<span class="bp-name">' + WEAPON_DEFS[bp.primary].name + "</span>" + skTag;
-    // 与键盘那条路径同源：**选完就收起面板**（DESIGN.md 一直这么写，实现漂移到了
-    // 「不关」那一侧）。面板里现在只有背包这一项，选完就该回战场。
-    // 被规则拦下时 switchBackpack 返回 false，面板保持打开 + toast 给原因。
-    // （指针锁定时没有光标、失锁时整个 #hud 又是 display:none，所以这一行实际只在带光标的
-    //   调试场景里跑到；留它是为了不让「点」与「键盘」两条路漂移。）
-    row.onclick = () => { sfx.ui("click"); if (switchBackpack(i)) closeBackpack(); };
+    row.type = "button";
+    row.textContent = String(i + 1);
+    row.title = "背包 " + (i + 1) + " · " + gunDisplayName(bp.primary, bp.skin);
+    row.setAttribute("aria-label", row.title);
+    row.setAttribute("aria-pressed", String(i === curBp));
+    row.setAttribute("aria-controls", "bpLoadout");
+    row.onmouseenter = () => previewBackpack(i);
+    row.onfocus = () => previewBackpack(i);
+    row.onclick = () => confirmBackpack(i);
     list.appendChild(row);
   });
+  document.getElementById("bpCurrent").textContent = "当前背包 " + (curBp + 1);
+  // Preview generation is lazy: closing the panel must not render thumbnails.
+  if (backpackOpen()) previewBackpack(previewBp);
   updateBpHint();
+}
+
+function updateBackpackLoadout() {
+  const grid = document.getElementById("bpLoadout");
+  if (!grid) return;
+  grid.replaceChildren();
+  const bp = BACKPACKS[previewBp];
+  const slots = [
+    ["主武器", bp.primary, bp.skin, "primary"],
+    ["副武器", "pistol", GEAR_SKIN.pistol, "secondary"],
+    ["近身武器", "knife", GEAR_SKIN.knife, "melee"],
+    ["投掷武器", "frag", null, "throwable"],
+    ["战术装备", "flash", null, "throwable"],
+    ["战术装备", "smoke", null, "throwable"],
+  ];
+  for (const [label, id, skin, slot] of slots) {
+    const st = owned[id]?.state;
+    const absent = (!!emptySlot[slot] && (slot !== "primary" || previewBp === curBp)) || (WEAPON_DEFS[id].type === "grenade" && !(st?.count > 0));
+    const card = document.createElement("div");
+    card.className = "bp-weapon-card bp-slot-" + slot + (absent ? " is-empty" : "");
+    card.dataset.weapon = id;
+    const type = document.createElement("div");type.className = "bp-slot-label";type.textContent = label;
+    const name = document.createElement("div");name.className = "bp-weapon-name";
+    name.textContent = absent ? (slot === "throwable" ? "已使用" : "未装备") : gunDisplayName(id, skin);
+    card.append(type, name);
+    if (!absent) {
+      const picture = document.createElement("div");picture.className = "bp-weapon-picture";
+      try {
+        const source = worldModel(id, skin) || classicNades[id]?.projectile() || owned[id]?.gun;
+        const url = weaponPreview(renderer, source, id + ":" + (skin || "default"), scene.environment, slot === "throwable" || slot === "melee", id === "knife" ? knifeBind : null);
+        if (url) {
+          const img = document.createElement("img");img.src = url;img.alt = gunDisplayName(id, skin);picture.append(img);
+        } else picture.innerHTML = weaponIconSvg(id, "bp-weapon-fallback");
+      } catch (error) {
+        // A thumbnail must never prevent opening/closing the inventory.
+        picture.innerHTML = weaponIconSvg(id, "bp-weapon-fallback");
+        console.warn("背包武器预览失败", id, error);
+      }
+      card.append(picture);
+      const detail = document.createElement("span");detail.className = "bp-weapon-detail";
+      detail.textContent = slot === "throwable" ? "× " + st.count : slot === "melee" ? "近战" : st ? st.mag + " / " + st.reserve : "";
+      card.append(detail);
+    }
+    grid.append(card);
+  }
 }
 // 面板底下那行提示。**单独拆出来**是因为它会随时间自己变（走出安全区、开一枪都会改
 // 那道闸门），而背包列表不会 —— 主循环按 0.25s 节流只重算这一行，不重建整个列表。
@@ -1873,14 +1954,10 @@ function updateBpHint() {
     return box;
   };
 
-  if (canBp) keysLine.appendChild(item(["1", "2", "3"], " 换背包（选完自动收起）"));
+  if (canBp) keysLine.appendChild(item(["1", "2", "3"], " 或点击编号确认 · 悬停预览"));
   else keysLine.appendChild(item([], swapBlockReason(), true));
 
-  // 槽位图例另起一行压暗：它和这个面板的操作无关，混在同一行会把上面两条按键提示淹掉。
-  const legend = document.createElement("div");
-  legend.className = "bp-hint-legend";
-  legend.textContent = "副武器 USP · 近战 匕首 · 投掷物 手雷/闪光/烟雾";
-  hint.appendChild(legend);
+  // Slots are shown as actual equipment cards above; no duplicate text legend.
 }
 // ---------- 地面掉落武器（敌人掉的枪 / 玩家按 G 丢的枪）----------
 // 数据形状：{ id, skin, slotKind, root, t, baseY, armed, x, z, mag, reserve }
@@ -2208,9 +2285,16 @@ function lobbyStorageRows() {
 
 function lobbyData() {
   return {
+    room: {
+      enemies: Array.from({ length: enemyTarget }, (_, i) => ({
+        name: roster[i]?.name || ENEMY_NAMES[i % ENEMY_NAMES.length],
+        role: "电脑", status: state === "playing" ? "对局中" : "准备",
+      })),
+      players: [{ name: "你", role: "房主", status: state === "playing" ? "对局中" : "准备" }],
+    },
     ticker:
       "团队竞技 · 运输船 · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
-      Math.round(TDM_TIME / 60) + " 分钟 · 对局中按 Enter 与队友交流",
+      Math.round(TDM_TIME / 60) + " 分钟 · 按 Enter 打开战场聊天",
     arsenal: lobbyArsenalRows(),
     storage: lobbyStorageRows(),
   };
@@ -3113,12 +3197,34 @@ function respawnPlayer() {
 // 是「选第几个背包」、否则是「切到主武器」；`Space` 与方向键
 // 在死亡态被吞掉），照代码生成出来的必然是一张会撒谎的表。
 document.addEventListener("keydown", (e) => {
-  // 聊天输入态在**这里**整体短路 —— 必须是第一条语句、且在 `keys[e.code] = true` 之前：
+  // 背包光标模式与聊天输入态都在 keys 写入之前短路：
   //  · 排在后面的话，打出的 w/a/s/d 会同时驱动 movePlayer；
   //  · 也不能只挡几个键，下面还有 +/-(改敌人数)、G(丢枪)、1/2/3/4、B 等分支；
   //  · 提前 return 会让 handler 末尾那两处 Space/方向键的 preventDefault **不执行**，
   //    空格才打得进输入框（这正是「必须放在最前」的第二个理由）。
+  if (gameMenuOpen()) {
+    if (e.code === "Escape") { e.preventDefault(); if (!e.repeat) resumeFromGameMenu(); }
+    if (e.code === "Tab") {
+      e.preventDefault();
+      const buttons = [...document.querySelectorAll("#gameMenu button")].filter(button => !button.disabled);
+      const index = buttons.indexOf(document.activeElement);
+      buttons[(index + (e.shiftKey ? -1 : 1) + buttons.length) % buttons.length].focus();
+    }
+    return;
+  }
+  if (e.code === "Escape" && state === "playing" && !backpackOpen()) {
+    e.preventDefault(); if (!e.repeat) openGameMenu(); return;
+  }
+  if (backpackOpen()) {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (/^Digit[123]$/.test(e.code)) confirmBackpack(Number(e.code[5]) - 1);
+    else if (e.code === "KeyB" || e.code === "Escape") { closeBackpack(true); showToast(""); }
+    return;
+  }
   if (chat.handleKey(e)) return;
+  if (e.repeat && /^Digit[123]$/.test(e.code)) return;
+  if (state === "playing" && !locked) return;
   keys[e.code] = true;
   // Tab 是浏览器的焦点切换键，不管在不在游戏里都要挡掉，否则按住会把焦点移走
   if (e.code === "Tab") {
@@ -3157,25 +3263,14 @@ document.addEventListener("keydown", (e) => {
   if (e.code === "KeyR") startReload();
   // G = 丢弃当前的主武器/副武器（掉在脚前的地上，走远再回来可以捡）
   if (e.code === "KeyG") dropWeapon();
-  if (e.code === "Digit1" || e.code === "Digit2" || e.code === "Digit3") {
-    if (backpackOpen()) {
-      // 面板打开时，数字键选的是「第几个背包」（CF 的 B + 数字键）。
-      // **选完自动收起面板**（DESIGN.md 一直这么写、实现漂移到了「不关」那一侧）：
-      // 面板里现在只有背包这一项，选完就该回战场，不必再按一次 B。
-      // 被规则拦下时 switchBackpack 返回 false —— 那时**不收面板**，玩家才看得见
-      // 那句原因与转黄的提示。同号背包（已经是它）返回 true，照收。
-      if (switchBackpack(+e.code[5] - 1)) closeBackpack();
-      return;
-    }
-  }
   if (e.code === "Digit1") switchToPrimary();
   if (e.code === "Digit2") switchToSecondary();
   if (e.code === "Digit3") switchWeapon("knife");
   if (e.code === "Digit4") switchNade();
   if (e.code === "KeyQ") quickSwitch();
-  if (e.code === "KeyB") toggleBackpack();
+  if (e.code === "KeyB" && !e.repeat) toggleBackpack();
   // （`[` / `]` 那条「面板打开时循环皮肤」的分支已随选皮肤功能一起删除，
-  //   `chat.handleKey` 仍是 keydown 的第一条语句、输入态整体短路，这一点不受影响。）
+  //   背包与聊天输入态都在写入移动键之前整体短路。）
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
 });
 document.addEventListener("keyup", (e) => {
@@ -3189,52 +3284,160 @@ document.addEventListener("keyup", (e) => {
 });
 // 切走窗口时 keyup 收不到，战绩面板会一直挂着，所以失焦也要收起来。
 // 聊天同理：失焦后 keyup 收不到、输入框也丢了焦点，typing 会一直挂着。
-window.addEventListener("blur", () => { fireEnabled=false;cancelMelee();cancelGrenade();showScoreboard(false);chat.cancel(); });
+window.addEventListener("blur", () => {
+  clearBackpackInput();
+  if (closeBackpack()) {
+    backpackResumePending = false;
+    showUnlockedMenu();
+  }
+});
 
-function requestLock() { viewport.requestPointerLock(); }
+// ---------- Esc 对局菜单 ----------
+function gameMenuOpen() {
+  return !document.getElementById("gameMenu").classList.contains("hidden");
+}
+function updateGameMenu() {
+  const status = document.getElementById("gameMenuStatus");
+  const message = matchPaused ? "游戏已暂停 · 计时与战场均已停止" : "对局进行中 · 可选择暂停游戏";
+  if (status.textContent !== message) status.textContent = message;
+  document.getElementById("gameMenuPause").textContent = matchPaused ? "继续游戏" : "暂停游戏";
+  document.getElementById("gameMenuReset").disabled = dead;
+}
+function openGameMenu() {
+  if (state !== "playing") return;
+  const wasOpen = gameMenuOpen();
+  closeBackpack();
+  backpackResumePending = false;
+  clearBackpackInput();
+  hud.classList.remove("hidden");
+  menu.classList.add("hidden");
+  gameover.classList.add("hidden");
+  document.getElementById("gameMenu").classList.remove("hidden");
+  updateGameMenu();
+  if (!wasOpen) document.getElementById("gameMenuResume").focus();
+  if (document.pointerLockElement === viewport) document.exitPointerLock();
+}
+function closeGameMenu() {
+  if (gameMenuOpen()) document.activeElement?.blur();
+  document.getElementById("gameMenu").classList.add("hidden");
+}
+function resumeFromGameMenu() {
+  if (state !== "playing") return;
+  clearBackpackInput();
+  // Keep the dialog and pause until lock succeeds, so denial is recoverable.
+  requestLock();
+}
+function toggleMatchPause() {
+  if (state !== "playing" || !gameMenuOpen()) return;
+  if (matchPaused) { resumeFromGameMenu(); return; }
+  matchPaused = true;
+  clearBackpackInput();
+  if (matchPaused) sfx.cancelStreak();
+  updateGameMenu();
+}
+function refreshPlayerPosition() {
+  if (state !== "playing" || dead || !gameMenuOpen()) return;
+  const spawns = mapData.spawns?.player;
+  if (spawns?.length) player.pos.fromArray(spawns[Math.floor(Math.random() * spawns.length)]);
+  else player.pos.set(0, 0, bounds.hl - 6);
+  player.vel.set(0, 0, 0);
+  player.yaw = 0; player.pitch = 0;
+  player.viewDip = 0; player.stepLift = 0; player.groundY = player.pos.y;
+  // This is relocation, not respawn: preserve HP, ammo, score and actedThisLife.
+  setScoped(false);
+  showToast("已返回复活点");
+  resumeFromGameMenu();
+}
+function quitMatchToLobby() {
+  if (state !== "playing") return;
+  state = "menu";
+  lockRequestCancelled = true;
+  matchPaused = false;
+  backpackResumePending = false;
+  closeBackpack(); closeGameMenu(); clearBackpackInput();
+  cancelDeath(); setScoped(false); clearFlash(); resetSwitchState();
+  sfx.cancelStreak();
+  for (const e of enemyManager.enemies) enemyManager.release(e);
+  for (const c of enemyManager.corpses) enemyManager.release(c);
+  enemyManager.enemies = []; enemyManager.corpses = [];
+  grenadePool.forEach(g => scene.remove(g.mesh)); grenadePool.length = 0;
+  clearGroundItems();
+  for (const cloud of smokes) for (const sprite of cloud.sprites) { sprite.visible = false; smokePool.push(sprite); }
+  smokes.length = 0;
+  chat.clear();
+  hud.classList.add("hidden"); gameover.classList.add("hidden");
+  menu.classList.remove("hidden"); viewport.classList.remove("active");
+  if (lobby) { lobby.setResume(false); lobby.refresh(); }
+  if (document.pointerLockElement === viewport) document.exitPointerLock();
+}
+document.getElementById("gameMenuResume").addEventListener("click", resumeFromGameMenu);
+document.getElementById("gameMenuPause").addEventListener("click", toggleMatchPause);
+document.getElementById("gameMenuReset").addEventListener("click", refreshPlayerPosition);
+document.getElementById("gameMenuEnd").addEventListener("click", quitMatchToLobby);
+
+function requestLock() {
+  lockRequestCancelled = false;
+  try {
+    const request = viewport.requestPointerLock();
+    request?.catch(() => { if (!locked && !backpackOpen()) showUnlockedMenu(); });
+  } catch (error) {
+    if (!locked && !backpackOpen()) showUnlockedMenu();
+  }
+}
+// A denied re-lock leaves the battle dialog available for another click.
+document.addEventListener("pointerlockerror", () => {
+  if (!locked && !backpackOpen()) showUnlockedMenu();
+});
 document.getElementById("startBtn").addEventListener("click", () => { sfx.ensure(); sfx.ui("click"); requestLock(); });
 document.getElementById("restartBtn").addEventListener("click", () => { sfx.ensure(); sfx.ui("click"); requestLock(); });
 
+function showUnlockedMenu() {
+  clearBackpackInput();
+  viewport.classList.remove("active");
+  if (state === "playing") openGameMenu();
+  else hud.classList.add("hidden");
+}
+
 document.addEventListener("pointerlockchange", () => {
   locked = document.pointerLockElement === viewport;
+  if (locked && lockRequestCancelled) { document.exitPointerLock(); return; }
   if (locked) {
+    backpackUnlockPending = false;
+    backpackResumePending = false;
+    matchPaused = false;
+    closeGameMenu();
+    closeBackpack();
     hud.classList.remove("hidden");
     menu.classList.add("hidden");
     gameover.classList.add("hidden");
     viewport.classList.add("active");
     if (state !== "playing") gameStart();
-    // 回到战场：主按钮改回「进入战场」。它在菜单里此刻是隐藏的，纯粹是把状态摆正
-    // （下一次真的显示大厅时不会残留上一次的「返回战场」）。
     if (lobby) lobby.setResume(false);
-  } else {
-    fireEnabled=false;cancelMelee();cancelGrenade();
-    hud.classList.add("hidden");
-    sfx.cancelStreak();
-    setScoped(false);
-    clearFlash();
-    showScoreboard(false);
-    // 失锁是「取消聊天输入」的**权威信号**：指针锁下 Chrome 拿 Escape 去解锁，
-    // 页面通常根本收不到那次 keydown，所以 Escape 那条只是尽力而为（见 chat.js）。
-    // 这里必须收：输入框随 HUD 一起被 display:none，会静默失焦而 typing 还挂着 true。
-    chat.cancel();
-    if (state === "playing") {
-      menu.classList.remove("hidden");
-      // 中途按 Esc 回大厅：`state` 仍是 "playing"，所以上面加锁分支那句
-      // `if (state !== "playing") gameStart()` 为假 —— 点主按钮是**原局续打**，
-      // 不是重开一局。文案必须跟着改，否则玩家会以为按下去要重来（实测这种误会很自然）。
-      // refresh() 是为了让「个人仓库」反映这一局里捡到的枪（`BACKPACKS` 被 pickUpItem 改过）。
-      if (lobby) {
-        lobby.setResume(true);
-        lobby.refresh();
-      }
-    }
-    viewport.classList.remove("active");
+    return;
   }
+  if (backpackUnlockPending || backpackOpen()) {
+    backpackUnlockPending = false;
+    clearBackpackInput();
+    viewport.classList.remove("active");
+    if (state === "playing" && backpackOpen()) {
+      // Intentional cursor mode: keep the battlefield/HUD visible, no lobby.
+      hud.classList.remove("hidden");
+      menu.classList.add("hidden");
+      return;
+    }
+    if (backpackResumePending && state === "playing") {
+      backpackResumePending = false;
+      requestLock();
+      return;
+    }
+  }
+  backpackResumePending = false;
+  showUnlockedMenu();
 });
 document.addEventListener("mousemove", (e) => {
   // 死亡期间不能转头：镜头归死亡视角接管（否则玩家一甩鼠标就压过转向击杀者的插值）。
   // 聊天打字期间同理 —— 指针锁还在，movementX/Y 照来，不挡就是边打字边乱转镜头。
-  if (!locked || state !== "playing" || dead || chat.isTyping()) return;
+  if (!locked || backpackOpen() || gameMenuOpen() || state !== "playing" || dead || chat.isTyping()) return;
   // 开镜灵敏度照抄 CS 的 `zoomSens: [40/90, 10/90]`（CS 的 zoom_sensitivity_ratio = 1），
   // 即按 FOV 等比缩放：一级 0.444、二级 0.111（原值 0.35 / 0.22 是拍脑袋定的）。
   const sens = 0.0022 * (scopeStage === 2 ? 10 / 90 : scoped ? 40 / 90 : 1);
@@ -3266,7 +3469,7 @@ document.addEventListener("mousedown", (e) => {
   // 死亡期间整体不响应：既不能开镜，也不能把 fireEnabled 置 true
   // （按住不放的话，复活那一刻全自动枪会立刻续火）。
   // 聊天打字期间同理 —— 输入框上按左键不该同时开一枪。
-  if (!locked || state !== "playing" || dead || chat.isTyping()) return;
+  if (!locked || backpackOpen() || gameMenuOpen() || state !== "playing" || dead || chat.isTyping()) return;
   if (isSecondaryClick(e)) {
     e.preventDefault();
     // 刀出鞘时右键 = **重击**（经典小刀翻握下刺）。这一句必须问在 `cycleScope()` 之前：
@@ -3291,7 +3494,7 @@ document.addEventListener("contextmenu", (e) => {
 document.addEventListener("keydown", (e) => {
   // 聊天打字时不许切镜：这一处**最容易漏** —— 它没有 dead / 面板守卫，
   // 打一句 "very good" 会顺手把 AWM 的倍镜切一档。
-  if (chat.isTyping()) return;
+  if (chat.isTyping() || backpackOpen() || gameMenuOpen()) return;
   if (e.code !== "KeyV" || state !== "playing" || !locked) return;
   if (!(WEAPON_DEFS[currentId].stats || {}).zoom) return;
   e.preventDefault();
@@ -3300,6 +3503,9 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- 开始 / 结束 ----------
 function gameStart() {
+  matchPaused = false;
+  closeGameMenu();
+  closeBackpack();
   sfx.cancelStreak();
   state = "playing";
   kills = 0;
@@ -3413,6 +3619,10 @@ function endTDM(result) {
   if (result === false) result = "lose";
   if (result === "draw" && kills !== enemyScore) result = kills > enemyScore ? "win" : "lose";
   state = "over";
+  matchPaused = false;
+  closeGameMenu();
+  closeBackpack();
+  backpackResumePending = false;
   // 死亡中时间到 / 比分到顶：必须掐掉死亡计时。否则 3 秒后 respawnPlayer() 照跑，
   // 会在结算画面上把玩家瞬移回出生点并弹一句「已复活」。
   cancelDeath();
@@ -3479,6 +3689,7 @@ function updateAmmoHud() {
     ammoFill.style.width = (WEAPON_STATE.mag / WEAPON_STATE.magSize) * 100 + "%";
     ammoFill.classList.toggle("low", WEAPON_STATE.mag <= 6);
   }
+  if (backpackOpen()) updateBackpackLoadout();
   updateScoreHud();
 }
 function updateScoreHud() {
@@ -3533,7 +3744,7 @@ function supportAt(x, z, feetY) {
 function movePlayer(dt) {
   // 死亡视角：只保留重力与落地，一切输入都不接受 —— 但**不能整块跳过这个函数**，
   // 否则在空中被打死时尸体会挂在半空 3 秒。水平速度在这段时间里按加速度自然衰减停下。
-  const canAct = !dead;
+  const canAct = !dead && !backpackOpen() && !gameMenuOpen();
   // 前 = player.yaw（与渲染、射击同源，保证 W 始终朝准星正前方）
   const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
@@ -3878,6 +4089,7 @@ let reloadHoldP = null;
 
 // ---------- 主循环 ----------
 function update(dt, rawDt) {
+  if (state === "playing" && matchPaused) return;
   time += dt;
   if (mapData && mapData.update) mapData.update(time, dt); // 海浪顶点动画 + 水面滚动
   updateSmokes(dt);
@@ -3967,7 +4179,7 @@ function update(dt, rawDt) {
   // 但 fireEnabled 若在开输入之前就被置位，这里不挡就会一边打字一边突突。
   // `!switchBlocking()` 是第二道：mousedown 那条路已经被 fire() 自己挡住了，但**自动连发
   // 是唯一不经鼠标事件的开火路径**，按住左键切枪时得在这里断掉，否则枪一升起来就续火。
-  if (fireEnabled && WEAPON_DEFS[currentId].fullAuto && !WEAPON_STATE.reloading && !dead && !chat.isTyping() && !switchBlocking()) fire();
+  if (!backpackOpen() && fireEnabled && WEAPON_DEFS[currentId].fullAuto && !WEAPON_STATE.reloading && !dead && !chat.isTyping() && !switchBlocking()) fire();
   if (player.invuln > 0) player.invuln -= dt;
   if (WEAPON_STATE.cooldown > 0) WEAPON_STATE.cooldown -= dt;
   updateMelee(dt);
@@ -4090,7 +4302,7 @@ function loop(now) {
   // 眼高只由蹲伏驱动；落地缓冲走独立的 viewDip，两者互不干扰
   // 眼高只由蹲伏驱动；落地缓冲走独立的 viewDip、上台阶滞后走 stepLift，三者互不干扰
   const targetEye = player.crouching ? CROUCH_EYE : EYE;
-  player.eyeH += (targetEye - player.eyeH) * Math.min(1, 22 * dt);
+  if (!matchPaused) player.eyeH += (targetEye - player.eyeH) * Math.min(1, 22 * dt);
   // 还没开过局时用大厅机位，其余一律用玩家视角（见 applyLobbyCamera 上方那段）。
   if (state === "menu") {
     applyLobbyCamera(time);
@@ -4106,7 +4318,8 @@ function loop(now) {
   // 而且没有任何可见提示（用户实测踩到过：音频的字段名撞车在死亡路径上抛异常）。
   try {
     update(dt, rawDt);
-    animateWeapon(dt);
+    if (!matchPaused) animateWeapon(dt);
+    if (gameMenuOpen()) updateGameMenu();
   } catch (err) {
     noteLoopError(err, "主循环");
   }
@@ -4435,6 +4648,9 @@ async function init() {
       switchBackpack, BACKPACKS,
       backpackState: () => ({
         curBp,
+        previewBp,
+        open: backpackOpen(),
+        cursor: !locked && backpackOpen(),
         canSwap: canSwapBackpack(),
         inSpawn: inSpawnZone(),
         acted: actedThisLife,
@@ -4513,6 +4729,8 @@ async function init() {
       },
       // （`skinCycle` / `selectSkin` 两个读口已随选皮肤 UI 删除；程序化换皮肤走上面的 `setSkin`。）
       backpackOpen,
+      gameMenuState: () => ({ open: gameMenuOpen(), paused: matchPaused, state, locked }),
+      openGameMenu, toggleMatchPause, refreshPlayerPosition, quitMatchToLobby,
       // 挂载诊断：一次给全「模型在武器组局部系里的包围盒 + 有效可见性 + 枪口火光挂在谁身上」。
       // 全是可 JSON 序列化的纯数据（Object3D 过不了 CDP 的 returnByValue）。
       gunDebug: (weaponId) => {

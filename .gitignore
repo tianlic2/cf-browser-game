@@ -36,10 +36,13 @@ counter-strike-in-browser-main/
 # 参考截图（只在 map.js 的注释里被提过一句配色），以及 Coze 模板自带的样式表。
 # 例外：被站点真正引用的资源必须放行 —— `assets/classic/` 是经典模式的原作地图资源，
 # `assets/hud/numerals.woff` 是 HUD 计分/血量/弹药数字用的 `Tactical HUD` 字体
-# （`styles/game.css` 的 `@font-face`）。漏放行的话线上会 404、数字掉回 monospace。
+# （`styles/game.css` 的 `@font-face`），`assets/ui/room-*.svg` 是大厅双阵营房间的
+# 标题底纹与金属框（`index.html` 的 `room-bl/gr` 与 `game.css` 的 `room-metal`）。
+# 漏放行的话线上会 404、数字掉回 monospace、大厅两块阵营标题变空白。
 /assets/*
 !/assets/classic/
 !/assets/hud/
+!/assets/ui/
 /styles/main.css
 # 大厅背景音乐的**原始 wav**：1.25 MB，11025 Hz 立体声。站点上放的是转码后的
 # `audio/ui/lobby_theme.m4a`（233 KB），原文件本地留档、不入库。

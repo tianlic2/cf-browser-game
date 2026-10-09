@@ -1077,149 +1077,86 @@ body {
 }
 .gameover-stats div:last-child b { color: #ffb64d; }
 
-/* ===== 背包面板 ===== */
-.backpack {
+/* ===== CF 式战场背包：编号栏 + 两大四小装备格 ===== */
+#backpack {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
   z-index: 6;
-  min-width: 340px;
-  padding: 26px 30px;
-  background: rgba(12, 18, 26, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  clip-path: polygon(22px 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%, 0 22px);
-  backdrop-filter: blur(4px);
-  pointer-events: auto; /* .hud 是 pointer-events:none，这里必须复位，否则面板不可交互 */
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 24px)); min-width: 0;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  padding: 0;
+  border: 1px solid #616b65;
+  background: linear-gradient(110deg, rgba(54,65,61,.97), rgba(34,43,41,.97));
+  box-shadow: 0 0 0 100vmax rgba(0,0,0,.32), 0 3px 14px #0008, inset 0 0 0 3px #141a1870;
+  color: #d0d6cc;
+  font: 11px/1.35 Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+  text-shadow: 0 1px 1px #000;
+  pointer-events: auto;
 }
-.backpack.hidden { display: none; }
-.bp-title {
-  font-size: 17px;
-  letter-spacing: 5px;
-  color: #e5e7eb;
-  text-align: center;
-  margin-bottom: 18px;
+#backpack.hidden { display: none; }
+#backpack .bp-heading {
+  display: flex; align-items: center; gap: 6px;
+  position: relative; height: 25px; padding: 0 9px;
+  border-bottom: 1px solid #526059;
+  background: linear-gradient(#1b211e, #101513);
+  font-size: 10px; font-weight: 700;
 }
-.bp-title small {
-  display: block;
-  font-size: 11px;
-  color: #9ca3af;
-  letter-spacing: 2px;
-  margin-top: 6px;
+#backpack .bp-heading-icon { color: #86c1da; font-size: 13px; }
+#backpack .bp-title { position: absolute; left: 50%; transform: translateX(-50%); }
+#backpack .bp-list {
+  display: flex; flex-direction: row; gap: 4px; padding: 7px 9px 6px;
+  border-bottom: 1px solid #101a17;
+  background: linear-gradient(90deg, #23312e88, #61716a22);
 }
-.bp-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+#backpack .bp-item {
+  position: relative; display: grid; place-items: center; flex: 0 0 31px;
+  height: 25px; padding: 0; border: 1px solid #53605b;
+  border-bottom-color: #17201b;
+  background: linear-gradient(#465650, #2a3732);
+  color: #c2cbc5; font: bold 12px/1 Arial, sans-serif;
+  text-shadow: 0 1px 2px #000; cursor: pointer;
+  box-shadow: inset 0 1px #76847b44;
 }
-.bp-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 13px 16px;
-  background: rgba(20, 30, 42, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #d1d5db;
-  font-family: "Consolas", "Courier New", monospace;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+#backpack .bp-item:hover { border-color: #91aaa9; }
+#backpack .bp-item.active {
+  color: #e6f5ff; border-color: #719ab1;
+  background: linear-gradient(#427b96, #244d64);
+  box-shadow: inset 0 1px #a0d2e366, 0 0 3px #0008;
 }
-.bp-item:hover {
-  background: rgba(35, 52, 70, 0.85);
-  border-color: rgba(74, 222, 128, 0.5);
+#backpack .bp-item.equipped::after { content: ""; position: absolute; bottom: 1px; left: 9px; right: 9px; height: 2px; background: #c8af68; }
+#backpack .bp-item:focus-visible { outline: 2px solid #d3e9ed; outline-offset: 2px; }
+#backpack .bp-loadout { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; padding: 6px; }
+#backpack .bp-weapon-card {
+  position: relative; grid-column: span 3; min-width: 0; height: 82px;
+  overflow: hidden; border: 1px solid #66716a;
+  background: linear-gradient(145deg, #18201ddb, #25312be8);
+  box-shadow: inset 0 0 8px #0005;
 }
-.bp-item.active { border-color: rgba(74, 222, 128, 0.8); }
-.bp-item.active .bp-name { color: #4ade80; }
-.bp-name {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 1px;
+#backpack .bp-slot-primary { grid-column: span 7; height: 114px; }
+#backpack .bp-slot-secondary { grid-column: span 5; height: 114px; }
+#backpack .bp-slot-label { padding: 3px 5px 0; color: #9ea99e; font-size: 9px; }
+#backpack .bp-weapon-name {
+  position: relative; z-index: 1; padding: 1px 5px 0;
+  color: #c8af68; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* 背包行里的皮肤名（小号、灰）：两个背包都用 AK 时靠它区分 */
-.bp-skin {
-  font-size: 12px;
-  letter-spacing: 1px;
-  color: #9ca3af;
-}
-.bp-item.active .bp-skin { color: #86efac; }
-/* 背包行：编号 + 主武器名。指针锁定时没有光标，这里的点击实际点不到，
-   主路径是 B + 数字键；pointer-events: auto 是为了语义正确（.hud 是 none）。 */
-.bp-row {
-  justify-content: flex-start;
-  gap: 14px;
-}
-.bp-idx {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex: none;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #cbd5e1;
-  font-size: 13px;
-  font-weight: 700;
-}
-.bp-row.active .bp-idx {
-  background: rgba(74, 222, 128, 0.22);
-  border-color: rgba(74, 222, 128, 0.8);
-  color: #4ade80;
-}
-/* 面板里的分区样式（.bp-sec / .bp-sec-title / .bp-list.bp-skins / .bp-skin-row /
-   .bp-model）已随「选皮肤」功能一起删除 —— 面板现在只有背包一段。
-   `.bp-title` 里那句小字已经写明「选完自动收起」。 */
-.bp-hint {
-  margin-top: 16px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 11px;
-  line-height: 1.7;
-  letter-spacing: 1px;
-  color: #9ca3af;
-  text-align: center;
-}
-/* 按键提示做成键帽、**不退回纯文本**。这条是「按 `/` 换皮肤」那次误读留下的：`[` `]`
-   只有 6.6px 宽、笔画极细，混在 11px 灰字里与相邻的真斜杠糊成一体，整句会被读成
-   「按 `/` 换皮肤」（用户实测报的正是这条）。那两个键的提示已经删了，键帽留给 `1` `2` `3`。
-   样式抄 `.bp-idx` 那套方角键帽，尺寸收小一号。注意 `.bp-hint` 上的 letter-spacing
-   必须在这里归零，否则键帽里的单个字符会被推开、看起来不像一个键。 */
-.bp-hint-keys {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 5px 12px;
-}
-.bp-hint-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: #cbd5e1;
-}
-.bp-hint kbd {
-  display: inline-block;
-  min-width: 17px;
-  padding: 1px 5px;
-  background: rgba(255, 255, 255, 0.09);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-bottom-color: rgba(0, 0, 0, 0.55);
-  color: #e5e7eb;
-  font-family: inherit;
-  font-size: 11px;
-  line-height: 1.45;
-  letter-spacing: 0;
-  text-align: center;
-}
-/* （`.bp-hint-sep` 那个「·」分隔符已删：面板里只剩「换背包」一条提示，没有要分隔的第二段。） */
-/* 「换背包被拦」那条染警示黄（面板里现在只有这一条提示，染黄的就是它）。 */
-.bp-hint-item.warn { color: #fbbf24; }
-/* 槽位图例与这个面板的操作无关，另起一行压暗 —— 混在同一行会把上面的按键提示淹掉 */
-.bp-hint-legend {
-  margin-top: 8px;
-  font-size: 10px;
-  letter-spacing: 0.5px;
-  color: #6b7280;
+#backpack .bp-weapon-picture { position: absolute; inset: 29px 4px 11px; display: grid; place-items: center; }
+#backpack .bp-weapon-picture img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 3px 2px #0009); }
+#backpack .bp-weapon-fallback { width: 80%; height: 80%; color: #b1b9a7; }
+#backpack .bp-weapon-detail { position: absolute; right: 5px; bottom: 2px; color: #bfc6b5; font: 9px/1.2 Consolas, monospace; }
+#backpack .is-empty { background: linear-gradient(135deg, transparent 49.6%, #79877d26 50%, transparent 50.4%), #2c383240; box-shadow: none; }
+#backpack .is-empty .bp-weapon-name { color: #8a978c; font-size: 9px; }
+#backpack .bp-hint { margin: 0 7px; padding: 4px 0; border-top: 1px solid #74827433; color: #aab8ac; font-size: 10px; }
+#backpack .bp-hint-keys, #backpack .bp-hint-item { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+#backpack .bp-hint-item.warn { color: #d5b86f; }
+#backpack kbd { min-width: 14px; padding: 0 2px; box-sizing: border-box; border: 1px solid #74837588; background: #18211b77; color: #d5e1d4; font: 10px/14px Arial, sans-serif; text-align: center; }
+#backpack .bp-footer { display: flex; justify-content: space-between; align-items: center; padding: 3px 8px 5px; color: #a8b5a9; font-size: 10px; }
+@media (max-width: 480px) {
+  #backpack { width: calc(100vw - 20px); }
+  #backpack .bp-slot-primary, #backpack .bp-slot-secondary { height: 101px; }
+  #backpack .bp-weapon-card:not(.bp-slot-primary):not(.bp-slot-secondary) { height: 76px; }
+  #backpack .bp-loadout { gap: 3px; padding: 5px; }
+  #backpack .bp-weapon-name { font-size: 9px; }
 }
 
 /* HUD 右下角的当前背包标识 */
@@ -1998,3 +1935,156 @@ body {
   .hud-gun-icon { height: 23px; }
   .hud .bp-badge { width: 13px; height: 14px; font-size: 8px; }
 }
+
+/* Classic room screen, based on the user's lobby reference. */
+#menu.lobby {
+  padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  background: radial-gradient(ellipse at center, rgba(24,31,29,.64), rgba(8,13,15,.96));
+  color: #dbddce; font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+  overflow-y: auto;
+}
+#menu.lobby.hidden { display: none; }
+#menu .lobby-shell {
+  flex: 0 0 auto; width: min(1060px, 100%); margin: auto;
+  border: 3px solid #171c1b; border-top-color: #6d736b;
+  background: #303530 url('../assets/ui/room-metal.svg');
+  box-shadow: 0 0 0 1px #777c6e, 0 18px 60px #000b, inset 0 0 0 1px #959885;
+}
+#menu .lobby-top { min-height: 36px; padding: 5px 13px; gap: 12px; border-bottom: 2px solid #0b1012; background: linear-gradient(#5d6359a8,#191f1ddb); box-shadow: inset 0 1px #a1a18b; }
+#menu .lobby-id { display: flex; align-items: baseline; gap: 14px; }
+#menu .lobby-title { font: italic 900 20px/1.3 Arial,"Microsoft YaHei",sans-serif; letter-spacing: 1px; color: #e1e0cb; background: none; -webkit-text-fill-color: currentColor; filter: none; text-shadow: 1px 2px #101715; margin: 0; }
+#menu .lobby-brand { color: #b6bba9; font-size: 11px; letter-spacing: 2px; }
+#menu .lobby-chips { display: flex; gap: 13px; }
+#menu .lobby-chip { border: 0; padding: 0; background: none; color: #c4c9b4; font: 11px/1.3 Arial,"Microsoft YaHei",sans-serif; letter-spacing: 0; }
+#menu .lobby-body { display: flex; flex-direction: column; min-height: 0; flex: none; }
+#menu .lobby-content { padding: 0; overflow: visible; background: none; }
+#menu .lobby-pane { max-width: none; margin: 0; }
+#menu .lobby-pane.hidden { display: none; }
+#menu .room-teams-heading { position: relative; display: grid; grid-template-columns: 1fr 1fr; height: 105px; border-bottom: 3px solid #090f10; box-shadow: inset 0 1px #c0c1a477; }
+#menu .room-team-title { position: relative; display: flex; align-items: center; justify-content: center; gap: 16px; overflow: hidden; }
+#menu .room-team-title.room-bl { background: linear-gradient(100deg,#413020cc,#8a755050,#302a2255); }
+#menu .room-team-title.room-gr { background: linear-gradient(100deg,#263a4655,#51798a60,#182f41ce); }
+#menu .room-team-title h2 { margin: -10px 0 0; font: 900 48px/1 "Microsoft YaHei","PingFang SC",sans-serif; letter-spacing: 2px; color: #ded6ad; -webkit-text-stroke: 1px #29312d; text-shadow: 0 2px #fff5, 2px 4px #101715, 4px 5px 2px #101715; }
+#menu .room-gr h2 { color: #8dccde; }
+#menu .room-team-title small { position: absolute; bottom: 13px; left: 0; right: 0; text-align: center; margin-left: 88px; font: 700 10px/1 Arial,sans-serif; letter-spacing: 5px; color: #b3b4a2; text-shadow: 0 1px #111; }
+#menu .room-gr small { margin-left: 0; margin-right: 88px; color: #a5bec5; }
+#menu .room-team-title img { width: 77px; height: 77px; filter: drop-shadow(2px 4px 2px #0009); }
+#menu .room-versus { position: absolute; left: 50%; top: 24px; transform: translateX(-50%) rotate(-8deg); z-index: 1; font: italic 900 46px/1 Impact,Arial,sans-serif; color: #f4be37; -webkit-text-stroke: 1px #4e2717; text-shadow: 2px 3px #151a16, 3px 5px #e64e24; }
+#menu .room-roster { display: grid; grid-template-columns: 1fr 1fr; margin: 0 7px; border: 1px solid #777d6c; border-top: 0; box-shadow: inset 0 0 30px #000; }
+#menu .room-team { position: relative; min-width: 0; background: repeating-linear-gradient(135deg, #151a16c9 0 4px, #252b24c9 4px 6px); }
+#menu .room-team + .room-team { border-left: 1px solid #858878; }
+#menu .room-team::before { content: ""; position: absolute; inset: 10%; background: url('../assets/ui/room-bl.svg') center/contain no-repeat; opacity: .065; filter: grayscale(1); pointer-events: none; }
+#menu .room-team.room-gr::before { background-image: url('../assets/ui/room-gr.svg'); }
+#menu .room-team-list { position: relative; }
+#menu .room-member { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-top: 1px solid #9ba18a27; border-bottom: 1px solid #060c0b77; box-sizing: border-box; font-size: 12px; text-shadow: 1px 1px #000; }
+#menu .room-member.occupied { background: linear-gradient(90deg,#74674837,transparent); }
+#menu .room-member.is-host { background: linear-gradient(90deg,#8a792aaa,#b2a26966,#2e4b4433); box-shadow: inset 0 0 0 1px #e2d19577; }
+#menu .room-rank { flex: 0 0 22px; height: 21px; display: grid; place-items: center; background: linear-gradient(#777e87,#2d3644); border: 1px solid #a7ab98; box-shadow: 1px 1px #070b0e; color: #f6ecd2; font: 900 21px/1 Georgia,serif; }
+#menu .is-host .room-rank { color: #f4d465; background: linear-gradient(#534725,#2a2b26); font-size: 15px; }
+#menu .room-member-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #e2d4b1; }
+#menu .is-host .room-member-name { color: #f4e9a1; font-weight: bold; }
+#menu .room-member-role { font-size: 10px; color: #a5ada1; }
+#menu .room-member-status { font-size: 11px; color: #b3c47c; }
+#menu .room-match-info { display: flex; flex-wrap: wrap; gap: 17px; margin: 0 7px; padding: 7px 11px; background: #0c1515bb; border: 1px solid #777d6c; border-top: 0; font-size: 11px; color: #9fa99e; }
+#menu .room-match-info b { color: #c9cfb4; font-weight: normal; }
+#menu .room-local { margin-left: auto; color: #81999b; }
+#menu .room-actions { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; box-shadow: inset 0 1px #b0b09955; }
+#menu .menu-setup { display: flex; flex-wrap: wrap; gap: 10px 20px; width: auto; max-width: none; margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+#menu .ml-row { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; }
+#menu .ml-label { font-size: 11px; letter-spacing: 0; color: #e0debf; }
+#menu .ml-stepper { gap: 0; }
+#menu .ml-step-btn { width: 25px; height: 27px; background: linear-gradient(#5f6951,#263021); border: 1px solid #808970; color: #dee6ba; border-radius: 2px; }
+#menu .ml-step-val { min-width: 29px; font: 15px/1 "Tactical HUD",monospace; color: #eff0d5; }
+#menu .ml-seg { gap: 3px; }
+#menu .ml-seg-btn { padding: 5px 8px; font-size: 11px; color: #b3b8aa; background: linear-gradient(#343e36,#202820); border: 1px solid #68705e; border-radius: 2px; }
+#menu .ml-seg-btn.active { background: linear-gradient(#799451,#354b27); color: #ecf2b1; border-color: #a1af72; }
+#menu .menu-btn { flex: 0 0 auto; width: 165px; margin: 0; padding: 11px 16px; background: linear-gradient(#4b8497 0%,#244957 48%,#153341 50%,#2d6071 100%); border: 2px solid #182422; border-top-color: #a3b6a6; border-left-color: #748d88; border-radius: 4px; color: #d5e8d8; font: 800 22px/1.2 "Microsoft YaHei",sans-serif; letter-spacing: 1px; clip-path: none; text-shadow: 2px 2px #101e26; box-shadow: 0 0 0 1px #777d6c, inset 0 0 0 1px #547587, 2px 3px 2px #101915; }
+#menu .menu-btn:hover { filter: brightness(1.2); transform: none; }
+#menu button:focus-visible, #menu input:focus-visible { outline: 2px solid #d8d09d; outline-offset: 2px; }
+#menu .lobby-rail { flex: none; display: flex; flex-direction: row; gap: 6px; padding: 7px 12px; width: auto; background: #151e1b77; border: 0; border-top: 1px solid #92987c66; }
+#menu .lobby-tab { flex: 0 1 auto; min-width: 0; margin: 0; padding: 7px 16px; border: 1px solid #7c8470; border-radius: 3px; clip-path: none; background: linear-gradient(#596353,#252e25 49%,#17241e 51%,#354a3e); color: #b0b9a6; font-size: 12px; letter-spacing: 0; text-shadow: 1px 2px #111; box-shadow: inset 0 0 0 1px #17231e, 1px 2px #101712; }
+#menu .lobby-tab::before { display: none; }
+#menu .lobby-tab.active { color: #d7e8d4; border-color: #8caca4; background: linear-gradient(#4c727c,#203f48 49%,#182e36 51%,#345b62); }
+#menu .lobby-tab:hover { color: #fff7ce; border-color: #c0c4a2; }
+#menu .room-chat { margin: 0 7px 7px; border: 2px solid #141c1b; border-top-color: #798171; background: #0a151c; box-shadow: 0 0 0 1px #596451; }
+#menu .room-chat-log { height: 91px; overflow-y: auto; padding: 8px 10px; box-sizing: border-box; background: linear-gradient(#263f4bdd,#112431ee); box-shadow: inset 0 1px 10px #040c1399; scrollbar-color: #6e766d #17242c; scrollbar-width: thin; }
+#menu .room-chat-log p { margin: 0 0 4px; font-size: 11px; line-height: 1.4; text-shadow: 1px 1px #12211b; }
+#menu .room-message-system { color: #d2d9a2; }
+#menu .room-message-hint { color: #8eaeae; }
+#menu .room-message-player { color: #e2dfca; }
+#menu .room-message-player b { color: #bace9b; }
+#menu .room-chat-compose { display: flex; align-items: center; gap: 8px; padding: 4px 7px; border-top: 2px solid #737b68; background: #101b1c; }
+#menu .room-chat-compose label { font-size: 11px; color: #cbd0b0; }
+#menu .room-chat-caret { font-size: 11px; color: #6aadb0; }
+#menu .room-chat-compose input { flex: 1; min-width: 0; border: 0; background: transparent; color: #dee1c7; padding: 4px; font: 12px/1.3 Arial,"Microsoft YaHei",sans-serif; caret-color: #9ad4cb; }
+#menu .room-chat-compose input::placeholder { color: #71898c; }
+#menu .room-chat-compose button { color: #c7d8c5; background: linear-gradient(#435b5e,#223637); border: 1px solid #7c9187; border-radius: 2px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
+#menu .lobby-pane:not([data-pane="play"]) { padding: 22px; min-height: 441px; box-sizing: border-box; background: #111b17cf; }
+#menu .lp-h2 { color: #e0dfbb; }
+#menu .lp-desc, #menu .lv-hint { color: #a3b4aa; }
+#menu .lv-tr.lv-th { background: #43554488; color: #c5d1b9; }
+#menu .lv-tr.lv-th > .lv-name, #menu .lv-card-slot em { color: #d3dcad; }
+#menu .lv-card.lv-cur { border-color: #8faaa0; }
+#menu .lv-key-row kbd { background: #263e37; border-color: #6f887d; color: #dbe5c8; }
+@media (max-width: 820px) {
+  #menu.lobby { padding: 12px; }
+  #menu .room-team-title h2 { font-size: 36px; }
+  #menu .room-team-title img { width: 62px; height: 62px; }
+  #menu .room-team-title { gap: 10px; }
+  #menu .room-versus { font-size: 37px; top: 30px; }
+  #menu .room-team-title small { margin-left: 66px; letter-spacing: 3px; }
+  #menu .room-gr small { margin-left: 0; margin-right: 66px; }
+  #menu .menu-setup { gap: 8px 14px; }
+  #menu .menu-btn { width: 138px; font-size: 19px; padding: 12px; }
+  #menu .lobby-chips { display: flex; }
+}
+@media (max-width: 540px) {
+  #menu.lobby { padding: 7px; }
+  #menu .lobby-top { padding: 6px 8px; min-height: 28px; gap: 5px; }
+  #menu .lobby-title { font-size: 15px; }
+  #menu .lobby-brand { display: none; }
+  #menu .lobby-chips { gap: 7px; }
+  #menu .lobby-chip { font-size: 9px; }
+  #menu .room-teams-heading { height: 73px; }
+  #menu .room-team-title { gap: 5px; }
+  #menu .room-team-title h2 { font-size: clamp(23px,6vw,32px); letter-spacing: 0; margin-top: -7px; }
+  #menu .room-team-title img { width: 42px; height: 42px; }
+  #menu .room-team-title small { bottom: 8px; font-size: 7px; letter-spacing: 2px; margin-left: 43px; }
+  #menu .room-gr small { margin-left: 0; margin-right: 43px; }
+  #menu .room-versus { top: 23px; font-size: 28px; }
+  #menu .room-member { height: 27px; padding: 0 5px; gap: 5px; font-size: 10px; }
+  #menu .room-rank { flex-basis: 17px; height: 17px; font-size: 17px; }
+  #menu .room-member-role { display: none; }
+  #menu .room-member-status { font-size: 9px; }
+  #menu .room-match-info { gap: 9px; font-size: 10px; padding: 6px; }
+  #menu .room-local { display: none; }
+  #menu .room-actions { padding: 9px; gap: 8px; }
+  #menu .menu-setup { flex-direction: column; gap: 6px; }
+  #menu .ml-row { gap: 6px; }
+  #menu .ml-label { font-size: 10px; }
+  #menu .ml-step-btn { width: 23px; height: 23px; }
+  #menu .ml-seg-btn { padding: 4px 6px; font-size: 10px; }
+  #menu .menu-btn { width: 118px; font-size: 17px; padding: 13px 5px; }
+  #menu .lobby-rail { gap: 5px; padding: 7px; overflow-x: auto; }
+  #menu .lobby-tab { padding: 7px 9px; white-space: nowrap; font-size: 11px; }
+  #menu .room-chat-log { height: 100px; padding: 7px; }
+  #menu .room-chat-log p { font-size: 10px; }
+  #menu .lobby-pane:not([data-pane="play"]) { padding: 14px; min-height: 400px; }
+}
+
+/* Esc 对局菜单：独立作用域，不使用大厅/胜负结算的共享 .menu 类。 */
+.game-menu { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: #0007; pointer-events: auto; font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif; }
+.game-menu.hidden { display: none; }
+.game-menu-panel { width: min(340px, 100%); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 20px; border: 1px solid #778176; background: linear-gradient(130deg, #343b34f5, #181e1bf5); box-shadow: 0 8px 36px #0009, inset 0 0 0 3px #121a1766; color: #d7ddcf; }
+.game-menu-panel header { padding-bottom: 13px; border-bottom: 1px solid #73816c55; }
+.game-menu-panel header span { color: #8e9d90; font-size: 9px; letter-spacing: 2px; }
+.game-menu-panel h2 { margin-top: 4px; color: #d8c393; font-size: 21px; font-weight: 600; letter-spacing: 3px; }
+#gameMenuStatus { min-height: 18px; margin: 12px 0; color: #b2bbad; font-size: 12px; }
+.game-menu-actions { display: grid; gap: 8px; }
+.game-menu-actions button { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 42px; padding: 9px 12px; border: 1px solid #657462; color: #e1e5d7; background: linear-gradient(#465244, #2a362b); font: 13px/1.4 Arial, "Microsoft YaHei", "PingFang SC", sans-serif; cursor: pointer; text-align: left; }
+.game-menu-actions button span { color: #a3afa0; font-size: 10px; }
+.game-menu-actions button:hover { border-color: #b6b99b; background: #495845; }
+.game-menu-actions button:focus-visible { outline: 2px solid #c6d9d8; outline-offset: 2px; }
+.game-menu-actions button:disabled { opacity: .45; cursor: default; }
+.game-menu-actions .game-menu-end { border-color: #76624d; background: linear-gradient(#4b4134, #332c24); }
+.game-menu-tip { margin-top: 14px; color: #849181; font-size: 10px; line-height: 1.5; }

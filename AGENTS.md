@@ -1,5 +1,167 @@
 # AGENTS.md
 
+## 2026-10-10 移动准星开口减半 + 投掷物行走摆幅再减半
+- **需求原文**：「目前的准心周围的四条线的范围，在人物移动时过于大了，缩小大约一半。另外，在手持投掷武器移动时，人物手臂摆动幅度过大，在现在的基础上幅度减少一半」。两件事**都在 `scripts/main.js`**，共两处常数；`styles/game.css` 与其它文件一个字未动。
+- **① 准星：只乘「移动」那一项，`MOVE_SPREAD_SCALE = 0.5`。** 落点是 `baseInaccuracy(def)` 里那一行 `base += ic.move * MOVE_SPREAD_SCALE * Math.pow(m, 0.25)`（常量定义在 `inaccToPx` 旁边）。CS 的 `move` 项在满速下给出 `atan(0.17506)·57.3·9.5 ≈ 94px` 的半开口，叠加基线后准星能开到 ≈105px。
+  - **为什么只动 `move` 这一项**：用户的原话限定在「在人物移动时」。`stand`/`crouch`（站定）、`jumpInitial`/`jump`（腾空）、`stacc`/`inaccPenalty`（连发惩罚）各自是独立的语汇，一起乘会顺手改掉「站定准星多大」「跳起来多散」「扫射时准星张多少」——那三件事没有人报过问题。
+  - **这是一次纯显示改动**：这颗散布锥**只驱动准星张开、绝不喂子弹**（见上面那条硬约定的 ④）。`baseInaccuracy()` 全仓库只有一个消费者 `crosshairGap()`，改动不可能碰到弹道。
+  - ⚠️ **别去改 `styles/game.css` 的 `--gap`/`--len`**：那两条是**基线形状**（站定不动时的固有开口），与移动引起的张开无关。要调「移动时张多开」只有 `MOVE_SPREAD_SCALE` 这一个旋钮。
+- **② 投掷物摆幅：`animateWeapon()` 里那个共用 bob 系数 0.3 → 0.15。** 落点是 `const m = moving ? amp * (def.type === "grenade" ? 0.15 : 1) : 0;`。这是**唯一一处**，因为它就是 `bobX/bobY` 的源头：武器组位置与旋转、`viewArms.root`、`classicView`（经典 AK 视模）、`classicNades[vid]`（经典投掷物视模）**五处都读同一对 `bobX/bobY`**，所以经典视模与回退手臂自动一致，不需要各自改一遍。
+  - **原地改系数、不去新建一条「投掷物专用 bob」**：那等于把同一条摆幅曲线抄成两份，下一次调别的武器时必然漂移。
+  - **`amp` 与 `rate` 一字未动**：用户报的是「幅度过大」，不是「摆太快」。静步/蹲走的 0.55 档、满速的 1.3 档、以及 crouch/sneak 的 rate 6 都照旧 —— 新系数是乘在 `amp` **之后**的，所以三档一起按同一比例缩，不会把某档削没。
+- **验证（无头 Chrome + CDP，`--use-angle=metal`，同脚本 A/B 对跑）**：A = 当前构建、B = `/tmp/cfbase`（把这两个常数逐字退回 1.0 / 0.30 的整目录副本）。仪器 `/tmp/cfsettune.mjs`（复用 `/tmp/cfharness.mjs` 的 `launch()`）：钉 `pointerLockElement` → 派发 `pointerlockchange` 走产品自己的 handler（无头下拿不到真锁）→ `freezeEnemies(true)` → 把玩家摆到中轴 `(0,0,28)`、`yaw=0`（正前方 20m 无阻挡）→ 派发 `keydown KeyW`（**目标是 `document`**）→ 页面内**按 rAF 逐帧**采 3.2s。
+  ```
+                    站定 gap   满速 gap   移动引起        HS 实测
+  A 当前(0.5)         10.35      57.85     +47.50        0 → 7.20
+  B 基线(1.0)         10.35     104.58     +94.23        0 → 7.20
+                                          ⇒ 比值 0.504
+  ```
+  ```
+                     手腕右(x,y)   手腕左(x,y)   武器组原点(x,y)
+  A 当前(0.15)        5.8 / 5.4    3.1 / 3.5      4.6 / 4.5
+  B 基线(0.30)       11.6 /10.8    6.3 / 7.1      9.0 / 9.0
+  A/B 比值           0.50/0.50    0.49/0.49      0.51/0.50
+  ```
+  ⇒ **18 通过 / 0 失败**（两构建各零未捕获异常）。判据里有一条**负控制**是硬需求：AK 的摆幅（41.8/38.4 px 峰峰值）在**两个构建上逐字相同**（比值 1.000）—— 少了它，一个「把 bob 全局砍半」的实现同样能过上面那 6 条摆幅断言。
+  - **采样窗口只取「已经跑起来」的那一段**（丢掉前 40 帧 + 要求连续 12 帧 `hs > 6.9`）：起步加速期 `amp` 还停在 1 档（`hSpeed > 5.6` 才换 1.3），混进去会把峰峰值量小。实测两构建的窗口内 `hs` 都是 7.20 恒定。
+  - **量的是「屏幕峰峰值」，不是「模型位移」**：`project()` 收的是**武器组局部**坐标，所以手腕（`armsPose().r/l`）与组原点 `[0,0,0]` 的投影**同时含平移和旋转**两项偏移，而两者都与 `m` 成正比 ⇒ 比值恒等于 0.5（实测 0.49~0.51 的散布来自 `Math.min/max` 取了不同帧的极值）。
+  - **AK 的 41.8px 与投掷物的 5.8px 不是矛盾**：`amp` 两者都是 1.3，差别全在系数（1.0 vs 0.15）与握持距离。**投掷物那个数小不代表用户看错了** —— 手持投掷物时手与模型是画面里**唯一**的内容（经典视模把回退手臂整个藏掉、投掷物占掉大半个右下角），同样的像素摆幅在「有枪身作参照」时看着不显眼、在「只有一只手」时非常显眼。
+- **未做的是「够不够稳」**：这两个数该不该是 0.5 / 0.15 要人眼在实战里判断，我签不了字。自动化只能证明「移动项的范围精确减半、投掷物摆幅精确减半、其余一概没动」——**证明不了这双手看着像不像人**（同 AGENTS.md 反复记的那条）。想再调就改那两个常数：`MOVE_SPREAD_SCALE` 与 `def.type === "grenade" ? 0.15`。
+
+## 2026-10-10 投掷物出手台词「Fire in the hole!」（用户提供的素材）
+- **需求原文**：「我加入了一个 fireinthehole 音效，在丢出手雷的那个时刻（注意是丢出时），播放这个音效」。括号里的强调是**在跟既有的拉环声消歧** —— 本仓库早就有 `sfx.grenadePin()`（拉环，CF 原声 `cf_grenade_pin`），所以「丢出时」= **实体真正建出来那一帧**，不是拉环那一下。
+- **落点三处，各一行**：素材 `fireinthehole.wav`（原在仓库根）→ **`audio/vo/fireinthehole.wav`**；`scripts/audio.js` 的 `SAMPLES` 加 `fireinthehole: ["vo/fireinthehole.wav"]` + 新方法 **`fireInTheHole()`**；`scripts/main.js` 的 `throwGrenade()` 里紧挨 `sfx.throwGrenade()` 加一行 **`if (def.nade === "frag") sfx.fireInTheHole();`**。
+- **为什么那一行就是「丢出时」，而且不需要新钩子**：`throwGrenade()`（`main.js:2611`）**只被 `updateGrenadeAction()` 一处调到**，判据是 `if(!a.thrown && a.t>=a.releaseAt)` —— 也就是「松手后的那一刻」，与 `grenadePool.push({...})` 同帧。而拉环那一声在更早的 `a.t>=.3`（`grenadePin()`）。所以「丢出时」这个时机**仓库里本来就有唯一的名字**，本次没有动 `grenadeAction` 状态机一个字。
+- **素材处理：原样入库、不转码**（与 `impacts/headshot_kill.mp3` 同一套）。2 ch / 44100 Hz / Int16 PCM / 85248 帧 / 约 1.933 s / 341036 字节。在 `SAMPLES` 里写成**自带扩展名的 stem** ⇒ 走 `_loadOne` 那条 `/\.(wav|mp3)$/i` 的「自带扩展名就原样用」分支，只有一个候选 URL、不产生 404、**也不进 `M4A_ONLY`**。**不动用户的原始资产**（同「不要把修正烘进 `models/usp.glb`」那条）；而且真转码的话 afconvert 只能出 m4a，白多一份「没有 ogg 的 m4a」还要进 `M4A_ONLY`。
+- **⚠️ 新开了 `audio/vo/` 这一层目录，刻意不放进 `announcer/`。** 两者都是人声，但**角色与路由都不同**，塞一起会让目录名撒谎：`announcer/`（第四节的 `cf_gr_*`）是**比赛播报**，播时传 `hudBus: true`，绕开距离衰减 / 闪光低通 / 货舱混响；这一条是**玩家自己的台词**。这正是本仓库反复记的那类坑（`muffle` 字段盖掉 `muffle()` 方法、`enemyBounds()` 被当成 `bounds()` 灌进敌人）—— **名字要能预测行为**。
+- **路由：不带 x/y/z ⇒ 不走 panner，走 `master` + 混响（`wet 0.2`），与 `hurt()` 同一条。也刻意不给 `hudBus`。** 理由是它是**发生在世界里的喊话**：被闪光弹闪了就该跟着一起闷（`hudBus` 会绕开那个低通）。**别照着 `announcer/` 目录里那批照抄 `hudBus: true`。**
+- **只有手雷喊，闪光/烟雾故意留空**（用户 2026-10-10 追加：「只留手雷，闪光弹和烟雾弹的音效不是这个，先空着，我之后再加」）。`throwGrenade()` 是 `frag`/`flash`/`smoke` 共用的一条路，所以判据写在**调用点那一行**：`if (def.nade === "frag")`。
+  - **判据取 `def.nade` 而不是 `currentId`**：它就是 `grenadePool.push({ kind: def.nade })` 灌进去的那个字段，也正是 `updateGrenades()` 里 `g.kind === "frag"` 用来**分流爆炸**的同一个依据 —— 于是「喊」与「炸」不可能分叉，不会出现「喊了手雷的台词、炸出来的却是闪光」。两者当前取值相同（三个 `WEAPON_DEFS` 的 `id` 与 `nade` 一一相等），但**取下游真正分流的那个字段**才是自洽的写法。
+  - **闪光/烟雾的出手目前只有紧接着上面那声甩手 whoosh**（`sfx.throwGrenade()`），这是有意的、不是漏了。要补就照着那行再写一句 `if (def.nade === "flash") sfx.xxx();` —— **`audio.js` 侧一个字都不用动**（`fireInTheHole()` 自己不判武器，「什么时候喊」归调用点），更不许动投掷状态机。
+- **没有合成兜底**（直接 `_sample()` + `_note(..., "missing")`，不走 `_playMapped` 的第三参）—— 人声合不出来，退回振荡器只会得一段「不像人」的怪声，这就是 `streak()` 当年定下的那条线（**绝不退回 TTS 一类的声线，声线随设备变**）。素材缺失/未加载完时它静默缺省，`reason: "missing"`；而**同帧的甩手 whoosh 是另一个方法（`sfx.throwGrenade()`），照常响** ⇒ 退化的只是台词，不是整次投掷。`/tmp/cfsfx.mjs` 里那条「不能静音」的断言因此不受影响。
+- 连带：`audio/CREDITS.txt` 头部「唯一的例外是 headshot_kill.mp3」改成「**例外是两件用户提供的原始素材**」并新增**第七节**（来源与许可**未考证**、**不能当 CC0**、原始规格、以及「为什么不放 `announcer/`」）；`AGENTS.md` 的 `audio/` 计数同步（**71 → 72 stem / 119 → 120 文件**，wav-only 那档 **8 → 9**）。
+- **验证**：静态 `node --input-type=module --check < <file>` 两个文件通过；**行为用例 `/tmp/cffith.mjs` 33 通过 / 0 失败**（无头 Chrome + CDP，`--use-angle=metal`，先 `#startBtn.click()` 建音频图、轮询 `preloadDone`）。跑真实投掷路径的实测（三种投掷物各跑一遍，事件序列都是**跃变沿**）：
+  ```
+  手雷  序列: ["grenadePin", "fireInTheHole", "holster"]
+  拉环  帧 i=17  t=0.30  thrown=false  grenadePin     cf_grenade_pin   sample  counts=[1,1,1] pool=0
+  出手  帧 i=50  t=0.85  thrown=true   fireInTheHole  fireinthehole    sample  counts=[0,1,1] pool=1
+  闪光  序列: ["grenadePin", "throwGrenade",  "holster"]
+  烟雾  序列: ["grenadePin", "throwGrenade",  "holster"]
+  ```
+  ⇒ **手雷**：thrown / 计数减一 / `grenadePool` 变长 三者在**同一帧**（i=50），且那一帧的 `lastAttempt` 就是 `fireInTheHole`；拉环在 35 帧之前（i=17）就已经响过了，两者被干净地分开。**闪光 / 烟雾**：同样三标记同帧 i=50（投掷照常发生）、拉环与甩手 whoosh 照常响，但 `fireInTheHole` **整段都不在序列里**。`audioState`：`totalStems 72`、`loaded 51`（槽位 id 数）、`failed 0`。主循环 `loopErrors 0 / lastError null`，页面零未捕获异常（脚本会按内容滤掉 pointer-lock 那条测试台固有噪声，并在滤到东西时把条数打出来）。
+- ⚠️ **`flash`/`smoke` 那两条断言不能只断「没听见」** —— 那对一个「整段投掷都没发生」的实现同样成立（假绿）。每条都同时断四件事：① thrown / 计数减一 / 入池**三标记同帧**；② 甩手 `throwGrenade` **在**序列里；③ `fireInTheHole` **不在**序列里；④ 出手帧的 `lastAttempt` **是** `throwGrenade` 而不是别的。**「不该发生 X」永远要配一条「该发生的确实发生了」**（本仓库那条通则）。
+- ⚠️ **这条用例的第一版判据写错了，记下来别再写回去：`lastAttempt` 是粘滞的，不能用它数「响了几次」。** 一条音效播完之后 `lastAttempt` **不会**被清掉，它会一直保持到**下一件**音效发生 —— 所以「数 `method === "grenadePin"` 的帧数」量到的根本不是音效次数，而是「自它上次成为最近一件音效之后过了多少帧」（实测读成 **33 次**、出手那条读成 **25 次**，而实际各是 1 次）。正确判据是**跃变沿**：`sig = method|id|reason` 与前一行不同才算新的一件（`events` 那串才是「这次投掷上到底响了几件、按什么次序」）。**「计数类」断言在这个读口上天生是错的，只能比序列。**
+  - 顺带：`events` 里那第三件 `holster` **不是**本次投掷的声音 —— 它是 `a.t >= releaseAt + GRENADE.recover` 之后 `switchWeapon(next)` 切回原武器的那一下，属于投掷之后的另一段。所以判据要切成「**出手帧之前的**事件序列 == `["grenadePin","fireInTheHole"]`」+「出手帧之后不再出现这两个方法」，而不是拿整串去比。**别把它当噪声过滤掉就算了** —— 用 `x.i <= thrownAt` 切段，顺带就断言了「它严格晚于出手」。
+- **未做的是「像不像」**：这声台词好不好听、够不够劲要人耳判断，我签不了字。自动化只能证明「素材加载成功、且在出手那一帧以 `reason: "sample"` 播出」——**证明不了它在耳机里听着对**（混响 `wet 0.2` 与 `vol 0.8` 这两个数是按 `hurt()` 那一档拍的，想调就在 `fireInTheHole()` 那几行改）。
+
+## 2026-10-10 敌人拟人化：瞄准滞后 / 每敌性格 / ADAD 点按横移 / 同伴分离力 / 头部张望
+- **起因**：用户反馈「敌人的移动显得过于呆板」。诊断出六条成因（都定位到了行）：①完美感知（转身目标每帧取玩家实时位置）；②所有敌人参数完全一样；③横移是一条恒定正弦；④没有互相分离（8 人能叠成一坨）；⑤从不张望（`head.rotation.*` **全仓库无写入点**）；⑥无决策节流。
+  - **实施范围 = ①瞄准滞后 + ②每敌性格 + ③ADAD 点按横移 + ⑤同伴分离力 + ⑥头部张望**。**明确不做**：断视线后搜索（LOS / 最后已知位置）与蹲下。不做 LOS 的直接理由是它要把 `GroundNavigation` 拉进来重做（搜索行为需要一个独立的「可疑点」寻路目标），**那是本次唯一的高风险面**，砍掉之后寻路一行未动。
+  - 落点：`scripts/enemies.js` 是主战场；`scripts/enemy_model.js` 只加「写 `head.rotation.y`」与「`reset()` 里清零」两处；`scripts/main.js` 只加一个读口。**`scripts/navigation.js` / `scripts/classic_soldier.js` 一行未改**（`git diff` 干净）。后者不改是对的：它的 `_retarget()` 读的是头节点的**世界四元数**，绕自身枢轴的 yaw 自动传播到 SWAT 头骨。
+
+- **② 每敌性格：6 个量，在 `reset()` 里由 `this.seed` 哈希派生（纯函数 ⇒ 同一个 seed 必得同一组，可断言），不是 `Math.random()`。** `traits = { reaction(0.70~1.30), strafe(0.65~1.35), engage(0.88~1.12), burst(0~1), turn(0.85~1.15), scan(0~1) }`。
+  - **六个乘数全部以 1.0 为中心；`burst` 取 `3 + round(burst*2)` ⇒ {3,4,5}、均值 4 = 改前**。所以「群体期望值不变」是**构造出来的、不是调出来的**。
+  - **性格绝不与 `ENEMY_TUNING` 相乘**，难度表那 5 个乘数照旧只管速度/停顿/伤害/准度/侵略性。乘进去会让简单档既「更弱」又「更没差别」。
+  - ⚠️ **`engage` 是一个真实的（小幅）杀伤力旋钮**：它改敌人**停在哪** ⇒ 改 `dist` ⇒ 改 `hitProb` 里的 `0.72 - dist/46`。所以范围收紧在 ±12%，并且**必须进平衡测量**（见下）。
+  - **对象池：`aimX/aimZ/aimSeeded/scanPhase/traits` 全在 `reset()` 里赋值**。`scanPhase` 取 `Math.random()*2π`（随机但非 0）；`aimSeeded = false` 让第一次 `update` 用自己脚下播种 ⇒ 出生有一段**真实的起转**而不是一帧到位。
+
+- **① 瞄准滞后：维护一个滞后瞄点 `aimX/aimZ`，转身目标读它而不是实时 `player.pos`。** `ka = 1 - exp(-dt/τ)`、`τ = (BASE_TAU(0.18) / traits.reaction) * clamp(dist / ENGAGE_FAR, 0.35, 1)`。
+  - **按距离收 τ 那一条是硬需求**：贴脸绕圈时 ω 大（4m、玩家 7.2m/s ⇒ ω=1.8），不收 τ 的话稳态滞后 `δ = ω·τ ≈ 0.36 > AIM_TOL(0.35)`，个别高 τ 的敌人会**停止开火**。
+  - **走位方向 `dx/dz` 仍用实时 `player.pos`，只改 `targetRot`。** 这个解耦是安全的：`avoid()` 探的是**本帧位移**而从不读 `rotation.y`，`moveBy()` 纯位置 ⇒「身体朝向滞后点、朝实时点走」不可能破坏合法性。
+  - 滞后目标上再叠一点**小幅慢速 yaw 抖动**（`sin(scanPhase*0.7 + seed) * 0.04`），只加在滞后目标上。
+
+- **⚠️ 杀伤力中性是「结构性的」，不是调出来的 —— 这条要能复述**：命中概率**只在 `main.js:3030` 一处算出**（`hitProb = clamp(max(0.12, 0.72 - dist/46) * max(0.5, 1 - pSpeed*0.05) * acc)`），**只由距离、玩家速度、难度 `acc` 决定 —— 敌人的朝向 / 枪口 / `aimErr` 一个都不进这个式子**。滞后唯一的通路是 `updateBurst` 的开火闸门。
+  - **闸门的参照系保持今天的实时公式不变**：`aimErr = |diff - step|` 里的 `diff` 仍由**实时** `liveYaw` 算。于是语义变成「**枪口还在往你身上摆的时候不开火**」，差值只有滞后引入的稳态项 `δ = ω·τ`。**这是本次唯一改动到「开火时机」的地方，也是平衡测量唯一要盯的项。**
+
+- **③ ADAD 点按横移：`rest`（`strafeT` 倒计时）→ `burst`（`flipsLeft = 2~4`、`flipT = 0.1~0.3s`）→ 回 rest，两者都 ÷ `traits.strafe`。**
+  - **平滑系数必须分档**：burst 期用 `K_STRAFE_BURST(8.0)`（干脆的急停急转），rest / 远距离衰减仍用 `K_STRAFE_REST(3.0)`。原来全程 `k(3.0)`（时间常数 ≈0.33s）会把 0.1~0.3s 的点按**抹成接近零幅** —— 不分档这次改动等于没做。
+  - **幅度不动**（仍 `0.85 * ENEMY_TUNING.aggro`）：性格改的是**节奏**不是幅度，避免叠一个新的杀伤力旋钮。
+  - **`if (detourT <= 0)` 那层抑制原样保留** —— 绕行时叠横移会让 `avoid()` 的切向开始摆、绕行变成螺旋（既有实测）。
+
+- **⑤ 同伴分离力：加在「喂给 `avoid()` 的本帧位移」上，不是加进 `wx/wz`。这个位置是评审抓出来的关键修正。**
+  - ❌ 加进 `wx/wz` 会被归一化（`tx = wx/wl * sp`）掉 —— 只能转方向、转不出间距。
+  - ❌ 加在 `route` 覆写之前等于白写 —— 那是**替换**不是叠加，而 `GroundNavigation.steer` 只在 `dist < 8 && clear` 时返回 null，即 **`dist ≥ 8m` 时 `route` 恒非空** ⇒ 敌人扑向你的时候分离力全被丢掉，而那正是叠坨的时候。
+  - ✅ 正确位置：**归一化之后、`avoid()` 之前**，直接并进本帧位移。
+  - **`cap = SEP_MAX_FRAC(0.35) * speed * dt` 是这道防线的核心**：分离位移永远只是「一个合法步长的一小部分」⇒ `avoid()`+`moveBy()` 仍是唯一权威，**分离力在物理上不可能把人推穿墙或瞬移**。
+  - **绝不写 `this.vel`** —— `wanted = |vel|*dt` 是卡死检测的参照，`vel` 被钉成「意图」。污染它会让 `moved < wanted*0.4` 那条逃生路失效。
+  - **退化堆叠（8 人同一格）**：`d2→0` 时对称堆的合力会互相抵消成 0 —— 用 `this.seed`（逐具不同）给一个**确定性的扇出方向**，避免永久焊死。
+  - **门控 `dist < ENGAGE_FAR + 3` 顺便把 `noProgT` 监工完全隔离开**：监工只在 `dist > ENGAGE_FAR + 3` 时累积，**两个距离带不相交** ⇒ 分离力不可能造成「远离玩家」的假卡死翻转。这是可证明的，不是调参调出来的。
+  - 管理器签名不变（`EnemyManager.update` 内部把 `this.enemies` 作为第三参喂下去），第三参可缺省 ⇒ `/tmp/*.mjs` 那批寻路用例照旧能跑、且**自动**覆盖到分离力。
+
+- **⑥ 头部张望：`MAX_SCAN = 0.5` rad（≈28.6°），只动 `rotation.y`、不加点头。**
+  - **只乘 `(1 - deathBlend)` 是硬需求**：死亡姿势强制 `neck.rotation.y = 1.15` 而 `head` 是 `neck` 的子节点，不归零会在其上再叠一个偏角，**破坏尸体 pivot `0.26` 的标定**（那个数由「全部顶点 root 系 z 的最大值」反解，头是极值点，实测余量只剩 **0.3mm**）。
+  - **门控放在 `enemies.js` 侧**：`scanAmp = (1 - aimLevel) * (1 - blind)`，`aimLevel` 在 `dist < ENGAGE_FAR + 6`（22m）时为 1 ⇒ **交战距离内头回到瞄具上，只有 22m 外才张望**。语义正好是「不交战时东张西望」，顺带保住「战斗中头部命中盒不乱动」。
+  - `scanPhase` 在 `enemies.js` 侧推进（性格在 `Enemy` 上、不在 rig 上）；`SoldierRig.reset()` 补 `this.head.rotation.set(0, 0, 0)`（从前没有，因为从没人写过 `head`）。
+
+- **⑥ 新调试读口 `__tactical.enemyAI()`**（`main.js` 既有 `?debug` 块内）：给每具 `{ name, dist, aimErr, wantShoot, detourSide, detourT, noProgT, strafeDir, strafeT, flipsLeft, aimX, aimZ, scanPhase, seed, headYaw, traits }`。**在这之前全仓库没有任何 per-enemy AI 读口** —— 没有它，①③⑤⑥ 四条都只能靠肉眼看截图（本仓库反复记为**无法验收**的做法）。已验证 `enemyAI` 在 HEAD 里出现 **0 次**、改后 **1 次**。
+
+### 验证（实测数字）
+- **静态**：`node --input-type=module --check < <file>` 三个文件全过。**注意本仓库没有 `package.json` ⇒ `node --check <file>` 会把 `.js` 当 CommonJS 而与 `import` 打架**，必须走 stdin 的模块形式（或 Node ≥ 22）。同一条也让 `node tools/test_classic_map.mjs` 需要 Node ≥ 22（Node 18.20.8 报 `Named export 'GroundNavigation' not found … is a CommonJS module`）；用 `~/.nvm/versions/node/v22.21.1/bin/node` 则 `PASS: 32 spawns, both stairs, tunnel ceiling, layered navigation and radar occlusion`。
+- **行为套件 `/tmp/cfai.mjs` 45 通过 / 0 失败**：含张望门控、性格确定性、滞后动力学、分离力，以及 **3 轮 × 180s 的全部 12 条寻路断言**（活体 8/8、嵌入 0 帧、画圈 0、NaN 0，每轮 86400 采样），收尾 `✅ loopErrors 0 / lastError null`。
+- **杀伤力中性（用户明确要求的平衡项）—— PASS**。权威脚本 `/tmp/cfuptime.mjs`，**两种模式都跑**（`neutral` 固定朝向、`natural` 真实朝向），每档 3600 帧、`uptime = Σ wantShoot 帧 / (N × 活体)`：
+  - *natural*：easy 2.846 %→2.923 %（**+2.7 %**）、normal 3.776 %→3.912 %（**+3.6 %**）、hard 4.991 %→4.978 %（**−0.3 %**）；比值 easy/normal 0.7538→0.7471（**−0.9 %**）、hard/normal 1.3218→1.2724（**−3.7 %**）。
+  - *neutral*：easy +1.65 %、normal +4.37 %、hard +1.16 %；比值 −2.6 % / −3.1 %。
+  - ⇒ **全部落在 ±10 % / ±5 % 之内**（计划给的验收线），**计划预留的那个 τ 杠杆没有被动用**。
+  - ⚠️ **这一项第一次测出来是 −13.9 %（normal）/ −12.4 %（hard），是测量假象、不是产品退化 —— 根因是 `loadoutPicker()` 每具随机配枪**：`fireMul` 是 ak 1.0 / m4 0.9 / **awm 3.2**，随机滚到 AWM 的敌人开火节奏只有别人的 1/3.2。**A/B 两侧必须钉死 `e.fireMul = 1`**（并 `e.burstLeft = 0; e.burstPause = 0.8`），钉死之后同一份代码立刻变成 **+3.6 %**。写这类平衡 A/B 之前先把「随机量」清干净，否则测的是配枪分布、不是改动。
+  - **开火闸门被排除嫌疑**：`wantShoot` 只有在 `updateBurst` 里每发子弹置 **true 一帧**（唯一置位点）⇒ Σ 帧数 == 发数，且**只由 dt/位置决定、与 `Math.random` 无关**，是完全确定的量。
+- **几何不回归（计划 §验证 7）—— PASS，同脚本 A/B、8123（改后）vs 8124（HEAD）逐行相同**（脚本 `/tmp/cfgeo.mjs`）：
+  ```
+  构型  网格  三角形  去重点云  校验和    head桶点  head校验和  pivot   deathBlend headYaw
+   0     22    9536     4858  16eb435e      991  178b4528   0.2055  1  0
+   1     22   12434     6343  7a2b6ff7     1398  87eb6069   0.2543  1  0
+   2     22   13394     6833  58ddc46c     1398  87eb6069   0.2543  1  0
+  ⇒ 最大 pivot 0.2543  ✅ ≤ 0.26
+  ```
+  以及两边都是 `✅ 瞄头部包围盒中心一枪即杀（100 → 0, dead=true）`（守 `part="head"` 标签）。
+  - ⚠️ **历史 AGENTS 那组数字（「每具 32 块 → 22 块」的 32、kit0「829 点 / 66d6529c / 1458 三角形」）在换一份探针实现之后不可复现**（本次实测是 22 网格 / kit0 **9536** 三角形 / 4858 去重点 / `16eb435e` / head 桶 991 点 `178b4528`）。**校验和这类量与「怎么去重/怎么排序」强相关，旧文档里的数字当基线是在赌当时的实现细节** —— 有效的证据只有**同一份脚本在两个构建上对跑**，差异才一定有信息量。
+- **分离力（计划 §验证 2）—— PASS，用带种子的仪器才拿得到可用的对照**（`/tmp/cfsep3.mjs`，8 具**完全重合**在一格、3 轮 × 30s、`Math.random` 用 mulberry32 钉种子）：
+  ```
+                  全程 <0.90    <0.52    <0.30 |  稳定段 <0.90   <0.52   <0.30 |  末态最小距离
+  8123 (改后)       4.14%      1.50%    0.74% |     2.07%       0.31%   0.08% |  0.783~1.516
+  8124 (HEAD)      24.59%     16.36%   10.36% |    11.29%       6.31%   2.96% |  0.331~0.477
+  ```
+  ⇒ 重叠占比 **−83 % ~ −93 %**、稳定段「明显穿模」**−97 %**；**HEAD 30 秒后仍插在 0.33~0.48 m、还有 1~3 对粘着；改后末态散开到 0.78~1.52 m、0~1 对**。两个构建都 `loopErrors 0`。
+  - **`SEP_MAX_FRAC = 0.35` 是刻意保守的，实测证明余量充足、没有上调**。
+  - ⚠️ **「两两最小距离」是 28 对上的极值统计，不能当判据**：8 个人围着玩家时总会有某一对贴近，那不代表「叠成一坨」。稳定量是**逐对占比** + **基线对照**。
+
+### 验证 9（60s 实时混战，硬件渲染 `--use-angle=metal`，GPU 实测 `ANGLE Metal Renderer: Apple M1 Pro`，60.0 fps）
+- 仪器 `/tmp/cfaivis.mjs`（不 pause、真实时钟、玩家沿 6m 峰峰 / 3.6s 正弦横移、峰值 5.24 m/s）：
+  ```
+                    朝向滞后 均  最大     headMax   noProgT 具·帧占比
+  8123 (改后)         3.81°     22.75°    28.6°     32.3%
+  8124 (HEAD) r#1     2.86°     10.81°     0.0°      —
+  8124 (HEAD) r#2     2.60°     11.13°     0.0°     31.44%
+  ```
+  两个构建都：活体 8.00、NaN 0、长停 0、路程/净推进 2.04~2.12×、8 具全部从 82~86 m 靠近到 4~8.5 m、`loopErrors 0 / lastError null`。
+- **【读数的正确解释 —— 这条不加会在下次被人当成回归】「身体朝向 vs 指向玩家的方位」这个差**混装了两件东西**：① 本次新加的瞄准滤波；② **HEAD 上就有的转身限速器**（`turnVel` + `TURN_RATE` 夹取 + `1-e^(-10·dt)` 平滑）。所以 **HEAD 读 2.60~2.86° 而不是 ≈0.2° 是正常的 —— 那 2.6~2.86° 全是②**。有效的量只有**构建之间的差**：正交检查 `sqrt(2.86² + 2.4²) ≈ 3.73°` vs 实测 3.81° ⇒ 新加的瞄准滞后 ≈ **2.4° RMS**，与解析预测 `v⊥·0.18/(16·reaction)`（在实测达到的 3.74 m/s 下）吻合。**别去把 HEAD 的 2.86° 当成「仪器坏了」。**
+- 模型预判的「近距闸门会被顶到」**确实出现了、但很稀**：滞后分布的**尾部**才是它 —— 6 % 的交战帧 > 0.15 rad（HEAD 是 1 %），峰值 22.75° = 0.397 rad 刚过 `AIM_TOL` 0.35，而整格直方图在 0.25 rad 以上是 0 %。与 §2 那条「贴脸绕圈顶到闸门」的预测一致。
+- `headMax` **28.6° == 整个 `MAX_SCAN`**（HEAD 恒 0.0°，因为 HEAD 从不写 `head`）⇒ 夹取量被真实用满，不是摆设。
+- **`noProgT` 累积：改后 32.3 % vs HEAD 31.44 % ⇒ 分离力没有把监工推上去**（计划风险表那一行的检测项通过）。
+- ⚠️ **这个实时仪器**回答不了「8 人还叠不叠」** —— 它的逐对占比统计**在未钉种子时逐次跑能差 2 倍**（同一个 HEAD 两次跑：`<0.90` 在 20/40/60s 读到 14.78/13.11/14.24 与 6.66/7.01/10.42）。**能用的只有「逐帧均值」（滞后，~18000 具·帧）与「类别事实」（headMax 0 vs 28.6°）**；重叠问题必须交给**带种子的 `/tmp/cfsep3.mjs`** —— 就是上面那组 6× 对照。
+
+### 两条「判据本身写错了」的修正（记下来，别再写回去）
+1. **「首帧把滞后点播到自己脚下」这条断言是结构上不可满足的**：播种与第一次收敛在**同一次 `update()` 调用**里，`aimX === 0` 这个中间态**观察不到**。改写成「解析等式 + 负控制」。
+2. **分离力的判据从「瞬时两两最小距离 ≥ 1.0 m」换成「逐对占比 + HEAD 基线对照」**。原来的写法在 28 对上取极值，噪声即结论；而且它是**用一条实测更难通过的线**去卡一个本来就对的行为。**换判据 ≠ 放宽标准**：`SEP_MAX_FRAC` 一分没抬，新的对照（0.74 % vs 10.36 %）比旧的那条严格得多。
+
+### 本次踩到 / 记下的坑（都属「控制台之外无痕迹」那一类）
+- **页面注入的模板字符串里，Node 侧的常量是不可见的**，除非显式 `${...}` 插进去（`ReferenceError: A is not defined` 就是这么来的）。
+- **`/tmp/*.mjs` 的注释里绝不能出现反引号**（模板字符串会被提前闭合，报错行指向注释里的那个词）—— 本次共踩 **5 次**。中文引号「」最省事。
+- **rAF 回调里的异常不进 `loopErrors()` / `lastError()`**（那两个只兜主循环），而且会**静默掐断 rAF 链** —— 外面唯一看得到的症状是「帧数恒为 0，而开火计数照涨」。采样器必须自带 `try/catch` 并把错误存下来打出去。
+- **`__tactical.player` 是模块级对象的直引**（shorthand），所以 `t.player.pos` / `t.player.vel` 可以原地改写；改完**等一帧**再开火（相机位置在 `loop()` 里按 `player.pos` 落位，改完立刻 `forceFire()` 用的是上一帧的旧址）。
+- **头部 AABB 中心不是实心**：这个骨架的头部 AABB 中心（y≈1.80）正落在锁骨高度，那条线上横着 `chest` 骨上的衣领/护颈（`part=body`）—— 从中心平射第一个命中的是**衣领**而不是头。所以爆头探针必须**扫俯仰角**并只接受「第一个命中是 `part=head` 的网格」的角度，**不能假设瞄包围盒中心就能打到头**。
+- **瞬移玩家之后要回读眼位再算射线**：`movePlayer` 会让瞬移过去的玩家**往下落**（两个构建各落 −0.40 / −0.72），写死 `1.62` 的探针与原品相机的真实眼位差一大截。`eyeH()` 与 `pos.y` 都必须**落位之后回读**。
+
+### 未完成 / 不可自证的
+- **「看起来像不像真人」是人工判断，我无法自签**。自动化代理覆盖了「8 人还叠不叠」（带种子的逐对占比）、「有没有人蹭墙角」（路程/净推进 ≈2.05×、长停 0）、以及「枪口跟丢没跟丢」的**数值**代理（滞后分布）；**但「在一个真人眼里够不够自然」不是这些数字能签字的**。计划 §验证 9 末尾那条就是留给这条的。
+- 其余待办：`AGENTS.md` 本节即本条；收尾要停掉 8124 基线服务并清掉残留的无头 Chrome（**用字符类写法 `pkill -f "user-data-dir=/tmp/cfprof-838[1]"`，避免 `pkill -f` 把调用它的 shell 自己杀掉**）。
+
+## 2026-10-10 连杀窗口 6 秒 + 爆头击杀确认音
+- **连杀判定窗口 `STREAK_WINDOW` 4.0 → 6.0 秒**（`scripts/main.js`）。它是唯一数据源，四处消费点（`updateStreakHud()` 进度条、`onKill()` 过期、主循环主动归零、`__tactical.streak().window`）都读它，改一处即可。**`remain <= 1.2s` 的「快断了」红闪阈值没跟着改**（那是提示，与窗口长度是两回事）。
+- **新增「爆头击杀确认音」`sfx.headshotKill()`**（槽位 `headshot_kill` → `impacts/headshot_kill.mp3`）。素材是**用户提供的原始 mp3，原样入库、未转码**，在 `SAMPLES` 里写成**自带扩展名**的 stem ⇒ 走 `_loadOne` 那条「自带扩展名就原样用」的分支（`/\.(wav|mp3)$/i`，同一个分支也在给 `classic/*.wav` 用），只有一个候选 URL、不产生 404，**也不进 `M4A_ONLY`**。来源与许可**未考证**，见 `audio/CREDITS.txt` 第六节，**不能当 CC0**。
+- **触发条件是「爆头 + 这一杀没续上连杀」**：`main.js` 的 `onKill()` 里 `if (headshot && streakCount === 1) sfx.headshotKill();`。`streakCount` 在该行之前刚 `++`，等于 1 ⟺ 计时器刚起算（上一串已断 / 本局第一杀）。2 以上交给人声播报（`sfx.streak`），不叠这一声。
+- **它与 `sfx.headshot()` 是两个独立槽位、两件事**：后者是**命中**标记音（`impacts/headshot`，打中头就打，**含没打死的那一枪**，挂在 `fire()` 命中分支），前者只在**击杀且不续连杀**时响。同一次爆头击杀上两声都会响，所以 `headshotKill()` 不压 `headshot()` 的音量。采样缺失/未加载时回退 `_headshotKillSynth()`（低频闷响 + 上行扫频），**刻意与 `_headshotSynth()`（单声高亢下行的金属「叮」）在音色与走向上分开**，采样全挂时两件事也必须听得出区别。
+- 连带：`audio/CREDITS.txt` 头部「每个 stem 出两份」的说明补了例外（这条 mp3 是原样单文件）并新增第六节；`AGENTS.md` 的 stem/文件计数与格式那条同步（`audio/` 现 71 stem / 119 文件）。`DESIGN.md` 里连杀窗口那处文案同步改成 6 秒。**本次只做 `node --check` 与静态资源 URL 核对，未做真实浏览器音频试听。**
+
 ## Esc 对局菜单（优先于旧失锁直接进大厅约定）
 - `#gameMenu` 是独立于 HUD/大厅的居中对话框，含返回游戏、暂停/继续、刷新位置、结束游戏。普通 Esc/意外失锁走 `openGameMenu`，不直接显示大厅；背包主动解锁仍走背包分支。
 - 打开菜单时对局继续，点击暂停才设置 `matchPaused`。`update` 入口整体早退，主循环跳过眼高/视模动画，但保持渲染与 lastT 推进；倒计时、AI、死亡计时、投掷物全部冻结，继续后不补算暂停时长。与调试 RAF 暂停 `loopPaused` 独立。
@@ -50,7 +212,7 @@
 - 回归：`node tools/test_classic_map.mjs`；浏览器已验证 21 项：镜像几何/碰撞/出生点/雷达、32 个刷点、双侧上下楼和出口跳箱、顶棚、子弹、手雷、雷达遮挡、60 秒 8 人寻路与 AI 下地道。调试增加 `movementStep(dt)` / `supportAt(x,z,feetY)`。
 
 ## 2026-10-09 统一手臂与投掷物（优先于旧投掷约定）
-- 投掷物行走摆幅在 `animateWeapon()` 共用 bob 系数处设为其他武器的 30%，同时覆盖经典视模和回退手臂；静步/蹲走原有衰减继续生效，拉环、投掷、切换动作不乘此系数。
+- 投掷物行走摆幅在 `animateWeapon()` 共用 bob 系数处设为其他武器的 **15%**（2026-10-10 由 30% 再减半，见文件开头那一节），同时覆盖经典视模和回退手臂；静步/蹲走原有衰减继续生效，拉环、投掷、切换动作不乘此系数。
 - `classic_arms.js` 从 AK 的实际手/袖蒙皮烘出四块网格，供 `ViewArms.loadClassic` 安装到所有其他武器；材质直接共享 AK，不能再另调成棕手套或绿袖。上臂烘焙时展平至肩向、保留腕端，避免刀重击时暴露 AK 原弯肘折面。旧 `fps_arms.glb` 只作加载失败回退。
 - `assets/classic/grenades/{frag,flash,smoke}` 是经典投掷物模型/50 骨骼/idle、prefire、fire、reload；三者手部纹理与 AK 完全一致。烟雾沿用该来源提供的 flash/smoke 共用形体和动作，贴图从默认 smoke MDL 提取。来源与条件见 CREDITS.md。
 - `tools/import_cf_grenades.py` 必须先把每个 SMD 的独立 bind 姿态变换到统一参考骨架，再写顶点。手臂 SMD 与雷体 SMD 的参考姿态不同，直接共用 inverseBind 会让双手飞出画面。
@@ -291,6 +453,9 @@
   - **叙事内音效走 `audio/` 里的 CC0 真实录音**：枪声（AK/AWM）、换弹三段、拉栓、**收枪/出枪（长枪、手枪、刀各一份 `sw_*`）**、**空枪干击 `sw_dryfire`**、**开镜/退镜 `sw_scope_in/out`**、脚步、命中掩体/肉体/跳弹、掠耳、弹壳、倒地、近战、爆炸、玩家受伤、**全部页面交互声**。逐文件署名见 `audio/CREDITS.txt`（**这份文件是 CC0 成立的前提，不能省**）。
   - **命中、单杀与回合奖励音保持合成；连杀人声按用户要求改为 CF 经典保卫者英文采样。** `cf_streak_2..8` → `audio/announcer/cf_gr_2..8.{ogg,m4a}`。Double Kill / Multi Kill / Ultra Kill / Unbreakable / Unbelievable / You Want a Piece of Me? / Come and Get Some!；8 杀以上只封顶语音，不封顶连杀计数。不要恢复系统 TTS 或旧方波琶音，也不能把这些游戏语音标成 CC0；来源与归属见 `audio/CREDITS.txt`。
   - **`SFX.streak(n)` 单通道人声抢占**：`rate:1`、`rateJitter:0`、`vol:0.65`、`volJitter:0`、`hudBus:true`（走 `hf`，不经过场景混响/距离衰减/闪光低通），`schedule:"streak"`、延迟 40ms。`cancelStreak()` 以 15ms 渐隐 + 20ms 停源余量终止前句，新句在它结束之后开始；同帧多杀只听见最后一档。独立人声不受世界音效池占满影响。缺素材返回 false 并记录 `reason:"missing"`，视觉提示照常。`onKill` 只在单杀时调 `sfx.kill()`，连杀时不叠合成奖励音。
+  - **爆头有两条独立的音，别混为一谈**：`sfx.headshot()` 是**命中**标记音（`impacts/headshot`，打中头就打、**含没打死的那一枪**，触发点在 `fire()` 的命中分支）；`sfx.headshotKill()` 是**击杀确认**音（`impacts/headshot_kill`，用户提供的原始 mp3，见 CREDITS.txt 第六节）。同一个爆头击杀上两声音都会响（CF 也是命中一声、确认一声），所以 `headshotKill()` 不压 `headshot()` 的音量。
+    - **`headshotKill()` 只在「这一杀没有续上连杀」时播**：`main.js` 的 `onKill()` 里判 `if (headshot && streakCount === 1)`。`streakCount` 在那一行之前刚 `++` 过，等于 1 就意味着**计时器是刚起算的**（上一串已断、或本局第一杀）—— 也就是用户要的「不处于连杀判定中」。到了 2 以上交给人声播报（`sfx.streak`），再叠一声会抢开头（与 `sfx.kill()` 同一条理由）。
+    - 采样缺失/还没加载完时回退到 `_headshotKillSynth()`（一声低频闷响 + 一记上行扫频），**刻意与 `_headshotSynth()`（单声高亢下行的金属「叮」）在音色和走向上分开** —— 采样全挂时这两个事件也必须听得出来是两件事。
   - **生命周期必须停止人声**：`beginDeath` / `gameStart` / `endTDM` / `pointerlockchange` 失锁分支均调 `cancelStreak()`；切枪不取消连杀。回归脚本 `/tmp/cf-classic-streak.mjs`（默认 OGG，`--aac` 拦 OGG 验证 M4A 回退），覆盖真实 onKill、同帧多杀、播放中抢占、实际音频输出、缺文件与退出清理。
     - **这条线在「手上动作」上是反过来划的**（用户反馈「切枪偏卡通」那次改的）：`holster`/`deploy`/`scopeIn`/`scopeOut`/`empty` 本来按「听不见的机械细节、合成更省」判给了合成，但合成出来的金属扫频一听就是程序 — 而它们在现实里**确实存在**（枪机、镜筒、击针），所以整类搬去真实录音。**判据是「现实里存不存在」，不是「重不重要」** —— 照着这条重划时别只看重要性。
     - **刀（`type === "melee"`）另有一条 `sw_deploy_knife` / `sw_holster_knife`，判据只能写 `type`，不能靠"其余都算长枪"兜。** `deploy()`/`holster()` 原来只分 `pistol` 与"其它"，而 `WEAPON_DEFS.knife.type` 是 `"melee"` —— 它**静默落到了长枪那两条**（725397「M16 换弹全程」/ 725403「步枪摆弄」）上，收出刀听成"子弹上膛"（用户报的正是这一条）。现在 `holster()`/`deploy()` 各多一个 `melee` 分支，刀取 462579@6.600（出，谱心 7.2k，3~12k 占 73%）与 107590@0.482（收，谱心 4.9k = 素材本身就是"入鞘"这个动作）。合成兜底也**不是**长枪/手枪那两条低通扫频：`_knifeDeploySynth()` / `_knifeHolsterSynth()` 走 `_clink()`，用几个**非整数比**的分音同时衰减 —— 整数倍会听成一根有音高的柱子，不像金属。**"出亮收钝"两边同源**（采样 7.2k/4.9k 与合成的 0.20s/0.13s 同向）。
@@ -300,7 +465,8 @@
   - **页面交互声 `ui(kind)` 四个 kind**（`click` 按钮 / `switch` 页签 / `open` / `close` 面板开合）**全部是真实录音**（`ui_click`/`ui_switch`/`ui_open`/`ui_close`）。曾经是 Kenney UI Audio 的 35~68ms 方波扫频，正是用户报的「点进入战场有卡通音效」的**主要来源之一**（另一半是当年 `roundStart` 的三角波琶音）。另有**大厅背景音乐**（`setMusic(on)`）。
   - **素材路径必须是文档相对字符串 `"./audio/…"`**（写在 `SAMPLES` 表里）。`fetch` 按**文档 URL** 解析，所以对 GitHub Pages 的**项目页**（站点根在 `/<仓库名>/`）是对的。**绝不用 `new URL("./audio/x.ogg", import.meta.url)`** —— 那会解析到 `scripts/audio/…`，静默 404（控制台只有一行 fetch 失败、游戏照跑）。这与「所有资源路径都是相对文档的」是同一条。
     - 采样素材**只许放在 `audio/`**：站点从仓库根发布，任何被引用的文件都会上线，而 `/assets/` 已被 gitignore ⇒ 音效不能放那里（与 GLB 走 `models/` 是同一条纪律）。新加的音频文件**必须在 `SAMPLES` 里有槽位**，否则永远不会被加载（没人引用 = 死数据上线）。
-  - **格式是 `.ogg` + `.m4a` 两份，不是 `.ogg` + `.mp3`。** 本机（macOS）实测：`afconvert` **能解码 Ogg Vorbis、能写 AAC/m4a，但不能编码 MP3**（`ExtAudioFileSetProperty ('cfmt') failed`），而 `ffmpeg` / `sox` / `lame` / `brew` 都不存在。`.m4a`（MP4 容器 + AAC）在 Safari/Chrome/Firefox/Edge 全支持、是苹果原生格式、同码率音质优于 MP3。`_loadOne()` 按 **ogg → m4a** 顺序试，任一成功即止。
+  - **格式默认是 `.ogg` + `.m4a` 两份，不是 `.ogg` + `.mp3`。** 本机（macOS）实测：`afconvert` **能解码 Ogg Vorbis、能写 AAC/m4a，但不能编码 MP3**（`ExtAudioFileSetProperty ('cfmt') failed`），而 `ffmpeg` / `sox` / `lame` / `brew` 都不存在。`.m4a`（MP4 容器 + AAC）在 Safari/Chrome/Firefox/Edge 全支持、是苹果原生格式、同码率音质优于 MP3。`_loadOne()` 按 **ogg → m4a** 顺序试，任一成功即止。
+    - **例外一：stem 自带扩展名就原样用、只有一个候选。** `_loadOne()` 里那条 `/\.(wav|mp3)$/i` 的分支就是它 —— `classic/*.wav`（CF 原声，保留原 WAV 不转码）与 **`impacts/headshot_kill.mp3`**（用户提供的原始 mp3）、**`vo/fireinthehole.wav`**（用户提供的原始 wav，见 CREDITS 第七节）都走这条：只请求这一个 URL、不产生 `.ogg`/`.m4a` 的 404，也因此不进 `M4A_ONLY`。**这条分支是有意的**：能用代码表达的就别去动用户的原始资产（同「不要把修正烘进 `models/usp.glb`」那条）。
     - **`M4A_ONLY` 这个 Set 不能删**：**14 个 stem**（`ui/` 下 5 个 + `sw/` 下 9 个）**不是**从参考项目搬来的，是我们自己用 `afconvert` 从 wav 编的 —— 而 afconvert **写不了 Ogg 容器**，它们**只有 m4a**。不列进这个 Set 就会为它们各白挨一次 `.ogg` 的 404，`failed[]` 也被污染（那是断言「零加载失败」的污染，不是无害噪声）。**注意集合里写的是 stem 路径（`ui/ui_click`、`sw/deploy`），不是槽位 id（`ui_click`、`sw_deploy`）** —— 查表的地方在 `_loadOne`，它手上只有 stem。
       - `ui/` 与 `sw/` 的**文件 stem 名与槽位 id 刻意不一致**（`ui/ui_panel_open` ↔ 槽位 `ui_open`、`sw/deploy_pistol` ↔ 槽位 `sw_deploy_pistol`）：槽位 id 是**读口**（`lastAttempt.id`，测试要按它断言），文件名是**素材文件**（按音色命名）。照槽位 id 去找文件会有一半找不到 —— 拿 `M4A_ONLY` 逐个 `ls audio/` 才能自证。
     - `.gitignore` 忽略了 `*.mp4` / `*.m4v` 但**没有**忽略 `*.m4a`，所以 `audio/` 无需改忽略规则。`大厅音效.wav`（用户的原始素材，1.25 MB / 11025 Hz 立体声）转完码后在 `.gitignore` 的「非站点资源（本地留档）」一节加了一行 `/大厅音效.wav` —— **本地留档、不入库，但不删用户的文件**。
@@ -308,7 +474,7 @@
   - **`preload()` 与 `ensure()` 是两件事，绝不能合并。** `ensure()` 的语义是「同步、幂等、只由用户手势调起」（建图 + 解锁 ctx）；预载是**异步网络副作用**，塞进去会让第一局在缓冲还在下载时开局。两者各自幂等，且**在对方第一次跑起来时互相补触发**：`init()` 里 `sfx.preload()` 一次不 await（见 `main.js`），`ensure()` 里 `if (!this._preloadPromise) this.preload()`，`_doPreload()` 结尾再 `if (this._musicOn && this.ctx && !this._music) this._startMusic()`（「ctx 之前就设过 BGM 意愿」的补触发）。
     - **`preload()` 永不 reject**：每个文件独立 `try/catch`、失败记入 `_failed[]` 并 `console.warn`。这不只是防御性编程 —— **异步的 reject 会绕过 `__errs` 与 `loopErrors()`**（它们只抓主循环里的同步异常），一个漏网的 reject 会变成一个没人看见的 unhandledrejection。
     - **解码器可以不是 `this.ctx`**：`AudioBuffer` 与创建它的 context 无关，所以 ctx 还没建起来时用 `new OfflineAudioContext(1, 1, 48000)` 当**纯解码器**（`this._decoder`）。两个都没有（浏览器不支持）就 `_preloadDone = true` 直接返回 ⇒ 全部退回合成。
-    - **`audio/` 里 62 个 stem、96 个文件、约 1.3 MB**（41 个 stem 有 ogg+m4a，14 个只有 m4a）。
+    - **`audio/` 里 72 个 stem、120 个文件**（48 个 stem 有 ogg+m4a、14 个只有 m4a、**9 个只有 wav** —— `classic/` 下 8 条 CF 原声 + **`vo/fireinthehole`**、**1 个只有 mp3** —— `impacts/headshot_kill`，后两条都是用户提供的原始素材，见下条与 CREDITS.txt 第六、七节）。
   - **回退是 `_playMapped()` 的第三个参数，不是 `if (has(x))` 分支。**
     ```js
     this._playMapped("shoot", { id: "ak47_fire", … }, () => this._shootSynth(kind));
@@ -799,10 +965,10 @@
   - `bindRoster()` 开头有 `if (!roster.length) initRoster();` 自愈：`gameStart()` 把 `state = "playing"` 放在**第一行**，一旦它中途抛异常，名册就停在 `[]` 而 `update()` 照样跑 `refillEnemies()`，于是每 2.4 秒抛一次 `Cannot set properties of undefined (setting 'enemy')`（实测踩到）。
   - UI 是 `#hud` 内的 `#deathScreen`（层内 z-index 4，天然压住 `.scope` 6、低于 `.fx-layer` 8），红晕 +「你被击杀」+ 击杀者名 + 武器 + 倒计时条；**进度条每帧写 `width`、不做 CSS 动画**（与 `#crosshair` 每帧写 `--gap` 同一套做法，CSS 动画跟不上 `pause()`/变速）。击杀者的武器名走 `enemyWeaponName(e)`（= `e.weaponName`，敌人现在每局随机枪，所以**不再有** `const ENEMY_WEAPON = "步枪"` 那个写死常量），死亡面板与 `pushKillFeed` 两处同源。
 - HUD：顶部单条计分板 `teamScoreVal`（蓝）/`roundTime` 倒计时/`limitVal` 目标/`enemyScoreVal`（红）；左下 `hpVal`+`hpFill`；右下 `weaponName`+`ammoVal`+`ammoFill`；右上 `killfeed`；军徽下方 `streak` + **连杀窗口倒计时 `streakTimer`**；准星下方 `killIcon`（击杀军徽） 与 `hitdir`。`pushKillFeed()`/`showStreak()`/`updateStreakHud()`/`showKillIcon()`/`showHitDir()` 驱动，连杀人声统一走 `sfx.streak(n)` 的 CF 固定采样（缺失静默降级）。`.fx-layer` 里的 `streakFlash` / `killBurst` 为兼容保留的隐藏节点。
-  - **连杀是「计数器 + 一个会重置的时间戳」，不是「最近 N 秒的击杀时间数组」**（`STREAK_WINDOW = 4.0` / `streakCount` / `lastKillAt`，在 `main.js` 靠近 `killTimes` 那个变量原来的位置）。每击杀一人 `streakCount++` 并把 4 秒窗口**从这一发重新起算**；`time - lastKillAt > 4.0` 就归零、重新从 1 数。
-    - 这两种写法**真的会算出不同的数**，不是口味问题：在**相邻间隔都 < 4s、但首尾间隔 > 4s** 时分道扬镳。第 0 / 3.5 / 7.0 秒各杀一人 —— 滑动窗口（`killTimes.filter(t => time - t < 4.0)`）在第三杀只数得到 **2**（第 0 秒那杀被 `7.0 - 4.0` 挤出了窗口），而「每杀一人重置计时器」是 **3**：只要相邻两杀都接得上，连杀就一直续着。**这就是 CF 的手感**（`/tmp/cfstreak.mjs` 第 5 条专门守这个分水岭，用 3.5s 间隔，滑动窗口实现在那里必然红）。
+  - **连杀是「计数器 + 一个会重置的时间戳」，不是「最近 N 秒的击杀时间数组」**（`STREAK_WINDOW = 6.0` / `streakCount` / `lastKillAt`，在 `main.js` 靠近 `killTimes` 那个变量原来的位置）。每击杀一人 `streakCount++` 并把 6 秒窗口**从这一发重新起算**；`time - lastKillAt > 6.0` 就归零、重新从 1 数。
+    - 这两种写法**真的会算出不同的数**，不是口味问题：在**相邻间隔都 < 6s、但首尾间隔 > 6s** 时分道扬镳。第 0 / 3.5 / 7.0 秒各杀一人 —— 滑动窗口（`killTimes.filter(t => time - t < 6.0)`）在第三杀只数得到 **2**（第 0 秒那杀被 `7.0 - 6.0` 挤出了窗口），而「每杀一人重置计时器」是 **3**：只要相邻两杀都接得上，连杀就一直续着。**这就是 CF 的手感**（`/tmp/cfstreak.mjs` 第 5 条专门守这个分水岭，用 3.5s 间隔，滑动窗口实现在那里必然红）。
     - **时间轴用主循环的 `time`（`time += dt`），不用 `performance.now()`**：`__tactical.pause()` 只停 rAF，`time` 跟着一起冻住，无头测试才能定步长快进（同 chat / 死亡计时那套）。
-    - **过期判定有两处，缺一不可**：① `onKill()` 里（`if (time - lastKillAt > STREAK_WINDOW) streakCount = 0;`）—— `__tactical.onKill` 是直接调本函数的、绕过 `update()`，`pause()` 期间 `update` 根本不跑，少了这条直接连调两次会误续；② `update(dt)` 里 `chat.update(dt)` 之后那条**主动归零**——只靠 ① 的话，中间这 4 秒里 `streak()` 读口会一直报一个早就该没了的数（调试和测试都会被骗）。两处用的是同一个比较，不会打架。
+    - **过期判定有两处，缺一不可**：① `onKill()` 里（`if (time - lastKillAt > STREAK_WINDOW) streakCount = 0;`）—— `__tactical.onKill` 是直接调本函数的、绕过 `update()`，`pause()` 期间 `update` 根本不跑，少了这条直接连调两次会误续；② `update(dt)` 里 `chat.update(dt)` 之后那条**主动归零**——只靠 ① 的话，中间这几个秒里 `streak()` 读口会一直报一个早就该没了的数（调试和测试都会被骗）。两处用的是同一个比较，不会打架。
     - **播报阶梯不封顶，分两段**（`STREAK_TITLES` / `STREAK_TITLE_MAX = 9` / `cnNumber()` / `streakLabel(n)`）：2~9 是**称号档**（双杀/三杀/四杀/五杀 → 暴走/主宰/超神/弑神），10 往上落到**中文数字连杀**（「十连杀!」「十一连杀!」「二十二连杀!」…）。`showStreak(n)` 只在 `streakCount >= 2` 时播（第一杀不播，与 CF 一致）。
       - **不能封顶是这条的全部理由**：旧实现是 `STREAK_TEXT`（只到 5）+ 一句 `Math.min(n, 5)`，于是 6 连杀往上全都在喊「五杀!」（用户实测报的问题）。**任何 n 都必须有专属文案、且 2 往上任意两档不相等** —— 中文数字那段天然无上限。题面给的「不能超过五连杀还显示五杀」就是这么解的。
       - **称号档必须连着数（2~9 不留空）**：`streakLabel(n)` 对 2~9 是查表，中间缺一档会返回 `undefined`、`textContent` 直接印出 `"undefined"`（不是抛异常，是静默）。
@@ -814,7 +980,7 @@
       - 取数用的是 `time`（不是墙上时钟），所以 `pause()` 期间条会跟着冻住，与 `streak()` 读口同源。
       - **`gameStart()` 里要顺手 `updateStreakHud()` 一次**：新一局可能是暂停中开的，不立刻收掉的话上一局的条会挂在那里等下一帧。
       - **调试读口 `__tactical.streakLabel(n)`**（给任意 n 的播报文案，用来断言阶梯单调无上限）与 **`__tactical.streakHud()`**（给 `{ visible, num, fill, low }`，`fill` 是 `"87.5%"` 这样的字符串）—— 没有它们，「超过五连杀显示的不是五杀」和「条在递减」这两条都只能靠肉眼看截图。
-    - **调试读口 `__tactical.streak()` 给 `{ count, since, window }`**：`count` 当前连杀数、`since` 距上一杀的秒数、`window` 窗口长度（免得测试把 4.0 抄一份进去、以后改窗口时假红）。**`since` 在「本局还没杀过人」时是 `null`，不是 `Infinity`** —— 内部 `time - lastKillAt` 确实是 `Infinity`，但 CDP 的 `returnByValue` 走 JSON、`Infinity` 到那边会变成 `null`（实测对着它调 `toFixed` 直接 TypeError）。与其让读口在两处表现不一致，不如在源头就写成 `null` 并写进注释。
+    - **调试读口 `__tactical.streak()` 给 `{ count, since, window }`**：`count` 当前连杀数、`since` 距上一杀的秒数、`window` 窗口长度（免得测试把 6.0 抄一份进去、以后改窗口时假红）。**`since` 在「本局还没杀过人」时是 `null`，不是 `Infinity`** —— 内部 `time - lastKillAt` 确实是 `Infinity`，但 CDP 的 `returnByValue` 走 JSON、`Infinity` 到那边会变成 `null`（实测对着它调 `toFixed` 直接 TypeError）。与其让读口在两处表现不一致，不如在源头就写成 `null` 并写进注释。
     - `gameStart()` 里连同 `killTimes` 那行一起换成 `streakCount = 0; lastKillAt = -Infinity;`。
   - **经典军徽取代冲击波**：`showKillIcon()` 重写节点内容，调用 `killMedalSvg()`；单杀与连杀共用一个节点，不累积。普通 / 爆头 / 黄金互斥，爆头后下一次普通击杀必须回到武器图形。
   - 动效验收要看实际像素、淡出后的 opacity=0、四种屏幕尺寸避开准星和弹药。不要再沿用旧冲击波的环宽/放射线断言，旧节点只为 debug 兼容保留。
@@ -832,8 +998,8 @@
   - **定位音**（敌人枪声/脚步）走 `out3d(node, x, y, z)` → `PannerNode`（`equalpower`，比 `hrtf` 省 CPU）；每帧在 `update()` 里调一次 `sfx.updateListener(player.pos, player.yaw)` 同步听者位姿。玩家自身音效（起跳/落地）传空坐标即直连 master，不做定位。
 - **无头测试的几个坑**（用无头 Chrome + CDP 验证时）：
   - **测试音频相关路径前，必须先让音频图「活起来」，否则整条音频链路全程隐身。** `SFX` 的每个方法都以 `if (!this.ready()) return;` 开头，而 `ready()` 是 `this.enabled && this.ctx`；`ctx` 只在 `sfx.ensure()` 里创建，`ensure()` 又只由「进入战场」/「再来一局」两个按钮的 click 调起。历史上所有用例都是直接 `__tactical.beginGame()`，于是 `ctx` 恒为 null、所有 `sfx.*` 都是静默 no-op —— **`this.muffle` 覆盖 `muffle()` 那个致命 bug 因此整整两轮都没测出来**。现在用例开头一律先 `document.getElementById("startBtn").click()`（无头下这次点击没有用户手势，`requestPointerLock` 会以未处理的 Promise 拒绝告警收场，用 `Input.dispatchMouseEvent` 发真点击或直接忽略这个 `unhandledrejection` 都行，但**音频图一定会建起来**），然后再 `beginGame()`。
-    - **「建起音频图」只解决一半 —— 采样是异步预载的，还要等 `audioState().preloadDone === true`。** 62 个 stem 是网络下载 + `decodeAudioData`，`ensure()` 之后立刻读到的 `loaded` 是空的、`lastAttempt.reason` 会是 `"synth"`（看着像「采样全挂了」，其实只是还没到）。用例开头一律 `startBtn.click()` → **轮询等 `preloadDone`** → 再做别的；报加载完整性的那条断言**必须把 `loaded.length` 打出来**（一个都没匹配上的空跑同样是「全绿」，`/tmp/cfsfx.mjs` 里打印的 `载入 62/62` 就是这条抓手）。
-      - **那个 62 是硬编码的断言值，素材增删时必须跟着改**（`/tmp/cfsfx.mjs` 与 `/tmp/cfswap.mjs` 各一处，`totalStems === 62` 与 `pk.n === 62`）。停在旧值不会让任何用例变红 —— 它会安静地变成一条**过期的断言**，而「新素材根本没进 `SAMPLES`」这类失效恰好就会被它放过。
+    - **「建起音频图」只解决一半 —— 采样是异步预载的，还要等 `audioState().preloadDone === true`。** 全部 72 个 stem 是网络下载 + `decodeAudioData`，`ensure()` 之后立刻读到的 `loaded` 是空的、`lastAttempt.reason` 会是 `"synth"`（看着像「采样全挂了」，其实只是还没到）。用例开头一律 `startBtn.click()` → **轮询等 `preloadDone`** → 再做别的；报加载完整性的那条断言**必须把 `loaded.length` 打出来**（一个都没匹配上的空跑同样是「全绿」，`/tmp/cfsfx.mjs` 里打印的 `载入 72/72` 就是这条抓手）。
+      - **那个 stem 总数是硬编码的断言值，素材增删时必须跟着改**（`/tmp/cfsfx.mjs` 与 `/tmp/cfswap.mjs` 各一处，`totalStems === N` 与 `pk.n === N`）。它数的是 `SAMPLES` 展开后的 stem 数，**现在是 72**（含 `classic/*.wav` 那批与用户提供的 `impacts/headshot_kill.mp3`、`vo/fireinthehole.wav`）。停在旧值不会让任何用例变红 —— 它会安静地变成一条**过期的断言**，而「新素材根本没进 `SAMPLES`」这类失效恰好就会被它放过。
     - **`ctx` 建起来 ≠ `ctx.state === "running"`**：无头下 `startBtn.click()` 没有临时用户激活，ctx 停在 `suspended`、**时间不前进**，于是探针一律读 0.000、排程的 `at` 时刻永远不到（看着像「压缩器完美削顶」「换弹三段一段都没响」）。要量信号就先 `ctx.resume()`（页面内调即可，或 CDP 带 `userGesture: true`）、并断言 `ctxState === "running"`。**这一条只在「量波形 / 量排程时刻」时才是硬需求** —— 只断言 `lastAttempt` 的用例不受影响（节点照样建、`_note` 照样写）。
     - **量波形的三条前提**（`/tmp/cfsfx.mjs` 的削顶块，三个坑都踩过）：① ctx 必须 running（上一条）；② **必须把 BGM 的增益钉成 0**（源头压，不是 `setMusic(false)`，见 `scripts/audio.js` 那节的 ⚠️）；③ **每档之间要留 ≥ 14 帧静默期** —— `AnalyserNode.getFloatTimeDomainData` 的窗口是 `fftSize/sampleRate` = 8192/44100 = **186 ms ≈ 11 帧 @60fps**，不留就量到上一档的尾音（实测「单发」那档读到与校准正弦**一模一样**的峰值）。探针循环一律写在页面里按 `rAF` 逐帧累计，**绝不用 CDP 轮询**（一次往返 ~100 ms，比要量的瞬态还长）。
   - **`try/catch` 会把异常藏起来，测试要断言 `loopErrors() === 0` 且 `lastError() === null`。** 主循环和死亡块都有兜底（见死亡流程一节），异常不再冒泡到 `window.onerror`，只看 `__errs` 会得到一片「零报错」的假绿。想验证兜底本身有效，可以故意弄坏一个每帧都会被写的 DOM（如给 `#crosshair` 的 `style` 装一个抛异常的 getter，`update()` 每帧都会写它的 `--gap`）。

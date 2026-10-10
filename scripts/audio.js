@@ -56,6 +56,14 @@ const SAMPLES = {
   cf_grenade_explode: ["classic/grenade_explode.wav"],
   cf_grenade_flash: ["classic/grenade_flash.wav"],
   cf_grenade_smoke: ["classic/grenade_smoke.wav"],
+  // 「Fire in the hole!」—— 玩家**丢出**投掷物那一下喊的一声（素材由用户提供，见 `vo/`
+  // 这一层目录的用意、以及下方 `fireInTheHole()` 与 CREDITS.txt 第七节）。
+  // 写成带扩展名的 stem ⇒ 走 `_loadOne` 那条「自带扩展名、原样用」的分支，只有一个候选
+  // URL（不产生 404），也因此不进 M4A_ONLY —— 与 `impacts/headshot_kill.mp3` 同一套处理：
+  // 素材是**用户给的原始 wav，原样入库、未转码**。
+  // ⚠️ 它与上面那四条 `cf_grenade_*` 不是一回事：那四条是 **CF 原声里投掷物的物音**
+  // （拉环 / 爆炸 / 闪爆 / 烟爆），这条是**玩家自己的人声台词**，两者来源不同（见 CREDITS）。
+  fireinthehole: ["vo/fireinthehole.wav"],
   ak47_fire:    ["weapons/ak47_fire"],
   ak47_distant: ["weapons/ak47_distant_a", "weapons/ak47_distant_b"],
   awp_fire:     ["weapons/awp_fire"],
@@ -70,6 +78,12 @@ const SAMPLES = {
   impact_flesh: ["impacts/impact_flesh_1", "impacts/impact_flesh_2", "impacts/impact_flesh_3"],
   ricochet:     ["impacts/ricochet_1", "impacts/ricochet_2"],
   headshot:     ["impacts/headshot"],
+  // 爆头**击杀**的确认音（用户提供的素材，见下面 headshotKill() 与 CREDITS.txt 第六节）。
+  // **与上面那条 `headshot` 是两个槽位、两件事**：那条是「打中了头」的命中标记音（含
+  // 没打死的那一枪），这条只在「爆头 + 这一杀没续上连杀」时播。写成带扩展名的 stem
+  // ⇒ 走 `_loadOne` 里那条「自带扩展名、原样用」的分支，只有一个候选 URL（不产生 404），
+  // 也因此不进 M4A_ONLY —— 素材是**原始 mp3 原样入库**，没有转码（见下条注释）。
+  headshot_kill: ["impacts/headshot_kill.mp3"],
   hurt:         ["impacts/hurt"],
   brass:        ["impacts/brass_1", "impacts/brass_2", "impacts/brass_3",
                  "impacts/brass_4", "impacts/brass_5"],
@@ -285,7 +299,11 @@ export class SFX {
   }
 
   async _loadOne(dec, id, stem) {
-    const cands = /\.wav$/i.test(stem) ? [""] : M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
+    // stem **自带扩展名**（`.wav` / `.mp3`）时原样用、不拼候选 —— 这叫「这条素材就这一个文件」：
+    // `classic/*.wav` 是 CF 原始 wav，`impacts/headshot_kill.mp3` 与 `vo/fireinthehole.wav`
+    // 是用户提供的原始素材（**不做转码**：mp3 / wav 三家浏览器都原生解，转一道只是白挨一次
+    // 有损转码；何况 wav 转出来的只能是没有 ogg 的 m4a，白白多一份 404）。
+    const cands = /\.(wav|mp3)$/i.test(stem) ? [""] : M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
     let last = "./audio/" + stem + cands[0];
     let err = null;
     for (const ext of cands) {
@@ -659,10 +677,22 @@ export class SFX {
   }
 
   // 爆头（奖励音调，但也换成了采样：那一声「叮」本来就是录音更好听）
+  // ⚠️ 这是**命中**音（打中头就打，哪怕没打死），与下面的 `headshotKill()` 不是一回事。
   headshot() {
     if (!this.ready()) return;
     this._playMapped("headshot", { id: "headshot", vol: 0.95, wet: 0.2 },
       () => this._headshotSynth());
+  }
+
+  // 爆头**击杀**确认音。**只在「这一杀没有续上连杀」时由 onKill 调**（见 main.js 那条注释）：
+  // 一旦进了连杀，紧接着就是经典人声播报，再叠一声会抢开头。
+  // 素材是用户提供的原始 mp3（未转码，见 SAMPLES / CREDITS.txt 第六节），整段约 1.0s。
+  // 与 `headshot()` 同一次击杀里**前后各响一声**是有意的（CF 也是命中一声、确认一声），
+  // 所以这里不压 `headshot()` 的音量、也不把它挤掉。
+  headshotKill() {
+    if (!this.ready()) return;
+    this._playMapped("headshotKill", { id: "headshot_kill", vol: 0.9, wet: 0.15 },
+      () => this._headshotKillSynth());
   }
 
   // 脚步。**玩家与敌人必须分档**：玩家的不带坐标 ⇒ 绕过 panner、全声级抵达耳边；
@@ -756,6 +786,31 @@ export class SFX {
     if (!this.ready()) return;
     this._note("throwGrenade", null, "synth", 0);
     this._meleeSynth(false);
+  }
+
+  // 「Fire in the hole!」—— **出手那一帧**喊的那一声（调用点在 main.js 的 `throwGrenade()` 里，
+  // 紧挨着上面的 `throwGrenade()` 甩手声；拉环那一下是 `grenadePin()`，与本方法无关）。
+  // **只有手雷会走到这里**：调用点门在 `def.nade === "frag"` 上（闪光/烟雾故意留空，等用户各自
+  // 补素材）。本方法自己**不判武器** —— 它只负责「把这句话喊出来」，「什么时候喊」归调用点。
+  // 与上面那声甩手 whoosh 是**两件事、两个方法**：那个是手臂动作，这个是台词。所以素材缺了
+  // 也不影响甩手声（那条路径自己照常响）——「听感退化、不会静音」。
+  //
+  // 路由：**不带 x/y/z** ⇒ 不走 panner，走 `master` + 混响（`wet` 0.2），与 `hurt()` 同一条，
+  // 因为这是**玩家自己的喊声**。也**刻意不走 `hudBus`**：那条总线绕开了闪光弹的低通闷音，
+  // 而这声是发生在世界里的喊话 —— 被闪了就该跟着一起闷。
+  //
+  // **没有合成兜底**（这里不用 `_playMapped` 的第三个参数）：人声合不出来，退回振荡器只会
+  // 得到一段「不像人」的怪声，而这正是 `streak()` 当年定下的那条线（绝不退回 TTS 一类的
+  // 声线，声线随设备变）。素材缺失/还没加载完时只留一个 `reason: "missing"` 的记录。
+  fireInTheHole() {
+    if (!this.ready()) return false;
+    const opts = {
+      id: "fireinthehole", kind: "nade",
+      vol: 0.8, volJitter: 0, rate: 1, rateJitter: 0, wet: 0.2,
+    };
+    const h = this._sample("fireinthehole", opts);
+    this._note("fireInTheHole", opts, h ? "sample" : "missing", h ? h.dur : 0);
+    return !!h;
   }
 
   grenadePin() {
@@ -1370,6 +1425,32 @@ export class SFX {
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
     o2.connect(g2).connect(this.master);
     o2.start(t); o2.stop(t + 0.1);
+  }
+
+  // 爆头**击杀**确认音（`headshot_kill` 采样缺失 / 还没加载完时的回退）。
+  // **必须与上面那声命中「叮」听得出是两回事**，否则采样挂掉之后这两件事就分不清了：
+  // 命中音是单声高频下滑，这一条是「低频冲击 + 一声上行短音」。
+  _headshotKillSynth() {
+    const ctx = this.ctx, t = ctx.currentTime;
+    const o0 = ctx.createOscillator();
+    o0.type = "sine";
+    o0.frequency.setValueAtTime(300, t);
+    o0.frequency.exponentialRampToValueAtTime(120, t + 0.16);
+    const g0 = ctx.createGain();
+    g0.gain.setValueAtTime(0.30, t);
+    g0.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o0.connect(g0).connect(this.master);
+    o0.start(t); o0.stop(t + 0.20);
+
+    const up = ctx.createOscillator();
+    up.type = "triangle";
+    up.frequency.setValueAtTime(1400, t + 0.02);
+    up.frequency.exponentialRampToValueAtTime(2600, t + 0.12);
+    const g1 = ctx.createGain();
+    g1.gain.setValueAtTime(0.22, t + 0.02);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    up.connect(g1).connect(this.master);
+    up.start(t + 0.02); up.stop(t + 0.18);
   }
 
   // 脚步的金属环层（**不是回退**，是叠加）：钢甲板的低频共鸣。

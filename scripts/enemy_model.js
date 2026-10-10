@@ -412,6 +412,11 @@ const MOUNT_AIM = { x: -0.02, y: 0.15, z: 0.36, pitch: 0.0 };
 const CADENCE_SLIP = 0.72;
 const HALF_STRIDE_MAX = 0.32;
 
+// 张望的最大偏头角（rad，约 28°）。**只动 head.rotation.y，不加点头** —— 头部命中盒的
+// AABB 横向半宽 0.125、深度 0.18，绕自身枢轴偏航不改变这两个数（外接半径仍 0.219），
+// 所以爆头盒不会随张望变形。改大这个值之前先跑 /tmp/cfhit.mjs 与 /tmp/cfpivot.mjs。
+const MAX_SCAN = 0.5;
+
 // ---------- 临时变量（避免每帧 new）----------
 const DOWN = new THREE.Vector3(0, -1, 0);
 const _i1 = new THREE.Vector3();
@@ -654,6 +659,9 @@ export class SoldierRig {
     this.spine.rotation.set(0, 0, 0);
     this.chest.rotation.set(0, 0, 0);
     this.neck.rotation.set(0, 0, 0);
+    // head 此前全仓库无写入点，所以这里一直没清；⑥ 段的张望会写 head.rotation.y，
+    // 对象池捞出来的人必须从零开始，否则会继承上一个人的偏头角。
+    this.head.rotation.set(0, 0, 0);
     this.mount.position.set(MOUNT_CARRY.x, MOUNT_CARRY.y, MOUNT_CARRY.z);
     this.mount.rotation.set(MOUNT_CARRY.pitch, 0, 0);
     this.mount.updateMatrix();
@@ -763,6 +771,14 @@ export class SoldierRig {
     this.neck.rotation.y = blind
       ? Math.sin(this.breath * 2.3) * 0.45
       : Math.sin(this.breath * 0.7) * 0.06;
+    // 张望：幅度由 enemies.js 门控（交战距离内 s.scan=0，只有 22m 外才东张西望），
+    // 这里只管把相位映成偏头角。**只动 rotation.y、不加点头** —— 把头部 AABB 的
+    // 横向占用压在既有的 sqrt(0.125²+0.18²)=0.219 半径内，否则爆头盒会随张望变形。
+    // **必须乘 (1-deathBlend)**：死亡姿势强制 neck.rotation.y=1.15，而 head 是 neck 的
+    // 子节点，不归零就是在 1.15 之上再叠一个偏角，会破坏尸体 pivot 0.26 那条标定
+    //（那个数由「全部顶点 root 系 z 的最大值」反解而来，头是极值点，余量只剩 0.3mm）。
+    // （用 this.deathBlend 而不是下面的 `db` —— 那个 const 在 ⑦ 段才声明，这里读会是 TDZ 抛错）
+    this.head.rotation.y = (s.scan || 0) * Math.sin(s.scanPhase || 0) * MAX_SCAN * (1 - this.deathBlend);
 
     // ⑦ 枪：低姿 ↔ 据枪 插值，开火时往肩里推 + 抬枪口
     const k = this.aimBlend;

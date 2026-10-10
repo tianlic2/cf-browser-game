@@ -492,6 +492,14 @@ function decayPunch(dt) {
 const PX_PER_DEG = 9.5;
 const inaccToPx = (v) => Math.atan(Math.max(0, v || 0)) * 57.29577951308232 * PX_PER_DEG;
 
+// 移动散布的**显示**缩放（用户 2026-10-10 反馈「移动时准星四条线张得太开」）。
+// CS 的 `move` 项在满速下给出 atan(0.17506)·57.3·9.5 ≈ 94px 的半开口，叠加基线后
+// 准星能开到 ≈100px —— 实际走位时确实甩得离谱。整体减半 ⇒ 满速 ≈51px。
+// **只乘 `move` 这一项**：站定(`stand`/`crouch`)、腾空(`jump*`)、连发惩罚(`inaccPenalty`)
+// 都是各自的语汇，用户报的是「移动时」这一条，不跟着动。
+// 这仍然是一次**纯显示**改动 —— 这颗散布锥只驱动准星张开、绝不喂子弹（见 crosshairGap 一节）。
+const MOVE_SPREAD_SCALE = 0.5;
+
 // 姿态 + 移动的散布锥（正切值，与 CS 同单位）。静步不叠移动项 —— 与「静步不触发脚步声」同源。
 function baseInaccuracy(def) {
   const ic = def.inacc;
@@ -502,7 +510,7 @@ function baseInaccuracy(def) {
   const hs = Math.hypot(p.vel.x, p.vel.z);
   let m = (hs - 0.34 * RUN_SPEED) / (0.95 * RUN_SPEED - 0.34 * RUN_SPEED);
   m = Math.max(0, Math.min(1, m));
-  if (m > 0 && !p.sneaking) base += ic.move * Math.pow(m, 0.25);
+  if (m > 0 && !p.sneaking) base += ic.move * MOVE_SPREAD_SCALE * Math.pow(m, 0.25);
   return base;
 }
 function crosshairGap() {
@@ -944,15 +952,15 @@ let lastKiller = null;    // 仅供调试钩子读取
 // 绝不写回 player.yaw/pitch —— 那是全项目唯一的朝向数据源。
 const deathCam = { active: false, t: 0, dYaw: 0, dPitch: 0, yawOff: 0, pitchOff: 0 };
 // 连杀（CF 口径）：**计数器 + 一个会重置的时间戳**，不是「最近 N 秒的击杀时间数组」。
-// 每击杀一人 `streakCount++`，并且把 4 秒窗口**从这一发重新起算**；4 秒内没有下一杀就归零。
-//   这两种写法不是口味不同，是**真的会算出不同的数**：在**相邻间隔都 < 4s、但首尾间隔 > 4s**
-//   的时候分道扬镳。第 0 / 3.5 / 7.0 秒各杀一人 —— 「最近 4 秒内杀了几个人」（滑动窗口）
-//   在第三杀只数得到 2 人（第 0 秒那杀被 `7.0 - 4.0` 挤出了窗口），而「每杀一人就把计时器
+// 每击杀一人 `streakCount++`，并且把 6 秒窗口**从这一发重新起算**；6 秒内没有下一杀就归零。
+//   这两种写法不是口味不同，是**真的会算出不同的数**：在**相邻间隔都 < 6s、但首尾间隔 > 6s**
+//   的时候分道扬镳。第 0 / 3.5 / 7.0 秒各杀一人 —— 「最近 6 秒内杀了几个人」（滑动窗口）
+//   在第三杀只数得到 2 人（第 0 秒那杀被 `7.0 - 6.0` 挤出了窗口），而「每杀一人就把计时器
 //   推翻重来」是 3 人：只要**相邻两杀**都接得上，连杀就一直续着，这才是 CF 的手感。
 //   旧实现是 3.0s 的 `killTimes.filter(t => time - t < 3.0)`，窗口既短、又是滑动语义。
 // 时间轴用主循环的 `time`（`time += dt`），不用 `performance.now()`：`__tactical.pause()`
 // 停 rAF 时它跟着一起冻住，无头测试才能定步长快进（同 chat / 死亡计时那套）。
-const STREAK_WINDOW = 4.0;
+const STREAK_WINDOW = 6.0;
 let streakCount = 0;
 let lastKillAt = -Infinity;
 // 主循环里被兜住的异常。以前任何一处抛异常都会让 update() 走不完 →
@@ -2617,6 +2625,19 @@ function throwGrenade() {
   actedThisLife = true; // 本回合已行动 → 锁定背包切换（CF 规则）
   cur().state.throwCd = st.throwCooldown;
   sfx.throwGrenade();
+  // 「Fire in the hole!」——**就在出手这一帧喊**（用户指定的时机）。这一行在这里是刻意的：
+  // 本函数只在实体真正建出来那一帧被 `updateGrenadeAction()` 调到（判据是 `a.t >= a.releaseAt`），
+  // 所以它天然就是「丢出时」；而拉环那一声在更早的 `grenadePin()`（`a.t >= .3`），**不是这里**。
+  //
+  // **只有手雷喊**（用户 2026-10-10 定；这句台词本来也只是手雷的喊话）。判据取 `def.nade`
+  // 而不是 `currentId`：它就是下面 `grenadePool.push({ kind: def.nade })` 灌进去的那个字段，
+  // 也正是 `updateGrenades()` 里 `g.kind === "frag"` 用来分流爆炸的**同一个依据** ——
+  // 于是「喊」与「炸」不可能分叉（不会出现喊了手雷台词、炸出来的却是闪光）。
+  //
+  // 闪光 / 烟雾**故意留空**：这一条是给用户之后各自补素材的挂点，要加就照着上面那句再写一行
+  // `if (def.nade === "flash") sfx.xxx();`，**不必动投掷状态机**。它们出手目前只有紧接着上面
+  // 那声甩手 whoosh（`sfx.throwGrenade()`），这是有意的、不是漏了。
+  if (def.nade === "frag") sfx.fireInTheHole();
   triggerKick(currentId); // 甩手投掷的后坐视感
 
   const origin = new THREE.Vector3();
@@ -2833,6 +2854,12 @@ function onKill(headshot, enemyName, weaponName, golden) {
   showKillIcon(headshot, currentId, golden);
   // 连杀时只播经典人声，避免再叠一层合成击杀音抢开头。
   if (streakCount < 2) sfx.kill();
+  // 爆头击杀的确认音**只在「这一杀没有续上连杀」时播**（用户定的口径）。判据落在
+  // `streakCount === 1` 上：它在上面 `streakCount++` 之后，等于 1 就意味着**这一杀计时器
+  // 是刚起算的**（上一串已经断了、或本局第一杀）—— 也就是「不处于连杀判定中」。到了
+  // 2 以上交给人声播报，再叠一声会抢开头（与上面 `sfx.kill()` 同一条理由）。
+  // 注意它与 `sfx.headshot()`（命中头就响、含没打死的那些）是两件事，这一枪上两声音都会响。
+  if (headshot && streakCount === 1) sfx.headshotKill();
   pushKillFeed("你", weaponName || WEAPON_DEFS[currentId].name, enemyName || "敌人",
                !!headshot, false, currentId);
   if (streakCount >= 2) showStreak(streakCount);
@@ -3997,9 +4024,11 @@ function animateWeapon(dt) {
   const rate = moving ? (player.crouching || player.sneaking ? 6 : hSpeed > 5.6 ? 12 : 8) : 0;
   const amp = player.crouching || player.sneaking ? 0.55 : hSpeed > 5.6 ? 1.3 : 1;
   bobT += dt * rate;
-  // 投掷物的双手更靠近镜头：仅把行走摆幅降至 30%，原拉环/投掷动画不缩放。
-  // 在共用 bob 处处理，使经典视模与加载失败后的回退手臂保持一致。
-  const m = moving ? amp * (def.type === "grenade" ? 0.3 : 1) : 0;
+  // 投掷物的双手更靠近镜头：仅把行走摆幅降至 15%（原 30%，用户 2026-10-10 反馈
+  // 「手持投掷物移动时手臂摆动过大」，再减一半），原拉环/投掷动画不缩放。
+  // 在共用 bob 处处理，使经典视模与加载失败后的回退手臂保持一致 ——
+  // 下面 `classicNades[vid]` 那条路也是读同一对 bobX/bobY，所以一处改动两边同时生效。
+  const m = moving ? amp * (def.type === "grenade" ? 0.15 : 1) : 0;
   const bobX = Math.sin(bobT * 2) * 0.013 * m;
   const bobY = Math.sin(bobT) * 0.013 * m;
 
@@ -4147,7 +4176,7 @@ function update(dt, rawDt) {
   // 放在下面那行 `state !== "playing"` 的 return **之前**：结算画面上已有的行也能淡完。
   chat.update(dt);
   // 连杀窗口过期就把计数归零。**单靠 onKill 里那次过期判定是不够的**：那条只在「下一次
-  // 击杀」时才跑，中间这 4 秒里 `streak()` 读口会一直报一个早就该没了的数（调试和测试都
+  // 击杀」时才跑，中间这几个秒里 `streak()` 读口会一直报一个早就该没了的数（调试和测试都
   // 会被它骗）。两条判定用的是同一个比较，不会互相打架。
   if (streakCount > 0 && time - lastKillAt > STREAK_WINDOW) streakCount = 0;
   // 连杀窗口倒计时条（每帧写 width，同死亡面板那条）。放在 `state !== "playing"` 的
@@ -5008,6 +5037,20 @@ async function init() {
       difficulties: () => DIFFICULTIES.map((d) => d.id),
       setDifficulty: (id) => { difficultyId = findDifficulty(id).id; applyDifficulty(); buildMenuMatch(); return difficultyId; },
       enemyTuning: () => ({ ...ENEMY_TUNING }),
+      // 逐敌 AI 读口。没有它，滞后瞄准/ADAD/分离力/张望这四条都只能靠肉眼看截图 ——
+      // 那是这个仓库反复记作「无法验收」的做法。给的是活体的**当前**值（非快照语义，
+      // 与 enemyLoadouts 那种一次性配置判据不同）。
+      enemyAI: () => enemyManager.enemies.map((e) => ({
+        name: e.name,
+        dist: Math.hypot(player.pos.x - e.group.position.x, player.pos.z - e.group.position.z),
+        aimErr: e.aimErr,
+        wantShoot: !!e.wantShoot,
+        detourSide: e.detourSide, detourT: e.detourT, noProgT: e.noProgT,
+        strafeDir: e.strafeDir, strafeT: e.strafeT, flipsLeft: e.flipsLeft,
+        aimX: e.aimX, aimZ: e.aimZ, scanPhase: e.scanPhase, seed: e.seed,
+        headYaw: e.rig && e.rig.head ? e.rig.head.rotation.y : 0,
+        traits: e.traits ? { ...e.traits } : null,
+      })),
       showScoreboard,
       scoreboard: () => ({
         visible: !scoreboardEl.classList.contains("hidden"),
@@ -5015,8 +5058,8 @@ async function init() {
         roster: roster.map((r) => ({ name: r.name, kills: r.kills, deaths: r.deaths, bound: !!r.enemy })),
       }),
       onKill: (head, name, wpn, golden) => onKill(head, name, wpn, golden),
-      // 连杀读口：`count` 是当前连杀数（4 秒无击杀即为 0），`since` 是距上一杀的秒数，
-      // `window` 是窗口长度（免得测试把 4.0 抄一份进去、以后改窗口时假红）。
+      // 连杀读口：`count` 是当前连杀数（6 秒无击杀即为 0），`since` 是距上一杀的秒数，
+      // `window` 是窗口长度（免得测试把 6.0 抄一份进去、以后改窗口时假红）。
       // `since` 在「本局还没杀过人」时是 `null`，**不是 `Infinity`** —— 内部那个
       // `time - lastKillAt` 确实是 `Infinity`，但 CDP 的 returnByValue 走 JSON，
       // `Infinity` 到那边会变成 `null`（测试里对着它调 toFixed 直接 TypeError）。

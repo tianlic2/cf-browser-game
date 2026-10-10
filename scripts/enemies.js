@@ -34,6 +34,30 @@ const pauseFor = (min, span, mul = 1) => (min + Math.random() * span) * ENEMY_TU
 // 别收得太紧：玩家贴身绕圈时敌人跟不上转速，容差过小会让它一直不还击
 const AIM_TOL = 0.35;
 
+// ---- 瞄准滞后（「枪口跟丢你半拍」）----
+// 转身目标不是玩家的**实时**位置，而是一个指数逼近出来的滞后瞄点：真人转身要先看到、再反应，
+// 不会像雷达一样锁死。τ 是滞后时间常数，反应快的敌人 τ 小。
+// **它与杀伤力没有直接通路**：main.js 的 hitProb 只由距离/玩家速度/难度 acc 决定，
+// 敌人的朝向一个像素都不进那个式子。唯一的耦合是开火闸门（AIM_TOL），
+// 而那条闸门的参照系仍取**实时**朝向 —— 见 update() 里 ① 段末尾的注释。
+const BASE_TAU = 0.18;
+
+// ---- ADAD 点按横移的节拍 ----
+const FLIP_REST_MIN = 0.3, FLIP_REST_SPAN = 0.5;   // burst 之间的停顿
+const FLIP_GAP_MIN = 0.1, FLIP_GAP_SPAN = 0.2;     // burst 内两次急转的间隔
+// 平滑必须分档：k(3.0) 的时间常数约 0.33s，会把 0.1~0.3s 的点按抹成接近零幅（看不出 ADAD）。
+// burst 期用 K_STRAFE_BURST 才有干脆的急停急转；rest / 远距离衰减仍用 K_STRAFE_REST。
+const K_STRAFE_BURST = 8.0;
+const K_STRAFE_REST = 3.0;
+
+// ---- 同伴分离力 ----
+// 加在「喂给 avoid() 的本帧位移」上（**不是**加进 wx/wz —— 那里会被归一化掉）。
+// 上限 cap = SEP_MAX_FRAC * speed * dt ⇒ 分离位移永远只是「一个合法步长的一小部分」，
+// 所以 avoid() + moveBy() 仍是唯一权威，**物理上不可能推穿墙或瞬移**。
+const SEP_R = 1.6;          // 作用半径（米）
+const SEP_PUSH = 3.2;       // 合力强度上限（无量纲，最后统一缩放到 cap）
+const SEP_MAX_FRAC = 0.35;  // 分离位移 ≤ 本帧合法步长的这个比例
+
 // ---- 碰撞尺寸：**与 main.js 的 PLAYER_RADIUS / STEP_H / PLAYER_TOP 必须一致** ----
 // 敌人和玩家共用实体尺寸与脚底高度判据；经典图寻路会跟随甲板、楼梯及地道地板。
 // AI 不跳箱，地道内的玩家通过出生区楼梯路线接近。
@@ -120,6 +144,25 @@ export class Enemy {
     this.flashAmt = 0;
     this._lastFlash = -1; // 强制复用后重算一次 emissive
     this.seed = Math.random() * Math.PI * 2;
+
+    // ---- 每敌性格：全部从 seed **哈希派生** ----
+    // 纯函数 ⇒ 同一个 seed 必得同一组性格（可断言；不是再掷一次骰子）。
+    // 六个乘数**全部以 1.0 为中心**（burst 的均值落在 4 = 改动前的点射长度），
+    // 所以群体期望值与改动前一致 —— 「难度不变」是构造出来的、不是测出来的。
+    // **绝不与 ENEMY_TUNING 相乘**：难度表那 5 个乘数照旧管速度/停顿/伤害/准度/侵略性，
+    // 性格管的是「这个人的脾气」。两者相乘会让简单档同时变得「更弱」且「更没差别」。
+    const R = (o) => {
+      const v = Math.sin(this.seed * 12.9898 + o * 78.233) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    this.traits = {
+      reaction: 0.70 + R(1) * 0.60,   // 0.70~1.30 反应快慢 —— 只进滞后的 τ
+      strafe:   0.65 + R(2) * 0.70,   // 0.65~1.35 躁动程度 —— 只进 ADAD 的节拍（除）
+      engage:   0.88 + R(3) * 0.24,   // 0.88~1.12 交战距离偏好（**小幅杀伤力旋钮，故意压紧**）
+      burst:    R(4),                 // 0~1 → 3+round(burst*2) ∈ {3,4,5}，均值 4
+      turn:     0.85 + R(5) * 0.30,   // 0.85~1.15 转身角速度
+      scan:     R(6),                 // 0~1 不交战时张望的速率
+    };
     // 移速必须在这里给：update() 里 `this.speed * dt` 一旦是 undefined，
     // sp 变 NaN → moveBy(NaN,NaN)；而 NaN 的所有比较都是 false，
     // blockedAt() 会**判成「哪儿都没被挡」**（假阴性），于是 NaN 一路写进 group.position，
@@ -141,6 +184,10 @@ export class Enemy {
     this.animT = Math.random() * Math.PI * 2;
     this.strafeDir = Math.random() < 0.5 ? -1 : 1;
     this.strafeT = 1.2 + Math.random() * 1.4;
+    // ADAD 点按横移的状态机：rest（strafeT 倒计时）→ burst（flipsLeft 次急转，每次间隔 flipT）。
+    // **对象池复用必须在这里归零**：捞出来的人不能带着上一个人的半截 burst。
+    this.flipsLeft = 0;
+    this.flipT = 0;
     // 移动/姿态的平滑量（对象池复用，每次出生都要归零，否则会带着上一具尸体的速度复活）
     this.vel = new THREE.Vector3();
     this.strafeBlend = this.strafeDir;
@@ -156,6 +203,14 @@ export class Enemy {
     this.noProgT = 0;
     this.turnRate = 0;
     this.turnVel = 0;
+    // 滞后瞄点：转身目标逼的是它，不是玩家的实时位置（见 update() 的 ⓪ 段）。
+    // aimSeeded=false ⇒ 第一次 update 用自己脚下播种，于是出生有一段真实的起转而不是一帧到位。
+    this.aimX = x;
+    this.aimZ = z;
+    this.aimSeeded = false;
+    // 张望相位：性格在 Enemy 上、不在 rig 上，所以相位也在这里推进。
+    // 相位起点取随机（与 animT/breath 同源）—— 8 个人同步张望本身就是「机械感」。
+    this.scanPhase = Math.random() * Math.PI * 2;
     this.aimPitch = 0;
     this.aimErr = 0;
     this.aimLevel = 0;                                       // 低姿 ↔ 据枪 的过渡量
@@ -168,7 +223,9 @@ export class Enemy {
     if (!this.group.parent) this.scene.add(this.group);
   }
 
-  update(dt, player) {
+  // peers = EnemyManager 本帧的活体数组（分离力用）。可缺省 —— 缺省时分离力整段跳过，
+  // 所以 `e.update(dt, player)` 这种老写法仍然工作（/tmp 那批寻路用例不受影响）。
+  update(dt, player, peers = null) {
     if (this.dead) { this.updateCorpse(dt); return; }
 
     this.animT += dt * 8;
@@ -184,22 +241,48 @@ export class Enemy {
     // 帧率无关的指数逼近：1-e^(-k·dt)。用 dt*k 的写法在低帧率下会变慢，手感随帧率漂移
     const k = (rate) => 1 - Math.exp(-rate * dt);
 
+    // ---------- ⓪ 滞后瞄点（「枪口跟丢你半拍」）----------
+    // 真人转身是「先看到、再反应」，不会像雷达一样每帧锁在实时位置。所以维护一个
+    // 指数逼近玩家的滞后点，转身目标用它而不是实时 player.pos。
+    // **dx/dz（走位方向）仍用实时玩家位置** —— 只改 targetRot。这个解耦是安全的：
+    // avoid() 探的是「本帧位移」而从不读 rotation.y，moveBy() 纯位置，
+    // 所以「身体朝滞后点、朝实时点走」不可能破坏合法性。
+    if (!this.aimSeeded) { this.aimX = gp.x; this.aimZ = gp.z; this.aimSeeded = true; }
+    // τ 按距离收：人越近跟得越稳。不收的话贴脸绕圈的稳态偏角 δ=ω·τ 会顶穿开火闸门
+    // （4m、玩家 7.2m/s ⇒ ω=1.8、τ=0.26 ⇒ δ≈0.36 > AIM_TOL 0.35，高 τ 的敌人会停止开火）。
+    const tau = (BASE_TAU / this.traits.reaction) *
+      Math.max(0.35, Math.min(1, dist / ENGAGE_FAR));
+    const ka = 1 - Math.exp(-dt / tau);
+    this.aimX += (player.pos.x - this.aimX) * ka;
+    this.aimZ += (player.pos.z - this.aimZ) * ka;
+    // 张望相位：只推进、不在这里消费（幅度在 ③ 段按 aimLevel 门控后交给骨架）
+    this.scanPhase += dt * (0.6 + this.traits.scan * 0.8);
+
     // ---------- ① 转身（限角速度，不再一帧转到位）----------
     let targetRot = blind
       ? this.group.rotation.y + Math.sin(this.animT * 0.35 + this.seed) * 1.6   // 致盲：乱转
-      : Math.atan2(dx, dz);   // 本组 +z 就是正面，也是枪口指向
+      : Math.atan2(this.aimX - gp.x, this.aimZ - gp.z)   // 本组 +z 就是正面，也是枪口指向
+        + Math.sin(this.scanPhase * 0.7 + this.seed) * 0.04;   // 滞后目标上再叠一点慢速游移
     let diff = targetRot - this.group.rotation.y;
     while (diff > Math.PI) diff -= Math.PI * 2;
     while (diff < -Math.PI) diff += Math.PI * 2;
     // 转成角速度再积分（而不是直接写角度）：这样转身有起转/收住的过渡，
     // 直接 min(TURN_RATE*dt, diff*k) 会是「匀速转到停」，看着像机器人原地打转
-    const wantRate = Math.max(-TURN_RATE, Math.min(TURN_RATE, diff * 8));
+    const maxTurn = TURN_RATE * this.traits.turn;   // 性格：转身快慢
+    const wantRate = Math.max(-maxTurn, Math.min(maxTurn, diff * 8));
     this.turnVel += (wantRate - this.turnVel) * k(10);
     const step = this.turnVel * dt;
     this.group.rotation.y += step;
     this.turnRate = this.turnVel;
-    // 转完后还剩多少没对准 —— 没转正不开火（枪口方向就是身体朝向，转着身子打就成了「歪着扫射」）
-    this.aimErr = Math.abs(diff - step);
+    // 转完后还剩多少没对准 —— 没转正不开火（枪口方向就是身体朝向，转着身子打就成了「歪着扫射」）。
+    // **参照系取实时方向（liveYaw），不是上面那个滞后目标**：语义是「枪口还在往你身上摆的时候不开火」。
+    // 滞后只贡献一个稳态偏角 δ=ω·τ（7m、玩家横向 5m/s ⇒ ω≈0.71、τ≤0.26 ⇒ δ≤0.18），
+    // 对 AIM_TOL 仍有余量；贴脸绕圈时 τ 已被按距离收到 0.35 倍，顶不穿。
+    // ⚠️ 别把这里改成拿滞后点当参照 —— 那会让闸门随难度/距离漂移，等于偷偷改杀伤力。
+    let liveDiff = Math.atan2(dx, dz) - this.group.rotation.y;
+    while (liveDiff > Math.PI) liveDiff -= Math.PI * 2;
+    while (liveDiff < -Math.PI) liveDiff += Math.PI * 2;
+    this.aimErr = Math.abs(liveDiff - step);
 
     // ---------- ② 期望速度 → 实际速度（有惯性，不是每帧瞬变）----------
     let wx = 0, wz = 0;
@@ -210,19 +293,42 @@ export class Enemy {
     } else {
       // 侵略性高 = 更敢贴身：后撤阈值变小、横移更大幅。除法规避了 aggro 为 0 的极端值
       // （ENEMY_TUNING 只由 main.js 的 DIFFICULTIES 灌入，最小 0.7）
-      const near = ENGAGE_NEAR / ENEMY_TUNING.aggro;
-      if (dist > ENGAGE_FAR) { wx = dir.x; wz = dir.z; }                 // 压上
+      // 交战距离偏好：`engage` 是**小幅杀伤力旋钮**（它改敌人停在哪 ⇒ 改 dist ⇒ 改 hitProb
+      // 里的 0.72-dist/46），所以范围故意压在 ±12%，并且要进验证第 3 条的中性测量。
+      // 后撤阈值与压上阈值一起缩放，中距离横移那条带（ENGAGE_FAR+3）保持全局不变 ——
+      // 它同时是分离力与 noProgT 监工的门（两带不相交的可证明性靠它）。
+      const near = (ENGAGE_NEAR * this.traits.engage) / ENEMY_TUNING.aggro;
+      const far = ENGAGE_FAR * this.traits.engage;
+      if (dist > far) { wx = dir.x; wz = dir.z; }                        // 压上
       else if (dist < near) { wx = -dir.x * 0.75; wz = -dir.z * 0.75; }  // 后撤
       if (dist < ENGAGE_FAR + 3) {
-        // 中距离左右横移（一直在动，不站桩）。方向翻转也要平滑，
-        // 否则速度向量会在一帧内掉头，看着像瞬移
-        this.strafeT -= dt;
-        if (this.strafeT <= 0) {
-          this.strafeT = 1.4 + Math.random() * 1.6;
-          this.strafeDir *= -1;
+        // 中距离左右横移（一直在动，不站桩）。这里是 **ADAD 点按**，不是一条恒定正弦：
+        // rest（站桩 0.3~0.8s）→ burst（连点 2~4 次急转，每次 0.1~0.3s）→ 回 rest。
+        // 真人对枪走位是「探两下、停一下」，匀速钟摆一眼就是机器人。
+        // 节拍全部 ÷ traits.strafe ⇒ 躁的人点得快、稳的人停得久。幅度不变（仍是 0.85*aggro），
+        // 性格改的是**节奏**不是幅度 —— 免得又叠出一个杀伤力旋钮。
+        const pace = 1 / this.traits.strafe;
+        if (this.flipsLeft <= 0) {
+          this.strafeT -= dt;
+          if (this.strafeT <= 0) {
+            this.flipsLeft = 2 + Math.floor(Math.random() * 3);          // 2~4 次急转
+            this.flipT = (FLIP_GAP_MIN + Math.random() * FLIP_GAP_SPAN) * pace;
+          }
+        } else {
+          this.flipT -= dt;
+          if (this.flipT <= 0) {
+            this.flipsLeft--;
+            this.strafeDir *= -1;
+            this.flipT = (FLIP_GAP_MIN + Math.random() * FLIP_GAP_SPAN) * pace;
+            if (this.flipsLeft <= 0) {
+              this.strafeT = (FLIP_REST_MIN + Math.random() * FLIP_REST_SPAN) * pace;
+            }
+          }
         }
-        this.strafeBlend += (this.strafeDir - this.strafeBlend) * k(3.0);
-        // **正在绕行时不许加横移**：横移方向每 1.4~3s 翻一次号，而 avoid() 的切向
+        // 平滑分档：burst 期用急的，才能看出 ADAD 的顿挫；rest/远距离用原来的缓的。
+        this.strafeBlend += (this.strafeDir - this.strafeBlend) *
+          k(this.flipsLeft > 0 ? K_STRAFE_BURST : K_STRAFE_REST);
+        // **正在绕行时不许加横移**：横移方向翻号，而 avoid() 的切向
         // 是由「本帧位移」定的 —— 横移把位移拧一下，探针方向跟着拧，敌人就会在
         // 墙角里「往东滑一秒、再往西滑一秒」原地打转。实测（撞墙真实生效之后）：
         // 贴着中央绿箱南侧绕行的 4 个人 180s 净推进 ≈ 0，累计路程却有 300~500m。
@@ -232,7 +338,7 @@ export class Enemy {
           wz += dir.x * this.strafeBlend * 0.85 * ENEMY_TUNING.aggro;
         }
       } else {
-        this.strafeBlend += (0 - this.strafeBlend) * k(3.0);   // 远距离只压上，不横着飘
+        this.strafeBlend += (0 - this.strafeBlend) * k(K_STRAFE_REST);   // 远距离只压上，不横着飘
       }
     }
     const route=!blind&&this.navigation?.steer(gp,player.pos);
@@ -244,8 +350,47 @@ export class Enemy {
     this.vel.x += (tx - this.vel.x) * k(MOVE_ACCEL);
     this.vel.z += (tz - this.vel.z) * k(MOVE_ACCEL);
 
+    // ---------- ④ 同伴分离 ----------
+    // 位置是**归一化之后、avoid() 之前**，直接并进本帧位移。两个错位置都试过：
+    // ① 加进 wx/wz 会被上面那两行归一化掉（tx = wx/wl*sp 只能转方向、转不出间距）；
+    // ② 加在 route 覆写之前等于白写 —— 那两行是**替换**不是叠加，而
+    //    GroundNavigation.steer 只在 dist < 8 && clear 时返回 null，即 dist ≥ 8m 时
+    //    route 恒非空 ⇒ 敌人扑向你（正是叠坨的时候）的那一段分离力全被丢掉。
+    // 门控 dist < ENGAGE_FAR + 3 与 noProgT 监工的累积带 dist > ENGAGE_FAR + 3
+    // **不相交** ⇒ 分离力在结构上不可能造成「远离玩家」的假卡死翻转（可证明，非调参）。
+    let sepX = 0, sepZ = 0;
+    if (peers && !blind && this.detourT <= 0 && dist < ENGAGE_FAR + 3) {
+      for (const o of peers) {
+        if (o === this) continue;
+        const ox = o.group.position.x, oz = o.group.position.z;
+        const ddx = gp.x - ox, ddz = gp.z - oz;
+        const d2 = ddx * ddx + ddz * ddz;
+        if (!Number.isFinite(d2) || d2 > SEP_R * SEP_R) continue;    // 邻位非有限一律跳过
+        const d = Math.sqrt(d2) || 1e-3;
+        const w = 1 - d / SEP_R;                                     // 越近推得越狠
+        sepX += (ddx / d) * w;  sepZ += (ddz / d) * w;
+      }
+      const sl = Math.hypot(sepX, sepZ);
+      if (sl < 1e-4) {
+        // 退化：完全重合（8 人同一格）时对称堆的合力会互相抵消成 0，
+        // 用逐具不同的 seed 给一个确定的扇出方向，免得永久焊死。
+        const a = this.seed;
+        sepX = Math.sin(a); sepZ = Math.cos(a);
+      } else {
+        const g = Math.min(1, SEP_PUSH / sl);
+        sepX *= g; sepZ *= g;
+      }
+      // **cap 是这道防线的核心**：分离位移永远只是「一个合法步长的一小部分」，
+      // 所以 avoid()+moveBy() 仍是唯一权威，物理上不可能把人推穿墙或瞬移。
+      const cap = SEP_MAX_FRAC * this.speed * dt;
+      const cl = Math.hypot(sepX, sepZ);
+      const s2 = cl > 1e-6 ? Math.min(1, cap / cl) : 0;
+      sepX *= s2; sepZ *= s2;
+      if (!Number.isFinite(sepX) || !Number.isFinite(sepZ)) { sepX = 0; sepZ = 0; }
+    }
+
     const before = gp.clone();
-    const [sx, sz] = this.avoid(this.vel.x * dt, this.vel.z * dt);
+    const [sx, sz] = this.avoid(this.vel.x * dt + sepX, this.vel.z * dt + sepZ);
     this.moveBy(sx, sz);
     const moved = Math.hypot(gp.x - before.x, gp.z - before.z);
     const wanted = Math.hypot(this.vel.x, this.vel.z) * dt;
@@ -296,6 +441,11 @@ export class Enemy {
       blind: blind ? 1 : 0,
       flinch: this.flinch,
       dead: false,
+      // 头部张望：幅度在**这里**门控（不在 rig 里再乘一次 aimBlend）——
+      // aimLevel 在 dist < ENGAGE_FAR+6（22m）时为 1 ⇒ 交战距离内头回到瞄具上、
+      // 命中盒不乱动，只有 22m 外才东张西望。相位在 Enemy 上推进（性格在这边）。
+      scan: blind ? 0 : (1 - this.aimLevel),
+      scanPhase: this.scanPhase,
     });
     // 脚步声：相位每跨过 π 就是一个支撑期的开始（= 脚落地），与步态天然同步
     const stepIdx = Math.floor(this.rig.phase / Math.PI);
@@ -348,7 +498,7 @@ export class Enemy {
     } else {
       this.burstPause -= dt;
       if (this.burstPause <= 0) {
-        this.burstLeft = 3 + Math.floor(Math.random() * 3); // 3~5 连发
+        this.burstLeft = 3 + Math.round(this.traits.burst * 2); // 3/4/5 连发，均值 4 = 改前
         this.burstTimer = 0;
         this.burstPause = pauseFor(0.85, 0.75, this.fireMul);
       }
@@ -586,7 +736,7 @@ export class EnemyManager {
         e.colliders = this._colliders;
         e.bounds = this._bounds;
         e.navigation = this.navigation;
-        e.update(dt, player);
+        e.update(dt, player, this.enemies);
         if(this.navigation) e.group.position.y=this.navigation.heightAt(e.group.position.x,e.group.position.z,e.group.position.y);
       }
     }

@@ -10,6 +10,10 @@
   afconvert 只写 m4af / WAVE / AIFF / CAF / ADTS），这些不是从参考项目搬来的
   ogg，而是我们自己从 wav 编的。加载器对它们直接走第二个候选，不产生 404
   （见 scripts/audio.js 的 M4A_ONLY，按**stem 路径**列）。
+**例外是两件用户提供的原始素材**：`impacts/headshot_kill.mp3`（第六节）与
+`vo/fireinthehole.wav`（第七节）。两者都是**原样入库、未转码**，所以在 `SAMPLES` 里写成
+自带扩展名的 stem —— 加载器那条「自带扩展名就原样用」的分支（同一个分支也在给
+`classic/*.wav` 用）只请求这一个 URL，不产生 404。
 
 
 ------------------------------------------------------------
@@ -167,3 +171,58 @@ classicgrenades.rar, GameBanana file 1325980:
   Grenades/sound/weapons/explode3.WAV -> classic/grenade_explode.wav
   Flashbang/sound/weapons/flashbang-1.WAV -> classic/grenade_flash.wav
   Smokegrenade/sound/weapons/sg_explode.WAV -> classic/grenade_smoke.wav
+
+
+------------------------------------------------------------
+六、爆头击杀确认音（用户提供）
+------------------------------------------------------------
+impacts/headshot_kill.mp3    <- 用户提供的 headshot.mp3（原在仓库根，已移入 audio/impacts/）
+
+**来源与许可未考证** —— 该文件由用户直接加入仓库，出处与授权均未提供。因此**不能**与
+第一、二节的 CC0 素材混为一谈，也不据此宣称任何许可。
+
+它是**用户提供的原始 mp3 原样入库、未转码**（这也是它不同于本目录其它 stem 的地方，见
+文件头那条说明）：2 ch / 44100 Hz / MPEG layer III / 约 0.99 s / 24567 字节，ID3v2.4。
+在 scripts/audio.js 的 SAMPLES 里写成自带扩展名的 stem，加载器那条「自带扩展名就原样用」
+的分支只请求这一个 URL（不带 .ogg/.m4a 两个候选、不产生 404），也因此不进 M4A_ONLY。
+
+用途：**爆头击杀**并且**这一杀没有续上连杀**（`streakCount === 1`，即上一串已断或本局第一杀）
+时播放，见 scripts/main.js 的 onKill() 与 scripts/audio.js 的 headshotKill()。它与
+`impacts/headshot`（命中头部的标记音，含没打死的那一枪）是**两个独立槽位**。
+
+
+------------------------------------------------------------
+七、投掷物出手台词「Fire in the hole!」（用户提供）
+------------------------------------------------------------
+vo/fireinthehole.wav         <- 用户提供的 fireinthehole.wav（原在仓库根，已移入 audio/vo/）
+
+**来源与许可未考证** —— 与第六节同一情形：文件由用户直接加入仓库，出处与授权均未提供。
+因此**不能**与第一、二节的 CC0 素材混为一谈，也不据此宣称任何许可。
+
+它是**用户提供的原始 WAV 原样入库、未转码**：2 ch / 44100 Hz / Int16 PCM / 85248 帧 /
+约 1.933 s / 341036 字节（无任何元数据块）。在 scripts/audio.js 的 SAMPLES 里写成
+**自带扩展名的 stem**（`vo/fireinthehole.wav`），加载器那条「自带扩展名就原样用」的分支
+只请求这一个 URL（不带 .ogg/.m4a 两个候选、不产生 404），也因此不进 M4A_ONLY。
+
+⚠️ **为什么另开 `vo/` 这一层目录，而不放进 `announcer/`**：两者都是人声，但**角色与路由
+都不同**，放一起会让目录名撒谎。`announcer/`（第四节的 cf_gr_*）是**比赛播报人声**，播放时
+传 `hudBus: true`，刻意绕开距离衰减、闪光弹低通与货舱混响；这一条是**玩家自己的台词**，
+`fireInTheHole()` 不带 x/y/z、走 `master` + 混响（`wet` 0.2），与 `hurt()` 同一条路由 ——
+它发生在世界里，被闪光弹闷住才是对的。
+
+用途：**丢出手雷那一帧**播放（`main.js` 的 `throwGrenade()`，也就是实体真正建出来、
+`updateGrenadeAction()` 判到 `a.t >= a.releaseAt` 的那一帧）。**不是拉环那一下**
+（那是 `grenadePin()` / `cf_grenade_pin`，更早）。
+**只有手雷（frag）喊**：调用点的判据是 `def.nade === "frag"`，它同时是 `updateGrenades()`
+里 `g.kind === "frag"` 分流爆炸的那个字段。**闪光弹与烟雾弹的出手不喊这一声**，目前只有
+同帧的甩手 whoosh —— 那是给它们各自补素材留的挂点，不是漏了。
+**这一声没有合成兜底**（人声合不出来，同 `streak()` 那条线）：素材缺失或还没加载完时它
+静默缺省，而**甩手那一声 whoosh 是同帧的另一个方法（`sfx.throwGrenade()`，注意它与
+`main.js` 里那个同名函数是两回事），照常响** —— 三种投掷物都有。
+
+实测（无头 Chrome + 真实投掷路径，见 AGENTS.md 本节）：手雷出手帧 i=50 / t=0.85 上
+`thrown`、手雷计数减一、投掷物入池三件事同帧发生，该帧 lastAttempt 为
+`{method:"fireInTheHole", id:"fireinthehole", reason:"sample"}`；拉环在 i=17 / t=0.30
+（`cf_grenade_pin`）；闪光/烟雾同一次投掷里同样三标记同帧，但整段序列
+`["grenadePin","throwGrenade","holster"]` 中不含 `fireInTheHole`。
+**听感（够不够劲）未经人耳确认。**

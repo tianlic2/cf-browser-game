@@ -590,7 +590,7 @@ function crosshairGap() {
   return Math.max(4, Math.min(240, px));
 }
 
-// 栓动狙击枪的循环：拉栓计时 −dt，归零时若「开火前在镜里」就自动回镜。
+// 栓动狙击枪的循环：拉栓计时 −dt，归零时若「开火前在镜里」且没有换弹就自动回镜。
 // **走 dt 不用 setTimeout** —— 与换弹/死亡计时同一套理由：`pause()`（停 rAF）才能把它一起冻住，
 // 无头测试也才能定步长快进。切枪可中断拉栓，因此两把枪分别维护状态。
 function updateBolt(dt) {
@@ -1312,12 +1312,12 @@ function updateStreakHud() {
   // 快断了（1.2s 内）就转红闪一下，提示「再不杀就断了」。单杀不给提示（还没成串）。
   streakTimerEl.classList.toggle("low", remain <= 1.2 && streakCount >= 2);
 }
-// 准星下方的击杀章：1～8 杀为星章，超过 8 杀改用金色鹰徽。
+// 准星下方的击杀章：1～6 杀对应六张参考图，第 7 杀起使用金色鹰徽。
 function showKillIcon(headshot, golden) {
   if (!killIconEl) return;
-  // 这一杀没有续上连杀时，爆头走金色骷髅章；九杀起鹰徽优先。
+  // 这一杀没有续上连杀时，爆头沿用金色骷髅章；第七杀起鹰徽优先。
   const soloHeadshot = headshot && streakCount === 1;
-  const highStreakEagle = streakCount > 8;
+  const highStreakEagle = streakCount > 6;
   const kind = !headshot ? "hit" : golden ? "gold" : "head";
   killIconEl.className = "killicon " + kind
     + (soloHeadshot ? " solo-headshot" : "")
@@ -1326,7 +1326,12 @@ function showKillIcon(headshot, golden) {
     ? '<img class="ki-high-streak-eagle" src="./assets/ui/streak_eagle.png" alt="" aria-hidden="true">'
     : soloHeadshot
       ? '<img class="ki-solo-headshot ki-hs' + (golden ? ' gold' : '') + '" src="./assets/ui/headshot_solo.png" alt="" aria-hidden="true">'
-      : killMedalSvg(streakCount, headshot, golden);
+      : '<img class="ki-streak-medal tier-' + streakCount + '" data-tier="' + streakCount
+        + '" src="./assets/ui/kill_streak_' + streakCount + '.png" alt="" aria-hidden="true">';
+  const medal = killIconEl.querySelector(".ki-streak-medal");
+  medal?.addEventListener("error", () => {
+    if (killIconEl.contains(medal)) killIconEl.innerHTML = killMedalSvg(streakCount, headshot, golden);
+  }, { once: true });
   void killIconEl.offsetWidth;
   killIconEl.classList.add("show");
 }
@@ -2481,6 +2486,8 @@ function applyScope(stage, audioWeaponId = currentId) {
   // 拉栓中不许开镜（AWM 的栓动循环）。退镜（stage 0）永远允许，否则拉栓开始时
   // 那次强制退镜会被自己挡掉 —— 那不是「开镜」而是「离开镜」，两回事。
   if (stage > 0 && WEAPON_STATE && WEAPON_STATE.boltT > 0) stage = 0;
+  // 换弹期间不能端起狙击镜；stage 0 仍须放行，让换弹开始时能主动退镜。
+  if (stage > 0 && WEAPON_STATE && WEAPON_STATE.reloading) stage = 0;
   // 收/出枪期间不许开镜（CF 同此：出枪没完端不起镜）。退镜（stage 0）永远放行 ——
   // switchWeapon 开头那次强制退镜正是走这条路，被自己挡掉就麻烦了。
   if (stage > 0 && switchBlocking()) stage = 0;
@@ -2494,7 +2501,7 @@ function applyScope(stage, audioWeaponId = currentId) {
   // 进来）时若去改逻辑枪的 visible，会把还没提交的新枪提前点亮。
   const c = vizWeapon();
   if (c) c.group.visible = !scoped;
-  // 每一次真正升倍率都响一声，包括一级 → 二级；被拉栓/切枪挡下的输入没有声音。
+  // 每一次真正升倍率都响一声，包括一级 → 二级；被拉栓/换弹/切枪挡下的输入没有声音。
   if (stage > previousStage) sfx.scopeIn(audioWeaponId, stage);
   else if (stage === 0 && previousStage > 0) sfx.scopeOut(audioWeaponId);
 }
@@ -2857,6 +2864,9 @@ function flatTargets() {
   return meshes;
 }
 
+// 不开镜狙击枪的最大散布角约 3.4°；在相机局部平面取均匀圆盘，避免落点集中在圆心。
+const SNIPER_HIP_SPREAD = 0.06;
+
 function fire() {
   const def = WEAPON_DEFS[currentId];
   // dead 是兜底闸门：死亡视角期间左键、自动连发（走这条）、__tactical.forceFire 全部到此为止
@@ -2895,11 +2905,17 @@ function fire() {
   // 一帧多就没了，掉一帧就整发不显示；连发时多个定时器还会互相踩着关灯。
   triggerMuzzleFlash(def);
 
-  // 子弹沿相机当前朝向发射，与准星所见完全一致。
+  // 只有不开镜的狙击枪在准心周围散布；开镜与其它枪仍沿相机中心射击。
   // `syncRecoil()` 在这里显式再同步一次：`recoilPitch/Yaw` 是 `aimPunch` 的派生量，
   // 而 `aimPunch` 可能刚被这一帧的 `decayPunch()` 改过 —— 保证相机与射线读的是同一份。
   syncRecoil();
-  const dir = new THREE.Vector3(0, 0, -1).applyEuler(
+  const dir = new THREE.Vector3(0, 0, -1);
+  if (def.type === "sniper" && !scoped) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = Math.sqrt(Math.random()) * SNIPER_HIP_SPREAD;
+    dir.set(Math.cos(angle) * radius, Math.sin(angle) * radius, -1).normalize();
+  }
+  dir.applyEuler(
     new THREE.Euler(player.pitch + recoilPitch, player.yaw + recoilYaw, 0, "YXZ")
   );
   const origin = new THREE.Vector3();
@@ -2985,12 +3001,12 @@ function onKill(headshot, enemyName, weaponName, golden) {
   addHitMark("kill", { golden: golden });
   if (streakCount === 1) hideStreakCallout();
   showKillIcon(headshot, golden);
-  // 连杀时只播经典人声，避免再叠一层合成击杀音抢开头。
-  if (streakCount < 2) sfx.kill();
+  // 每次击杀都给一声参考视频里的确认音；爆头/连杀时音量稍低，英文播报仅在 2～8 杀播放。
+  sfx.kill(!!headshot, streakCount >= 2);
   // 爆头击杀的确认音**只在「这一杀没有续上连杀」时播**（用户定的口径）。判据落在
   // `streakCount === 1` 上：它在上面 `streakCount++` 之后，等于 1 就意味着**这一杀计时器
   // 是刚起算的**（上一串已经断了、或本局第一杀）—— 也就是「不处于连杀判定中」。到了
-  // 2 以上交给人声播报，再叠一声会抢开头（与上面 `sfx.kill()` 同一条理由）。
+  // 2 以上交给人声播报，额外的爆头长音会抢开头；通用确认音则每杀都保留。
   // 注意它与 `sfx.headshot()`（命中头就响、含没打死的那些）是两件事，这一枪上两声音都会响。
   if (headshot && streakCount === 1) sfx.headshotKill();
   pushKillFeed("你", weaponName || WEAPON_DEFS[currentId].name, enemyName || "敌人",
@@ -3061,6 +3077,11 @@ function startReload() {
   if (WEAPON_STATE.reloading || WEAPON_STATE.mag === WEAPON_STATE.magSize || WEAPON_STATE.reserve <= 0) return;
   WEAPON_STATE.reloading = true;
   WEAPON_STATE.reloadT = 0;
+  if (WEAPON_DEFS[currentId].stats.zoom) {
+    // 已在镜中换弹要立刻退镜；若上一枪还在拉栓，也不能让它稍后自动回镜。
+    WEAPON_STATE.reScope = false;
+    if (scoped) setScoped(false);
+  }
   // 三段 foley（弹匣出 / 入 / 拉栓）按 `reloadDur` **等比排程** —— 绝不拉伸采样
   // （0.7 s 的段落拉到 2.4 s 就是 0.29× 慢放，像卡带）。AK 2.43s → 0.39/1.41/1.94。
   sfx.reload({ id: currentId, dur: WEAPON_STATE.reloadDur });
@@ -4791,7 +4812,8 @@ async function init() {
   await audioLoad;
   bootPart("audio", 1);
   // 首页队伍徽章及对局 HUD 图标一并完成解码，避免遮罩退场后才跳出图片。
-  const hudImages = ["./assets/ui/headshot_solo.png", "./assets/ui/streak_eagle.png"].map(async src => {
+  const hudImages = ["./assets/ui/headshot_solo.png", "./assets/ui/streak_eagle.png",
+    ...Array.from({ length: 6 }, (_, i) => `./assets/ui/kill_streak_${i + 1}.png`)].map(async src => {
     const img = new Image();
     img.src = src;
     await img.decode().catch(() => {});
@@ -5277,9 +5299,10 @@ async function init() {
           hasGun: !!killIconEl.querySelector(".ki-gun"),
           soloHeadshot: killIconEl.classList.contains("solo-headshot"),
           highStreakEagle: !!killIconEl.querySelector(".ki-high-streak-eagle"),
-          tier: Number(killIconEl.querySelector(".ki-medal")?.dataset.tier || 0),
+          tier: Number(killIconEl.querySelector("[data-tier]")?.dataset.tier || 0),
           streak: streakCount,
-          goldRays: killIconEl.querySelectorAll(".ki-ray.lit").length,
+          goldRays: Number(killIconEl.querySelector(".ki-streak-medal")?.dataset.tier || 0)
+            || killIconEl.querySelectorAll(".ki-ray.lit").length,
           animating: killIconEl.classList.contains("show"),
         };
       },

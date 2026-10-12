@@ -4,7 +4,7 @@
 //   ① **现实里存在的声音**（枪声 / 脚步 / 换弹 / 命中 / 近战 / 爆炸 / 倒地 / 拉栓 /
 //      **切枪收出 / 空枪干击 / 开镜退镜 / 按钮与页签 / 面板开合**）走 `audio/`
 //      里的 CC0 真实录音（逐文件署名见 `audio/CREDITS.txt`）；
-//   ② 回合结束 / 命中标记 / 单杀奖励音保持合成；连杀按用户要求使用 CF 经典英文男声采样。
+//   ② 回合结束 / 命中标记保持合成；每杀确认音使用短金属采样，连杀使用 CF 经典英文男声采样。
 //      连杀是明确例外：固定的人声演绎才是还原目标，不使用系统 TTS 或电子音阶。
 //      announcer/ 的游戏语音不是 CC0，来源与归属单列在 audio/CREDITS.txt。
 //
@@ -85,6 +85,7 @@ const SAMPLES = {
   impact_flesh: ["impacts/impact_flesh_1", "impacts/impact_flesh_2", "impacts/impact_flesh_3"],
   ricochet:     ["impacts/ricochet_1", "impacts/ricochet_2"],
   headshot:     ["impacts/headshot"],
+  kill_confirm: ["impacts/kill_confirm.wav"],
   // 爆头**击杀**的确认音（用户提供的素材，见下面 headshotKill() 与 CREDITS.txt 第六节）。
   // **与上面那条 `headshot` 是两个槽位、两件事**：那条是「打中了头」的命中标记音（含
   // 没打死的那一枪），这条只在「爆头 + 这一杀没续上连杀」时播。写成带扩展名的 stem
@@ -128,10 +129,10 @@ const SAMPLES = {
   sw_deploy_knife:   ["sw/deploy_knife"],
   sw_holster_knife:  ["sw/holster_knife"],
   sw_dryfire:        ["sw/dryfire"],
-  sw_scope_in:       ["sw/scope_in"],
-  sw_scope_out:      ["sw/scope_out"],
+  sw_scope_in:       ["sw/scope_in_click.wav"],
+  sw_scope_out:      ["sw/scope_out_click.wav"],
   music:        ["ui/lobby_theme"],
-  // CF Global Risk 男声：2~8 杀七档，8 杀以上沿用最高档；计数与 HUD 不封顶。
+  // CF Global Risk 男声：2~8 杀七档；超过 8 杀只保留击杀确认音，计数与 HUD 不封顶。
   cf_streak_2: ["announcer/cf_gr_2"],
   cf_streak_3: ["announcer/cf_gr_3"],
   cf_streak_4: ["announcer/cf_gr_4"],
@@ -150,7 +151,7 @@ const M4A_ONLY = new Set([
   "ui/ui_click", "ui/ui_switch", "ui/ui_panel_open", "ui/ui_panel_close", "ui/lobby_theme",
   "sw/deploy", "sw/holster", "sw/deploy_pistol", "sw/holster_pistol",
   "sw/deploy_knife", "sw/holster_knife",
-  "sw/dryfire", "sw/scope_in", "sw/scope_out",
+  "sw/dryfire",
 ]);
 
 // 自动武器只播「初始爆裂声」，丢掉 1.7 s 的尾巴（不丢的话 0.09 s 的射击间隔会堆成一团糊音）。
@@ -663,11 +664,16 @@ export class SFX {
     this._hitSynth();
   }
 
-  // 击杀播报（奖励音调）
-  kill() {
+  // 每次击杀都播放参考视频里的确认音。新采样约 1.2s，连续击杀时收掉上一声的尾巴，
+  // 否则手雷多杀会把相同长音叠成一团；爆头和连杀时压低一点让专属音/人声清楚。
+  kill(headshot = false, streak = false) {
     if (!this.ready()) return;
-    this._note("kill", null, "synth", 0);
-    this._killSynth();
+    this.cancelScheduled("kill", 0.02);
+    this._playMapped("kill", {
+      id: "kill_confirm", kind: headshot ? "head" : streak ? "streak" : "normal",
+      vol: headshot ? 0.65 : streak ? 0.73 : 1.05,
+      volJitter: 0, rateJitter: 0, wet: 0, schedule: "kill",
+    }, () => this._killSynth());
   }
 
   // 玩家受伤
@@ -917,13 +923,14 @@ export class SFX {
   // ==========================================================================
 
   // CF 经典保卫者男声。每次只保留最新一档，不排成长队、不叠电子音阶。
-  // 40ms 起播窗口把同一帧的手雷多杀合并到最高档；旧句在 35ms 内淡出并停止。
+  // 40ms 起播窗口把同一帧的手雷多杀合并到最后一档；旧句在 35ms 内淡出并停止。
   // 缺素材只保留视觉反馈，绝不退回系统 TTS（声线随设备变）或旧方波琶音。
-  // 语音只有七档；8 杀以上复用最后一句，真实连杀计数仍由 main.js 无限递增。
+  // 语音只有七档；超过 8 杀收掉上一句且不再播报，击杀确认音由 main.js 照常播放。
   streak(n) {
     if (!this.ready() || !Number.isFinite(n) || n < 2) return false;
     this.cancelStreak();
-    const id = "cf_streak_" + Math.min(8, Math.floor(n));
+    if (n > 8) return false;
+    const id = "cf_streak_" + Math.floor(n);
     const opts = {
       id, kind: "streak", vol: 0.65, volJitter: 0,
       rate: 1, rateJitter: 0, wet: 0, hudBus: true,
@@ -1025,14 +1032,14 @@ export class SFX {
     }
   }
 
-  // 两把狙击枪共用真实的镜筒操作录音；巴雷特调低音高，二级倍率再短促地响一次。
-  // 素材的 RMS 约 0.098，原 0.55 增益在枪声旁容易被盖住；这里让机械声清楚但不削波。
+  // 两把狙击枪共用短促的机械镜筒卡榫声；巴雷特略低沉，二级倍率略轻。
+  // 新录音比旧握持摩擦更有可辨识的瞬态，增益留有余量避免叠音削波。
   scopeIn(weaponId = "awm", stage = 1) {
     if (!this.ready()) return;
     const heavy = weaponId === "barrett";
     this._playMapped("scopeIn", {
       id: "sw_scope_in", kind: weaponId + ":" + stage,
-      vol: heavy ? (stage === 2 ? 0.95 : 1.12) : (stage === 2 ? 0.88 : 1.05),
+      vol: heavy ? (stage === 2 ? 0.88 : 0.95) : (stage === 2 ? 0.85 : 0.92),
       rate: heavy ? (stage === 2 ? 1.02 : 0.90) : (stage === 2 ? 1.20 : 1.07),
       volJitter: 0.06, rateJitter: 0.01, wet: 0.02,
     }, () => this._scopeInSynth(weaponId, stage));
@@ -1042,7 +1049,7 @@ export class SFX {
     const heavy = weaponId === "barrett";
     this._playMapped("scopeOut", {
       id: "sw_scope_out", kind: weaponId,
-      vol: heavy ? 0.85 : 0.78, rate: heavy ? 0.82 : 0.93,
+      vol: heavy ? 0.98 : 0.92, rate: heavy ? 0.82 : 0.93,
       volJitter: 0.06, rateJitter: 0.01, wet: 0.02,
     }, () => this._scopeOutSynth());
   }
@@ -1335,9 +1342,9 @@ export class SFX {
 
   // 开镜 / 退镜回退：镜筒贴脸的短促「咔」+ 一层很轻的金属共鸣
   _scopeInSynth(weaponId = "awm", stage = 1) {
-    this._scopeClick((weaponId === "barrett" ? 600 : 760) + (stage === 2 ? 110 : 0), 0.05, 0.19);
+    this._scopeClick((weaponId === "barrett" ? 600 : 760) + (stage === 2 ? 110 : 0), 0.05, 0.30);
   }
-  _scopeOutSynth() { this._scopeClick(520, 0.045, 0.11); }
+  _scopeOutSynth() { this._scopeClick(520, 0.045, 0.23); }
   _scopeClick(freq, dur, vol) {
     const ctx = this.ctx, t = ctx.currentTime;
     const osc = ctx.createOscillator();
@@ -1353,7 +1360,7 @@ export class SFX {
     f.frequency.value = freq;
     f.Q.value = 3;
     osc.connect(f).connect(g);
-    this.send(g, 0.05);   // 与两条 scope 采样同档，保「几乎听不见」
+    this.send(g, 0.02);
     osc.start(t);
     osc.stop(t + dur + 0.02);
   }

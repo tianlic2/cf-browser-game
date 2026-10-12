@@ -1,19 +1,23 @@
 音频素材署名 / Audio asset credits
 =================================
 
-本目录的素材按来源分别列示。Freesound 录音适用所列 CC0；用户提供的大厅音乐与第四节 CF 游戏语音、第五节 CF AK 音效、第八节 M4A1-C 音效及第九节巴雷特音效不据此宣称 CC0 或商用授权。
+本目录的素材按来源分别列示。Freesound 录音适用所列 CC0；用户提供的大厅音乐、击杀参考视频与第四节 CF 游戏语音、第五节 CF AK 音效、第八节 M4A1-C 音效及第九节巴雷特音效不据此宣称 CC0 或商用授权。
 
 除第五、八、九节保留原 WAV 外，已有转码文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
   <stem>.ogg  —— Ogg Vorbis。Chrome / Firefox / Edge 走这一份。
   <stem>.m4a  —— MP4 容器 + AAC。Safari 走这一份（Chrome/Firefox 也认）。
-  **ui/ 与 sw/ 下的 14 个 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
+  **ui/ 与 sw/ 下现用的 12 个 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
   afconvert 只写 m4af / WAVE / AIFF / CAF / ADTS），这些不是从参考项目搬来的
   ogg，而是我们自己从 wav 编的。加载器对它们直接走第二个候选，不产生 404
-  （见 scripts/audio.js 的 M4A_ONLY，按**stem 路径**列）。
+  （见 scripts/audio.js 的 M4A_ONLY，按**stem 路径**列）。旧的两条 scope m4a 不再加载。
 **例外是两件用户提供的原始素材**：`impacts/headshot_kill.mp3`（第六节）与
 `vo/fireinthehole.wav`（第七节）。两者都是**原样入库、未转码**，所以在 `SAMPLES` 里写成
 自带扩展名的 stem —— 加载器那条「自带扩展名就原样用」的分支（同一个分支也在给
 `classic/*.wav` 用）只请求这一个 URL，不产生 404。
+开镜与退镜现用 `sw/scope_in_click.wav`、`sw/scope_out_click.wav` 两条单声道 PCM；
+同样在 `SAMPLES` 中写全扩展名、只请求 WAV。旧 `scope_in/out.m4a` 保留作素材备份，
+游戏不再加载。
+`impacts/kill_confirm.wav` 也走同一条单文件 WAV 加载路径，来源见第十节。
 
 
 ------------------------------------------------------------
@@ -70,8 +74,10 @@ rate** 给，不烘进文件。
 
 sw/deploy                    <- freesound.org/s/725397/  (An M16 Rifle being reloaded while empty; full sequence by serøutōnin--deprivəd)  CC0
 sw/holster                   <- freesound.org/s/725403/  (A rifle being moved around and handled w/ magazine removals by serøutōnin--deprivəd)  CC0
-sw/scope_in                  <- freesound.org/s/725403/  (同上，另一处被静音包围的极轻握持摩擦)  CC0
-sw/scope_out                 <- freesound.org/s/725403/  (同上，第三次)  CC0
+sw/scope_in                  <- freesound.org/s/725403/  (旧开镜素材，轻握持摩擦；现不加载)  CC0
+sw/scope_out                 <- freesound.org/s/725403/  (旧退镜素材；现不加载)  CC0
+sw/scope_in_click.wav        <- freesound.org/s/725402/ + /s/725403/  (真实干击机械卡榫与握持摩擦混合；0.205s、峰值 0.62)  CC0
+sw/scope_out_click.wav       <- freesound.org/s/725402/ + /s/725403/  (同来源，卡榫低通降调与退镜摩擦混合；0.215s、峰值 0.62)  CC0
 sw/deploy_pistol             <- freesound.org/s/725400/  (A pistol being moved around and handled w/ foley by serøutōnin--deprivəd)  CC0
 sw/holster_pistol            <- freesound.org/s/725400/  (同上，另一处)  CC0
 sw/dryfire                   <- freesound.org/s/725402/  (A rifle being dry fired once by serøutōnin--deprivəd)  CC0
@@ -259,3 +265,18 @@ classic/barrett_bolt.wav  <-  Barrett_M82A1/sound/weapons/awp/awp_bolt.WAV
 两段 WAV 均逐字节提取、未转码或变速：44.1 kHz、16-bit、单声道，时长分别约
 4.792 s（含长尾回响）和 0.666 s。游戏以原速播放，巴雷特枪声不再使用通用录音或
 AWM 枪声，拉栓也走独立采样。上一版 qubodup CC0 通用「Sniper Fire」已移出游戏。
+
+
+------------------------------------------------------------
+十、每杀确认音（用户提供的参考视频）
+------------------------------------------------------------
+impacts/kill_confirm.wav <- `005 - 无角色语音，仅击杀反馈音效 + 图标.mp4`
+参考文件 SHA-256：9c1160cf877467d598abfc71e4cdaf463ab667ce79384a42dde613355fe8fcd8
+
+参考视频的多种图标展示反复使用同一段击杀反馈音（主要段落的归一化相关系数约 0.996）。
+从音轨首段 0.346–1.540 s 截取，混为单声道，首尾分别淡入 4 ms / 淡出 55 ms，
+峰值调至 0.75；成品为 48 kHz / 16-bit PCM WAV，时长 1.194 s。旧的 CC0 金属
+混制音已经被这条采样替换。每次玩家击杀都播放；连续击杀时新声音会收掉上一声尾部，
+爆头和连杀时降低增益，让专属音效与英文播报保持清楚。
+
+该视频由用户提供作听感参考；音轨原始权利和再分发授权未核实，因此这里不把它标为 CC0。

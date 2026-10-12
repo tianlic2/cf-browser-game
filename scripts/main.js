@@ -2864,8 +2864,10 @@ function flatTargets() {
   return meshes;
 }
 
-// 不开镜狙击枪的最大散布角约 3.4°；在相机局部平面取均匀圆盘，避免落点集中在圆心。
-const SNIPER_HIP_SPREAD = 0.06;
+// 不开镜狙击枪在相机局部平面取均匀圆环：中心留空，远处不能靠盲射稳定命中准心目标。
+// 最小/最大偏角约 2.6°/6.8°；贴脸仍有一定盲射命中机会。
+const SNIPER_HIP_SPREAD_MIN = 0.045;
+const SNIPER_HIP_SPREAD_MAX = 0.12;
 
 function fire() {
   const def = WEAPON_DEFS[currentId];
@@ -2912,7 +2914,8 @@ function fire() {
   const dir = new THREE.Vector3(0, 0, -1);
   if (def.type === "sniper" && !scoped) {
     const angle = Math.random() * Math.PI * 2;
-    const radius = Math.sqrt(Math.random()) * SNIPER_HIP_SPREAD;
+    const radius = Math.sqrt(SNIPER_HIP_SPREAD_MIN ** 2
+      + Math.random() * (SNIPER_HIP_SPREAD_MAX ** 2 - SNIPER_HIP_SPREAD_MIN ** 2));
     dir.set(Math.cos(angle) * radius, Math.sin(angle) * radius, -1).normalize();
   }
   dir.applyEuler(

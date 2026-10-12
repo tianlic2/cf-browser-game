@@ -39,7 +39,7 @@ def vtf(path):
     modes={0:('RGBA','RGBA'),1:('RGBA','ABGR'),2:('RGB','RGB'),3:('RGB','BGR'),11:('RGBA','ARGB'),12:('RGBA','BGRA'),16:('RGB','BGRX')}
     mode,raw=modes[fmt]; return Image.frombytes(mode,(w,h),data,'raw',raw).convert('RGBA')
 
-def materials(root, names, target):
+def materials(root, names, target, include_normals=False):
     files={str(p.relative_to(root)).replace('\\','/').lower():p for p in root.rglob('*') if p.is_file()}
     result=[]
     for name in names:
@@ -52,6 +52,14 @@ def materials(root, names, target):
         if t:
             dest=target/(re.sub(r'[^a-z0-9_-]','_',name.lower())+'.png')
             im=vtf(t); im.save(dest,optimize=True);record['map']=str(dest.relative_to(OUT))
+        if include_normals:
+            bump=re.search(r'"?\$bumpmap"?\s+"?([^"\s]+)',text,re.I)
+            bump_tex=bump.group(1).replace('\\','/').lower() if bump else None
+            normal=files.get('materials/'+bump_tex+'.vtf') if bump_tex else None
+            if normal:
+                dest=target/(re.sub(r'[^a-z0-9_-]','_',name.lower())+'_normal.png')
+                vtf(normal).save(dest,optimize=True)
+                record['normalMap']=str(dest.relative_to(OUT))
         if re.search(r'\$(?:alphatest|translucent)"?\s+"?1',text,re.I): record['alphaTest']=.5
         result.append(record)
     return result
@@ -171,7 +179,7 @@ def soldier_convert(root):
         bones.append({'name':string(mdl,p+name),'parent':par,'position':unpack(mdl,'3f',p+32),'quaternion':unpack(mdl,'4f',p+44)})
     nt,ti=unpack(mdl,'2i',204);names=[string(mdl,ti+i*64+unpack(mdl,'i',ti+i*64)[0]) for i in range(nt)]
     matnames=['models/player/cf_swat/'+n for n in names]
-    mats=materials(root/'cstrike',matnames,dst)
+    mats=materials(root/'cstrike',matnames,dst,include_normals=True)
     nv=unpack(vvd,'i',16)[0];nf,fix,vo=unpack(vvd,'3i',48)
     raw=[unpack(vvd,'3f4B8f',vo+i*48) for i in range(nv)]
     if nf:

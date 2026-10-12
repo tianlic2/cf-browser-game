@@ -13,10 +13,12 @@
 
 ## SWAT
 
+- 当前敌人外观改用用户提供的 `models/swat_bl.glb`（来源与许可见 `models/CREDITS.md`），生成的蒙皮权重为 `swat/swat_bl_weights.bin`。以下旧 SWAT 资源继续提供 50 根动画骨骼和权重参照；动作仍由本项目 IK 驱动。
+
 - 来源：[Crossfire Character (Swat Reborn)](https://gamebanana.com/mods/213666)，`cf_swat_reborn.zip`，文件编号 `216863`，采用 `Without phong.zip`。
 - 原始模型/贴图：Smilegate；重制、重建模、截图：Living4Things。
 - 来源页标注 CC BY-NC-ND 4.0，同时把修改后分发/在其他模组中分发列为需询问。此记录不把社区许可扩大解释为对原游戏素材的商业授权。
-- 本地转换：MDL v44 + VVD/VTX LOD0，50 根骨骼、3724 个三角面；原贴图转 PNG。骨骼动作由本项目 IK 系统驱动，**不是原 CF 动作数据**。按蒙皮头骨权重拆分头部命中面。
+- 本地转换：MDL v44 + VVD/VTX LOD0，50 根骨骼、3724 个三角面；原漫反射贴图及 VMT 指向的五张法线贴图转 PNG。骨骼动作由本项目 IK 系统驱动，**不是原 CF 动作数据**。按蒙皮头骨权重拆分头部命中面。
 - 产物：`swat/swat.bin`、`swat.json` 与 PNG 贴图。
 
 ## AK-47
@@ -28,15 +30,24 @@
 - 第一人称另导入同包 `extra stuff/compile/v_/PV-AK47.smd`、`PV-AK47_GR.smd`、`FVIEW_ARM_GR.bmp`、`FVIEW_HAND_GR.bmp`、`PV-AK47.bmp` 和 `idle_0/reload/fire/select.smd`；保留 51 骨骼与对应纹理。动作按来源 `sequences.qc` 时间采样，换弹映射到本游戏周期；这不是对原客户端逐帧完全一致的保证。
 - 原声音复制到 `audio/classic/`：`ak47-1.wav` → `ak47_fire.wav`、`G_MZC_AK47_CLIPOUT.WAV` → `ak47_out.wav`、`G_MZC_AK47_CLIPIN.WAV` → `ak47_in.wav`、`G_RELOAD_AK47.WAV` → `ak47_bolt.wav`。不变调。
 
+## M4A1-C
+
+- 来源：[CF M4A1-C Weapon Pack](https://gamebanana.com/mods/211325)，文件 `cf_m4a1_custom_pack_update.rar`，GameBanana 文件编号 `217470`；下载包 MD5 为 `605821e3b397c3a4d7731642f7fc9791`。
+- 页面将原始模型、贴图、动画、声音归于 SmileGate；该更新包还标注修改过声音，故本地音效准确称为“该移植包提供的声音”，不声称逐字节等同某一版 CF 官方客户端。页面的移植白名单说明不等于公开再分发或商业授权。
+- 使用包内 `Black (Original)` 两张 VTF，及 `Required/models/weapons/w_rif_sg552.{mdl,vvd,dx90.vtx}` 的 LOD0 枪身，转换为 `m4c/m4a1_custom.glb`。世界模型与第一人称模型的枪身顶点数相同；取世界模型可避开包内独立的手部网格，继续复用本项目的统一手臂。未导入 Source 动画；开火/换弹动作仍由本项目驱动。
+- 默认 M4 皮肤显示为 `M4A1-C`，玩家、敌人和掉落物共用这把模型。转换脚本：`tools/import_cf_m4c.py`。
+- 原样复制四段 WAV：`sg552/sg552-1.WAV` → `audio/classic/m4c_fire.wav`；`m4a1/m4a1_clipout.WAV`、`m4a1_clipin.WAV`、`m4a1_boltpull.WAV` 分别 → `m4c_out.wav`、`m4c_in.wav`、`m4c_bolt.wav`。玩家和敌人的 M4 开火共用同一采样；不变调、不另叠合成爆音。
+
 ## 转换与边界
 
 - `tools/import_cf_source.py`：可重复转换地图/SWAT（Python + numpy + Pillow）。
 - `tools/import_cf_ak.py`：可重复转换 AK SMD/贴图并复制音效。
+- `tools/import_cf_m4c.py`：可重复转换 M4A1-C Source MDL/VVD/VTX 和 VTF，并复制四段 WAV。
 - `tools/import_cf_view.py`：转换 AK 第一人称手臂、枪械与动画。
 - 格式依据：[Valve Source SDK](https://github.com/ValveSoftware/source-sdk-2013/tree/master/src/public) 的 `bspfile.h`、`studio.h`、`optimize.h`。
 - `manifest.json` 保存下载包及转换结果的 SHA-256，以区分实际使用的版本。
 - 经典英文连杀男声来源另外记录于 `audio/CREDITS.txt`。
-- M4/AWM 仍为既有模型的经典配色，击杀军徽仍为自绘；枪感、AI、HUD、人物动作仍是本项目实现。不能称为完整 1:1 原版客户端。
+- AWM 仍为既有模型的经典配色，击杀军徽仍为自绘；枪感、AI、HUD、人物动作仍是本项目实现。不能称为完整 1:1 原版客户端。
 
 ## 小刀行为参考与标定
 

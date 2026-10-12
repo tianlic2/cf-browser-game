@@ -3,11 +3,14 @@ import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
 import { SFX } from "./audio.js";
 import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js";
+import { setEnemyMuzzleTexture } from "./enemy_model.js";
 import { buildMap } from "./map.js";
 import { ClassicView } from "./classic_view.js";
 import { KNIFE, knifePose } from "./melee.js";
 import { GRENADE, advanceGrenade, sweepGrenade, grenadePose } from "./grenades.js";
 import { buildClassicMap } from "./classic_map.js";
+import { buildPalaceMap } from "./palace_map.js";
+import { ImpactVfx } from "./impact_vfx.js";
 import { loadClassicSoldier } from "./classic_soldier.js";
 import { GroundNavigation } from "./navigation.js";
 import { intersectsBrush, brushSupport, brushBottom } from "./brush_collision.js";
@@ -31,6 +34,58 @@ const viewport = document.getElementById("viewport");
 const hud = document.getElementById("hud");
 const menu = document.getElementById("menu");
 const gameover = document.getElementById("gameover");
+const bootScreen = document.getElementById("bootScreen");
+const bootPercent = document.getElementById("bootPercent");
+const bootFill = document.getElementById("bootProgressFill");
+const bootBar = document.getElementById("bootProgress");
+const bootStatus = document.getElementById("bootStatus");
+const bootDetail = document.getElementById("bootDetail");
+const bootWeights = { map: .28, assets: .42, skins: .11, audio: .16, ready: .03 };
+const bootParts = { map: 0, assets: 0, skins: 0, audio: 0, ready: 0 };
+let bootStage = "map";
+function bootPart(part, fraction) {
+  if (!bootScreen || bootScreen.classList.contains("is-error") || !Object.hasOwn(bootParts, part)) return;
+  bootParts[part] = Math.max(bootParts[part], Math.min(1, Math.max(0, fraction)));
+  const value = Math.min(99, Math.floor(100 * Object.entries(bootParts)
+    .reduce((sum, [key, done]) => sum + bootWeights[key] * done, 0)));
+  bootPercent.firstChild.nodeValue = String(value);
+  bootFill.style.width = value + "%";
+  bootBar.setAttribute("aria-valuenow", String(value));
+}
+function bootPhase(stage, status, detail = "") {
+  if (!bootScreen) return;
+  bootStage = stage;
+  bootStatus.textContent = status;
+  bootDetail.textContent = detail;
+  const order = ["map", "actors", "audio", "ready"];
+  const active = order.indexOf(stage);
+  for (const el of bootScreen.querySelectorAll("[data-boot-step]")) {
+    const index = order.indexOf(el.dataset.bootStep);
+    el.classList.toggle("is-active", index === active);
+    el.classList.toggle("is-done", index < active);
+  }
+}
+function bootFinish() {
+  if (!bootScreen || bootScreen.classList.contains("is-error")) return;
+  bootPhase("ready", "部署完成，即将进入游戏房间", "全部资源已就绪");
+  bootParts.ready = 1;
+  bootPercent.firstChild.nodeValue = "100";
+  bootFill.style.width = "100%";
+  bootBar.setAttribute("aria-valuenow", "100");
+  setTimeout(() => {
+    menu.inert = false;
+    bootScreen.classList.add("is-complete");
+    setTimeout(() => bootScreen.remove(), 500);
+  }, 220);
+}
+function bootFail(error) {
+  console.error("游戏初始化失败", error);
+  if (!bootScreen) return;
+  bootScreen.classList.add("is-error");
+  bootStatus.textContent = "资源部署失败";
+  bootDetail.textContent = String(error?.message || error).slice(0, 100);
+  document.getElementById("bootRetry").hidden = false;
+}
 // 大厅（scripts/lobby.js 的实例）。在 `init()` 的**第一句**创建 —— 必须早于
 // `buildMenuMatch()`（它会往大厅顶栏写徽章）。节点缺失时 lobby.js 自己转静默禁用，
 // 所以这里判空只为「旧 index.html 缓存」那一类场景兜底，不是常规分支。
@@ -170,7 +225,8 @@ vmScene.add(vmHemi, vmSun, vmFill, vmRim, vmCamera);
 // 强度 0.62 → 1.25 是配合 `tameWorldEnv()` 把介质 IBL 砍到 0.35 之后补回来的：净填充量
 // 与改动前相当（甚至略高），但色相从「蓝」换成了「暖白」，压在最上面的高对比
 // 依旧是「太阳 3.05 对填充 ≈1.2」这个比值给的，不是靠把阴影压死给的。
-scene.add(new THREE.HemisphereLight(0xe0dcd2, 0x726a5a, 1.25));
+const worldHemi = new THREE.HemisphereLight(0xe0dcd2, 0x726a5a, 1.25);
+scene.add(worldHemi);
 const sun = new THREE.DirectionalLight(0xfff4e0, 3.05);
 sun.position.set(-34, 78, 30);
 sun.castShadow = true;
@@ -198,6 +254,8 @@ scene.add(sun);
 // ---------- 地图 ----------
 let gameReady = false;
 let mapData = null;
+const mapCatalog = {};
+let selectedMapId = "transport";
 let obstacleMeshes = [];
 // 拍平后的障碍 Mesh 列表。map 的 obstacles 是 Mesh 与 Group 混装（106 Mesh + 28 Group
 // 内含 392 Mesh），非递归 intersectObjects(obstacleMeshes,false) 会**静默漏掉** Group 里的
@@ -281,8 +339,8 @@ const scaleInacc = (src, k) => Object.fromEntries(Object.entries(src).map(([n, v
 const INACC_M4 = scaleInacc(INACC_AK, 0.92);
 const INACC_USP = scaleInacc(INACC_AK, 1.6);
 
-// 1=主武器(背包三选一) 2=副武器 3=近战 4=投掷物(手雷/闪光弹/烟雾弹循环)
-// Q=上/副武器快速切换，B=背包选主武，右键=AWM 开镜 / 匕首重击
+// 1=当前背包主武器 2=副武器 3=近战 4=投掷物(手雷/闪光弹/烟雾弹循环)
+// Q=上/副武器快速切换，B=背包选主武，右键=狙击枪开镜 / 匕首重击
 const WEAPON_DEFS = {
   ak: {
     id: "ak", slot: "primary", type: "rifle", name: "AK-47", model: "./models/ak47.glb",
@@ -319,6 +377,16 @@ const WEAPON_DEFS = {
     recoilReset: 0.55, punchHold: 0.20, viewTrack: 1.0, punchDecay: { exp: 6, lin: 10 },
     inacc: INACC_AWP,
   },
+  barrett: {
+    id: "barrett", slot: "primary", type: "sniper", name: "巴雷特 M82A1", model: "./models/barrett_m82.glb",
+    rotY: 0, targetLen: 1.14, key: "1", fullAuto: false,
+    // CF 端游把 M82A1 做成栓动狙：每发退镜、拉栓、再回镜。比 AWM 略慢的
+    // 1.55s 间隔是当前手感标定值，不能按现实枪械的半自动结构放开连续射击。
+    stats: { magSize: 10, reserve: 20, interval: 1.55, dmg: 130, reload: 3.85, rangeMod: 0.99, boltTime: 1.3, zoom: true },
+    pattern: [[0, 0], [0.25, 4.2], [-0.25, 4.2]],
+    recoilReset: 0.55, punchHold: 0.22, viewTrack: 1.0, punchDecay: { exp: 6, lin: 10 },
+    inacc: INACC_AWP,
+  },
   pistol: {
     // 模型是 usp.glb（原来的 pistol.glb 是一把 10cm 长的小方块枪，已弃用）。
     // **`orient` 是给这颗模型专用的掰正旋转**：usp.glb 的 Sketchfab 根节点带了一个「造型朝向」，
@@ -331,14 +399,14 @@ const WEAPON_DEFS = {
     // 说明掰正后长轴确实落在枪管上。于是 rotY 走 AK 那一套 -π/2 即可。
     // **其余模型（三把基础枪 + 匕首 + 八款皮肤模型）的根节点都是正的，只有这一条要 `orient`。**
     id: "pistol", slot: "secondary", type: "pistol", name: "USP", model: "./models/usp.glb",
-    rotY: -Math.PI / 2, targetLen: 0.55, key: "2", fullAuto: false,
+    // 26 cm in the view model (AK: 82 cm); the old 55 cm made the USP rifle-sized.
+    rotY: -Math.PI / 2, targetLen: 0.26, key: "2", fullAuto: false,
     orient: [0.10541675, -0.07145408, 0.10883619, 0.98586830],
     // `muzzleY` 是**枪口焰锚点的高度**，默认 0.02（那是照旧的方块手枪定的 —— 它浑身上下
     // 一样厚，0.02 就贴着"枪管"）。新模型是一把真枪：枪管在套筒里，套筒前端面实测
-    // y ∈ [0.067, 0.158]（枪组局部、米），中心 0.113 —— 还按 0.02 画的话枪口焰会吊在
-    // 枪管下方 9cm 处，明显脱节。取 0.11（略低于端面中心，因为膛线孔在下沿之上一点）。
+    // 旧 55 cm 标尺下 y ∈ [0.067, 0.158]，缩到 26 cm 后等比取约 0.052。
     // z 不用改：`fitGunModel` 用实测的 box.min.z - 0.02，对新旧模型都对。
-    muzzleY: 0.11,
+    muzzleY: 0.052,
     stats: { magSize: 12, reserve: 24, interval: 0.17, dmg: 35, reload: 2.2, rangeMod: 0.91 },
     // **punchHold 必须 > 射击间隔（0.17s），否则这张表等于白写。** `punchHold` 决定「停火多久
     // 之后才开始恢复」，取 0.15 时每两发之间会漏进 ~0.02s 的恢复（实测 60fps 下正好 1~2 帧，
@@ -349,18 +417,10 @@ const WEAPON_DEFS = {
     inacc: INACC_USP,
   },
   knife: {
-    id: "knife", slot: "melee", type: "melee", name: "军用匕首", model: "./models/knife.glb",
-    // **`orient` 是必需的、`rotY` 修不了它**：`models/knife.glb` 是把长轴摆在
-    // `a = (-0.4757, 0.004, 0.8796)`（实测最远点对）上的，比水平躺得还歪、还带偏航，
-    // 而 `rotY` 只有一个绕 Y 的旋钮。四元数是「刀尖轴 → 目标方向、掌面法线 → 相机正前方」
-    // 那一对基底的复合（`Mt·Mmᵀ`，与 USP 同一套做法，见 `withOrient`）。
-    // **它是量出来的**：`a`/`w`/`n` 三轴由顶点云实测，刃面自动取「正对相机」的那一档。
-    orient: [0.86017813, -0.02682014, 0.16330949, -0.48239431],
-    // `targetLen` 从 0.5 收到 0.35：**这是「拳能攥住刀柄」反推的**，不是审美取舍。
-    // 归一化标尺一放大，刀柄就跟着变粗，而手的大小是定死的（步枪手 s=0.743）——
-    // 0.5 时拳宽/柄宽只有 0.58（拳比柄还窄，等于捏不住），0.35 时恰好 1.07、拳/柄长 0.82。
-    // 收到 0.35 之后全刀 ≈35cm，正是战斗匕首的真实尺寸。
-    rotY: 0, targetLen: 0.35, key: "3",
+    id: "knife", slot: "melee", type: "melee", name: "军用匕首", model: "./models/m9_knife.glb",
+    // CC0 M9 source points along +X. This yaw shows the blade's broad side
+    // while still aiming its tip forward and inward from the right hand.
+    rotY: 2.25, targetLen: 0.35, key: "3",
     stats: KNIFE,
     pattern: [[0, 0]], recoilReset: 0.55, punchHold: 0.15, viewTrack: 0, punchDecay: { exp: 6, lin: 10 },
   },
@@ -381,7 +441,7 @@ const WEAPON_DEFS = {
     stats: { count: 1, throwCooldown: 0.85, radius: 4.6, life: 25, fuse: 1.5 },
   },
 };
-const PRIMARY_IDS = ["ak", "m4", "awm"];
+const PRIMARY_IDS = ["ak", "m4", "awm", "barrett"];
 const NADE_IDS = ["frag", "flash", "smoke"];
 
 // owned[id] = { group, gun, baseGun, baseMuzzle, muzzleLocal, models, modelMuzzles,
@@ -492,20 +552,21 @@ function decayPunch(dt) {
 const PX_PER_DEG = 9.5;
 const inaccToPx = (v) => Math.atan(Math.max(0, v || 0)) * 57.29577951308232 * PX_PER_DEG;
 
-// 移动散布的**显示**缩放（用户 2026-10-10 反馈「移动时准星四条线张得太开」）。
-// CS 的 `move` 项在满速下给出 atan(0.17506)·57.3·9.5 ≈ 94px 的半开口，叠加基线后
-// 准星能开到 ≈100px —— 实际走位时确实甩得离谱。整体减半 ⇒ 满速 ≈51px。
-// **只乘 `move` 这一项**：站定(`stand`/`crouch`)、腾空(`jump*`)、连发惩罚(`inaccPenalty`)
-// 都是各自的语汇，用户报的是「移动时」这一条，不跟着动。
-// 这仍然是一次**纯显示**改动 —— 这颗散布锥只驱动准星张开、绝不喂子弹（见 crosshairGap 一节）。
-const MOVE_SPREAD_SCALE = 0.5;
+// 移动/跳跃只缩放「比站定多张开的部分」；本次在旧视觉效果上再缩小 75%。
+// CS 散布表、站定开口、射击惩罚和真实子弹轨迹保持不变。
+const MOVE_SPREAD_SCALE = 0.125; // 旧值 0.5 的 25%
+const JUMP_SPREAD_SCALE = 0.25;
 
 // 姿态 + 移动的散布锥（正切值，与 CS 同单位）。静步不叠移动项 —— 与「静步不触发脚步声」同源。
 function baseInaccuracy(def) {
   const ic = def.inacc;
   if (!ic) return 0;
   const p = player;
-  if (!p.onGround) return ic.jumpInitial + ic.jump * Math.min(1, Math.abs(p.vel.y) / JUMP_VEL);
+  if (!p.onGround) {
+    const standing = p.crouching ? ic.crouch : ic.stand;
+    const airborne = ic.jumpInitial + ic.jump * Math.min(1, Math.abs(p.vel.y) / JUMP_VEL);
+    return standing + Math.max(0, airborne - standing) * JUMP_SPREAD_SCALE;
+  }
   let base = p.crouching ? ic.crouch : ic.stand;
   const hs = Math.hypot(p.vel.x, p.vel.z);
   let m = (hs - 0.34 * RUN_SPEED) / (0.95 * RUN_SPEED - 0.34 * RUN_SPEED);
@@ -529,17 +590,19 @@ function crosshairGap() {
   return Math.max(4, Math.min(240, px));
 }
 
-// AWM 的栓动循环：拉栓计时 −dt，归零时若「开火前在镜里」就自动回镜。
+// 栓动狙击枪的循环：拉栓计时 −dt，归零时若「开火前在镜里」就自动回镜。
 // **走 dt 不用 setTimeout** —— 与换弹/死亡计时同一套理由：`pause()`（停 rAF）才能把它一起冻住，
-// 无头测试也才能定步长快进。只有 AWM 会用到，所以只推进它一把。
+// 无头测试也才能定步长快进。切枪可中断拉栓，因此两把枪分别维护状态。
 function updateBolt(dt) {
-  const s = owned.awm && owned.awm.state;
-  if (!s || s.boltT <= 0) return;
-  s.boltT -= dt;
-  if (s.boltT > 0) return;
-  s.boltT = 0;
-  if (s.reScope && currentId === "awm" && state === "playing" && !dead) setScoped(true);
-  s.reScope = false;
+  for (const id of ["awm", "barrett"]) {
+    const s = owned[id] && owned[id].state;
+    if (!s || s.boltT <= 0) continue;
+    s.boltT -= dt;
+    if (s.boltT > 0) continue;
+    s.boltT = 0;
+    if (s.reScope && currentId === id && state === "playing" && !dead) setScoped(true);
+    s.reScope = false;
+  }
 }
 
 // 第一人称手臂（视模）。**全局只有一个实例**，切枪时被重挂进新武器的组 ——
@@ -680,7 +743,7 @@ function loadWeapon(def) {
           aimPunch: { x: 0, y: 0 }, // 累积抬枪偏移（度，x 右+ / y 上+）；打满表就停在最后一项
           sinceShot: 99,            // 距上一发的秒数，驱动 punchHold / recoilReset 两条时序
           inaccPenalty: 0,          // 准星张开的连发惩罚（度）—— **纯视觉，绝不喂子弹**
-          boltT: 0,                 // AWM 拉栓剩余秒数（0 = 可以开火/可以开镜）
+          boltT: 0,                 // 栓动狙拉栓剩余秒数（0 = 可以开火/可以开镜）
           reScope: false,           // 开火前在镜里 → 拉完自动回镜（CS 的栓动循环）
           ks: makeKickSpring(), // 视模后坐的位移/速度状态（见 makeKickSpring 注释）
           throwCd: 0,
@@ -776,6 +839,7 @@ function flashTexture() {
 // 贴图是**白底 + alpha 形状**，颜色留给 material.color 去乘 —— skins.js 的专属枪口焰色
 // （每个皮肤一项 muzzle）正是这么上色的；贴图一旦自带橙黄，就会被色值再乘一遍变成脏红。
 const MUZZLE_FLASHES = Array.from({ length: 5 }, flashTexture);
+setEnemyMuzzleTexture(MUZZLE_FLASHES[0]);
 
 const muzzleShot = new THREE.Sprite(
   new THREE.SpriteMaterial({
@@ -895,7 +959,7 @@ let matchPaused = false;
 let lockRequestCancelled = false;
 let time = 0;
 let fireEnabled = false;
-let knifeHeavyHeld = false, knifeChain = 0, meleeState = null, meleeHold = null;
+let knifeHeavyHeld = false, knifeChain = 0, knifeLastSwingAt = -Infinity, meleeState = null, meleeHold = null;
 let classicView = null, classicFireT = Infinity;
 let knifeBind = null;
 let strideAcc = 0;
@@ -987,9 +1051,6 @@ enemyManager.onFootstep = (x, z) => sfx.footstep(x, 1.0, z);
 const raycaster = new THREE.Raycaster();
 
 // ---------- 预加载 ----------
-function loadAK() {
-  return Promise.all(PRIMARY_IDS.map((id) => loadWeapon(WEAPON_DEFS[id])));
-}
 // 敌人那把枪**不再单独加载**：世界模型目录（scripts/guncatalog.js）在初始化的最后
 // 从玩家已加载的枪上派生全部「枪型 × 皮肤」变体，包括敌人手持的那一份。
 // 旧版这里会再下载一遍 ak47.glb 给敌人当模板，那 92KB 和这个函数一起删掉了。
@@ -1224,6 +1285,10 @@ function showStreak(n) {
   streakEl.classList.add("show");
   sfx.streak(n);
 }
+function hideStreakCallout() {
+  streakEl.className = "streak";
+  streakEl.textContent = "";
+}
 
 // 连杀窗口倒计时（常驻 HUD）：只要身上挂着连杀就显示，进度条按 STREAK_WINDOW 走完。
 // **每帧由 update() 推**（不是 CSS 动画）：这样才能跟着 __tactical.pause() 一起冻住、
@@ -1247,12 +1312,21 @@ function updateStreakHud() {
   // 快断了（1.2s 内）就转红闪一下，提示「再不杀就断了」。单杀不给提示（还没成串）。
   streakTimerEl.classList.toggle("low", remain <= 1.2 && streakCount >= 2);
 }
-// Classic medal below the reticle. A single reusable node restarts on each kill.
-function showKillIcon(headshot, weaponId, golden) {
+// 准星下方的击杀章：1～8 杀为星章，超过 8 杀改用金色鹰徽。
+function showKillIcon(headshot, golden) {
   if (!killIconEl) return;
+  // 这一杀没有续上连杀时，爆头走金色骷髅章；九杀起鹰徽优先。
+  const soloHeadshot = headshot && streakCount === 1;
+  const highStreakEagle = streakCount > 8;
   const kind = !headshot ? "hit" : golden ? "gold" : "head";
-  killIconEl.className = "killicon " + kind;
-  killIconEl.innerHTML = killMedalSvg(weaponId || currentId, headshot, golden);
+  killIconEl.className = "killicon " + kind
+    + (soloHeadshot ? " solo-headshot" : "")
+    + (highStreakEagle ? " high-streak-eagle" : "");
+  killIconEl.innerHTML = highStreakEagle
+    ? '<img class="ki-high-streak-eagle" src="./assets/ui/streak_eagle.png" alt="" aria-hidden="true">'
+    : soloHeadshot
+      ? '<img class="ki-solo-headshot ki-hs' + (golden ? ' gold' : '') + '" src="./assets/ui/headshot_solo.png" alt="" aria-hidden="true">'
+      : killMedalSvg(streakCount, headshot, golden);
   void killIconEl.offsetWidth;
   killIconEl.classList.add("show");
 }
@@ -1285,14 +1359,15 @@ function updateDeathBar(p) {
 }
 
 // ---------- 背包与切枪 ----------
-// CF 式多背包：3 个背包各带一把主武器，副武器/近战/投掷物三件套共用。
+// CF 式多背包：4 个背包各带一把主武器，副武器/近战/投掷物三件套共用。
 // 数字键 1/2/3/4 切的是「当前背包内的槽位」，不是背包编号 —— 切背包走 B + 数字键，
 // 与 CF 一致（CF 里这也是两件不同的事）。
 // Classic loadout; modern model skins remain available to the existing skin API.
 const BACKPACKS = [
   { primary: "ak", skin: DEFAULT_SKIN.ak },   // 背包 1 —— AK-47 老兵
-  { primary: "m4", skin: DEFAULT_SKIN.m4 },       // 背包 2 —— 黑色 M4A1
+  { primary: "m4", skin: DEFAULT_SKIN.m4 },       // 背包 2 —— 黑色 M4A1-C
   { primary: "awm", skin: DEFAULT_SKIN.awm },      // 背包 3 —— 军绿 AWM
+  { primary: "barrett", skin: DEFAULT_SKIN.barrett }, // 背包 4 —— 巴雷特 M82A1
 ];
 let curBp = 0;
 
@@ -1684,6 +1759,7 @@ function switchWeapon(id, force, opts) {
   if (!owned[id] || (id === currentId && !force)) return;
   cancelMelee();cancelGrenade();
   const draw = !!(opts && opts.draw);
+  const previousId = currentId;
   const prev = owned[currentId];
   if(WEAPON_DEFS[currentId].type!=="grenade")grenadeReturnId=currentId;
   const type = WEAPON_DEFS[id].type;
@@ -1701,7 +1777,7 @@ function switchWeapon(id, force, opts) {
   // `scopeStage` 仍是 2，画面上就是「切了枪人还在开镜」（准星与镜筒 overlay 倒是没了，
   // 所以只剩「世界被放大 + 鼠标变慢」这两个症状，很容易被当成别的问题）。
   // applyScope(0) 把 scopeStage 一起归零，并照常补回准星/镜筒 overlay 与枪模可见性。
-  applyScope(0);
+  applyScope(0, previousId);
   // 切枪打断换弹（与 CF 一致：切开就等于放弃这次换弹，切回来要重新按 R）。
   // **必须打断「旧枪」那一把** —— 否则收枪段里它会一边换弹一边下沉，两套姿势互相打架；
   // 而且在动画中途清掉时间线（resetSwitchState）也才不会有半截换弹残留。
@@ -1715,13 +1791,13 @@ function switchWeapon(id, force, opts) {
     // 不取消的话「弹匣入井 / 拉栓」会在切到别的枪之后照常响 —— 而逻辑上这次换弹已经作废了。
     sfx.cancelReload();
   }
-  // 快切取消拉栓（CF 的经典技巧）：AWM 打完一枪正在拉栓时换枪 = 主动放弃这次拉栓。
+  // 快切取消拉栓（CF 的经典技巧）：栓动狙打完一枪正在拉栓时换枪 = 主动放弃这次拉栓。
   // 三件事一起做，缺一件这个技巧就不成立：
   //   ① `boltT = 0` —— 拉栓没了，切回来不用再等它走完（`fire()` 与 `applyScope()` 都门在它上面）；
   //   ② `reScope = false` —— 否则拉栓走完还会**自动回镜**，等于切回来又端起了镜子
   //      （与上面「切枪一律退镜」直接冲突）；
-  //   ③ `nextFireAt = 0` —— 放开 CS 的射速闸门（AWM 的 `interval` 是 1.4548s，比 `boltTime`
-  //      1.2s 还长，不放它的话快切省下来的时间会被这 1.4548s 全部吃掉，快切等于白做）。
+  //   ③ `nextFireAt = 0` —— 放开射速闸门（两把栓动狙的 `interval` 都比 `boltTime`
+  //      长，不放它的话快切省下来的时间会被射击间隔全部吃掉，快切等于白做）。
   // 只在「拉栓真的在走」时生效：拉栓已完成、单纯在等 `interval` 的那种等待不给捷径，
   // 免得「打一枪切一下枪」变成绕开射速限制的万能解。
   if (prev && prev.state.boltT > 0) {
@@ -1835,7 +1911,7 @@ function toggleBackpack() {
   clearBackpackInput();
   sfx.ui("open");
   updateBackpack();
-  showToast(canSwapBackpack() ? "悬停编号预览 · 点击或按 1 / 2 / 3 确认" : "");
+  showToast(canSwapBackpack() ? "悬停编号预览 · 点击或按 1 / 2 / 3 / 4 确认" : "");
   backpackUnlockPending = true;
   document.exitPointerLock();
 }
@@ -1890,7 +1966,7 @@ function backpackOpen() {
 // （面板按钮、方括号、`__tactical.selectSkin` / `skinCycle`）。留一个「零调用点的换皮肤
 // 函数」只会让人以为还有入口（同 `stats.recoil` 那条死数据的先例）。
 // **皮肤机制本身一个字没动**：`BACKPACKS[i].skin` / `GEAR_SKIN` / `activeSkinId()` /
-// `applySkinTo()` / `skinForGun()` 全部照旧，三个背包的默认皮肤（老兵 / 雷神 / 紫电）照常挂上、
+// `applySkinTo()` / `skinForGun()` 全部照旧，四个背包的预设外观照常挂上、
 // 捡到的枪也照常带着敌人的皮肤。程序化入口只剩 `__tactical.setSkin`（它本来就不写
 // `LOADOUT_DEFAULT`，与「捡来的枪只活一条命」的边界一致）。
 // 面板是「查看 + 切换」用的，改配装在开始菜单里（等价于 CF 在仓库里配好再进战场）。
@@ -1999,7 +2075,7 @@ function updateBpHint() {
     return box;
   };
 
-  if (canBp) keysLine.appendChild(item(["1", "2", "3"], " 或点击编号确认 · 悬停预览"));
+  if (canBp) keysLine.appendChild(item(["1", "2", "3", "4"], " 或点击编号确认 · 悬停预览"));
   else keysLine.appendChild(item([], swapBlockReason(), true));
 
   // Slots are shown as actual equipment cards above; no duplicate text legend.
@@ -2224,10 +2300,9 @@ function enemyWeaponName(e) {
 }
 
 // 开始菜单里**只有对局设置**（敌人数 + 难度），没有键位表、也没有背包/皮肤配装。
-// 背包与皮肤改用写死的默认值：BACKPACKS（背包1=AK 老兵 / 背包2=M4 雷神 / 背包3=AWM 紫电）
+// 背包与皮肤改用预设值：BACKPACKS（AK / M4 / AWM / 巴雷特各占一个背包）
 // 与 GEAR_SKIN（USP 与匕首都是原厂 —— 这两把没有模型皮肤，见 skins.js 的 pistol/knife 表）。
-// 三个背包在游戏内仍可用 B + 数字键切换，
-// 所以「三背包 = 三把主武器」这条玩法没丢，只是配装在代码里预设好、菜单不再提供入口。
+// 四个背包在游戏内可用 B + 数字键切换；配装在代码里预设好，菜单不提供入口。
 //
 // `skinForGun()` 保留着：皮肤归属校验的那条不变式（「M4 不许挂着 AK 的 skin id」）依然成立，
 // 只是现在唯一的触发点是 `__tactical.setSkin` 这类程序化改动。删掉它会让那条不变式重新变成
@@ -2258,6 +2333,55 @@ function buildMenuMatch() {
   for (const btn of box.children) {
     btn.classList.toggle("active", btn.dataset.diff === difficultyId);
   }
+}
+
+function updateMapChoiceUi() {
+  const name = mapData?.name || "运输船";
+  document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
+    const available = !!mapCatalog[button.dataset.map];
+    button.disabled = !available || state === "playing";
+    button.classList.toggle("active", button.dataset.map === selectedMapId);
+    button.setAttribute("aria-pressed", button.dataset.map === selectedMapId ? "true" : "false");
+  });
+  const label = document.getElementById("lobbyMapName");
+  if (label) label.textContent = name;
+  const chip = document.getElementById("lobbyMapChip");
+  if (chip) chip.textContent = name + " · 团队竞技";
+  const radar = document.getElementById("minimap");
+  if (radar) radar.dataset.mapLabel = name + " · 战术地图";
+}
+
+function activateMap(id) {
+  if (state === "playing" || !mapCatalog[id]) return false;
+  impactVfx.clear();
+  selectedMapId = id;
+  mapData = mapCatalog[id];
+  for (const [key, entry] of Object.entries(mapCatalog))
+    for (const visual of entry.visuals || []) visual.visible = key === id;
+  renderer.shadowMap.needsUpdate = true;
+  scene.background = mapData.background;
+  // The enclosed hall uses its chandelier lights as the key. Restore the
+  // outdoor daylight exactly when switching back to the transport ship.
+  worldHemi.intensity = id === "palace" ? 0.82 : 1.25;
+  sun.intensity = id === "palace" ? 1.55 : 3.05;
+  renderer.toneMappingExposure = id === "palace" ? 1.12 : 1.18;
+  colliders = mapData.colliders;
+  obstacleMeshes = mapData.obstacles;
+  obstacleFlat = [];
+  for (const o of obstacleMeshes) {
+    if (o.isMesh) obstacleFlat.push(o);
+    else o.traverse((m) => { if (m.isMesh) obstacleFlat.push(m); });
+  }
+  bounds = mapData.bounds;
+  enemyManager.spawnPoints = mapData.spawns?.enemy || null;
+  if (mapData.source && !mapData.navigation)
+    mapData.navigation = new GroundNavigation(colliders, bounds,
+      { maxHeight: mapData.navigationMaxHeight });
+  enemyManager.navigation = mapData.navigation || null;
+  if (minimap) minimap.setLayout(mapData.topdown, bounds);
+  updateMapChoiceUi();
+  if (lobby) lobby.refresh();
+  return true;
 }
 
 // ---------- 大厅数据（喂给 scripts/lobby.js）----------
@@ -2340,18 +2464,18 @@ function lobbyData() {
       players: [{ name: "你", role: "房主", status: state === "playing" ? "对局中" : "准备" }],
     },
     ticker:
-      "团队竞技 · 运输船 · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
+      "团队竞技 · " + (mapData?.name || "运输船") + " · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
       Math.round(TDM_TIME / 60) + " 分钟 · 按 Enter 打开战场聊天",
     arsenal: lobbyArsenalRows(),
     storage: lobbyStorageRows(),
   };
 }
 
-// ---------- 开镜（AWM 右键）----------
-// CF 的 AWM 是**两级变倍**：右键 → 一级镜，再右键 → 二级镜（更高倍），再右键 → 退镜。
+// ---------- 开镜（AWM / 巴雷特右键）----------
+// 两把狙击枪都是两级变倍：右键 → 一级镜，再右键 → 二级镜，再右键 → 退镜。
 // 用 scopeStage 记 0/1/2，scoped 只是它的布尔视图，别处照旧读 scoped。
 let scopeStage = 0;
-function applyScope(stage) {
+function applyScope(stage, audioWeaponId = currentId) {
   const def = WEAPON_DEFS[currentId];
   if (stage > 0 && !(def.stats && def.stats.zoom)) stage = 0;
   // 拉栓中不许开镜（AWM 的栓动循环）。退镜（stage 0）永远允许，否则拉栓开始时
@@ -2360,7 +2484,7 @@ function applyScope(stage) {
   // 收/出枪期间不许开镜（CF 同此：出枪没完端不起镜）。退镜（stage 0）永远放行 ——
   // switchWeapon 开头那次强制退镜正是走这条路，被自己挡掉就麻烦了。
   if (stage > 0 && switchBlocking()) stage = 0;
-  const was = scoped;
+  const previousStage = scopeStage;
   scopeStage = stage;
   scoped = stage > 0;
   scopeEl.classList.toggle("hidden", !scoped);
@@ -2370,7 +2494,9 @@ function applyScope(stage) {
   // 进来）时若去改逻辑枪的 visible，会把还没提交的新枪提前点亮。
   const c = vizWeapon();
   if (c) c.group.visible = !scoped;
-  if (scoped !== was) (scoped ? sfx.scopeIn() : sfx.scopeOut());
+  // 每一次真正升倍率都响一声，包括一级 → 二级；被拉栓/切枪挡下的输入没有声音。
+  if (stage > previousStage) sfx.scopeIn(audioWeaponId, stage);
+  else if (stage === 0 && previousStage > 0) sfx.scopeOut(audioWeaponId);
 }
 // 兼容既有调用点（换枪 / 复活 / 失焦 / 开火后）——一律按「进一级镜 / 退镜」处理
 function setScoped(v) { applyScope(v ? (scopeStage > 0 ? scopeStage : 1) : 0); }
@@ -2666,13 +2792,15 @@ function throwGrenade() {
 }
 
 // ---------- 近战：前摇 → 有效刀刃窗口 → 收刀 ----------
-function cancelMelee() { meleeState=null;meleeHold=null;knifeHeavyHeld=false;knifeChain=0; }
-function meleeAttack(heavy=false, followup=false) {
+function cancelMelee() { meleeState=null;meleeHold=null;knifeHeavyHeld=false;knifeChain=0;knifeLastSwingAt=-Infinity; }
+function meleeAttack(heavy=false) {
   if (currentId!=="knife" || state!=="playing" || dead || switchBlocking() || meleeState || cur().state.cooldown>0) return;
-  const kind=heavy?'heavy':followup&&knifeChain%2?'thrust':'light';
+  if (!heavy && time-knifeLastSwingAt>.9) knifeChain=0;
+  const kind=heavy?'heavy':knifeChain%2?'thrust':'light';
   const mode=KNIFE[kind];
   meleeState={kind,t:0,hit:false,sounded:false};
   knifeChain=heavy?0:knifeChain+1;
+  knifeLastSwingAt=heavy?-Infinity:time;
   cur().state.cooldown=mode.interval;
   actedThisLife=true;
 }
@@ -2689,8 +2817,9 @@ function updateMelee(dt) {
     const origin=camera.getWorldPosition(new THREE.Vector3());
     for(let i=0;i<=steps&&!a.hit;i++) {
       const u=(from+(to-from)*i/steps-mode.hitStart)/(mode.hitEnd-mode.hitStart);
-      const yaw=player.yaw+mode.arc*(1-2*u);
-      const dir=new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(player.pitch,yaw,0,"YXZ"));
+      const yaw=player.yaw+mode.arc*mode.sweepSign*(1-2*u);
+      const pitch=player.pitch+mode.pitchArc*(1-2*u);
+      const dir=new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(pitch,yaw,0,"YXZ"));
       raycaster.set(origin,dir);raycaster.far=KNIFE.range;
       const hit=raycaster.intersectObjects(targets,false)[0];
       if(hit){a.hit=true;resolveKnifeHit(hit,dir,mode);}
@@ -2705,11 +2834,15 @@ function resolveKnifeHit(h,dir,mode) {
     const ef=new THREE.Vector3(Math.sin(enemy.group.rotation.y),0,Math.cos(enemy.group.rotation.y));
     const backstab=ef.dot(dir)>.5,golden=head&&enemy.health>=enemy.maxHealth;
     const dmg=head?mode.head:backstab?mode.backstab:mode.dmg;
-    enemy.combatAt=time;spawnBlood(h.point);
-    if(enemy.takeDamage(dmg))onEnemyDeath(enemy,head,"军用匕首",golden);
-    else {addHitMark(head?"head":"hit",{golden});head?sfx.headshot():sfx.hit();enemy.setFlash();}
+    enemy.combatAt=time;spawnBlood(h.point,dir);
+    if(head)sfx.headshot();
+    if(enemy.takeDamage(dmg,head)){
+      if(head)spawnHeadshotBurst(h.point,dir);
+      onEnemyDeath(enemy,head,"军用匕首",golden);
+    }
+    else {addHitMark(head?"head":"hit",{golden});if(!head)sfx.hit();enemy.setFlash();}
     sfx.impact(h.point,"knife_flesh");
-  } else if(!enemy){spawnSparks(h.point);sfx.impact(h.point,"knife_wall");}
+  } else if(!enemy){impactVfx.surface(h,false);sfx.impact(h.point,"knife_wall");}
 }
 
 // ---------- 射击 ----------
@@ -2736,7 +2869,7 @@ function fire() {
   if (def.type === "grenade") { primeGrenade(); return; }
 
   if (WEAPON_STATE.reloading || WEAPON_STATE.cooldown > 0) return;
-  // 拉栓中不许开火（AWM）。门放在这里而不是 `nextFireAt` 上：`nextFireAt` 只管射速节奏，
+  // 拉栓中不许开火（AWM / 巴雷特）。门放在这里而不是 `nextFireAt` 上：`nextFireAt` 只管射速节奏，
   // 而拉栓是「这一发之后的额外动作」，两者正交 —— 拉栓 1.2s 比射击间隔 1.4548s 短，
   // 合并成一个计时器会让「拉栓中切枪再切回来」丢掉拉栓状态。
   if (WEAPON_STATE.boltT > 0) return;
@@ -2749,7 +2882,7 @@ function fire() {
   actedThisLife = true; // 本回合已行动 → 锁定背包切换（CF 规则）
   WEAPON_STATE.cooldown = 0.07;
   // 第二个参数是**武器 id**：`def.type` 对 AK 与 M4 都是 "rifle"，只有 id 能区分两者
-  // （AK 原速、M4 变调 + 收短窗口 + 叠一层更高的机匣爆音，见 audio.js 的 GUN 表）。
+  // （AK 与 M4A1-C 各播自己的原速采样，见 audio.js 的 GUN 表）。
   sfx.shoot(def.type, def.id);
 
   if(currentId==='ak')classicFireT=0;
@@ -2777,7 +2910,6 @@ function fire() {
   const hits = raycaster.intersectObjects(flatTargets(), false);
   if (hits.length > 0) {
     const h = hits[0];
-    spawnTracer(h.point);
     if (h.object.userData.enemy) {
       const enemy = h.object.userData.enemy;
       if (!enemy.dead) {
@@ -2788,18 +2920,22 @@ function fire() {
         const golden = head && enemy.health >= enemy.maxHealth;
         const dmg = head ? enemy.maxHealth : damageAt(def, h.distance);
         enemy.combatAt = time;   // 挨打即暴露（小地图），见 enemiesShoot 那条
-        spawnBlood(h.point);
+        spawnBlood(h.point,dir);
         // 子弹入肉的闷响。与 `sfx.hit()/headshot()` 那两声音调**并存**：音调是奖励反馈、
         // 采样是世界反馈，CF 的手感正是这两层叠出来的（见 audio.js 的 hit() 注释）。
         sfx.impact(h.point, "flesh");
-        if (enemy.takeDamage(dmg)) onEnemyDeath(enemy, head, def.name, golden);
+        if(head)sfx.headshot();
+        if (enemy.takeDamage(dmg,head)) {
+          if(head)spawnHeadshotBurst(h.point,dir);
+          onEnemyDeath(enemy, head, def.name, golden);
+        }
         else {
           addHitMark(head ? "head" : "hit", { golden: golden });
-          head ? sfx.headshot() : sfx.hit();
+          if(!head)sfx.hit();
         }
       }
     } else {
-      spawnSparks(h.point);
+      impactVfx.surface(h);
       // 打在掩体上的实心撞击；`impact()` 内部有 30% 概率把这段换成跳弹（`ricochet`）。
       // 位置给 `h.point` 而不是玩家：撞击声来自子弹落点，`out3d` 会按玩家朝向给它方向。
       sfx.impact(h.point, "wall");
@@ -2814,17 +2950,13 @@ function fire() {
   WEAPON_STATE.sinceShot = 0;
   advancePunch();
 
-  // CF 惯例：狙击枪一枪打出即强制退镜。CS 的 AWP 还多一层栓动循环 ——
-  // 退镜 → 拉栓 `boltTime` 秒（期间不可开火、不可开镜）→ 拉完**自动回镜**。
-  // 旧注释说这顺带避免了狙击后坐在窄视场里被放大糊住画面，现在这一点由退镜本身负责。
-  if (def.type === "sniper") {
-    WEAPON_STATE.boltT = def.stats.boltTime ?? 0;
+  // 栓动狙：退镜 → 拉栓 `boltTime` 秒 → 自动回镜。
+  if (def.type === "sniper" && def.stats.boltTime > 0) {
+    WEAPON_STATE.boltT = def.stats.boltTime;
     WEAPON_STATE.reScope = scoped; // 本来在镜里 → 拉完自动回镜（CS 的手感）
     if (scoped) setScoped(false);
-    // 拉栓声**延后 0.20 s**（audio.js 的 bolt() 内部定）：枪声（1.31 s 采样）的起音先出来，
-    // 拉栓才落在它上面 —— 同帧发两段只会糊成一坨。`bolt()` 自己是可取消的排程，
-    // 切枪时由 `sfx.cancelBolt()` 收掉（AWM 快切的经典手感就建立在「拉栓能被切枪取消」上）。
-    sfx.bolt();
+    // 枪声先起、拉栓声随后叠入。两把枪各用自己的拉栓采样；快切可取消排程。
+    sfx.bolt(def.id);
   }
 
   updateAmmoHud();
@@ -2851,7 +2983,8 @@ function onKill(headshot, enemyName, weaponName, golden) {
   // chat 的优先级队列本来也能合并，但在这里先选一次更省，也让意图更直白。
   chat.taunt(streakCount >= 2 ? "multikill" : headshot ? "headshot" : "kill", { name: enemyName });
   addHitMark("kill", { golden: golden });
-  showKillIcon(headshot, currentId, golden);
+  if (streakCount === 1) hideStreakCallout();
+  showKillIcon(headshot, golden);
   // 连杀时只播经典人声，避免再叠一层合成击杀音抢开头。
   if (streakCount < 2) sfx.kill();
   // 爆头击杀的确认音**只在「这一杀没有续上连杀」时播**（用户定的口径）。判据落在
@@ -2946,7 +3079,8 @@ function updateReload(dt) {
   }
 }
 
-// ---------- 粒子池（火花 / 血雾共用）----------
+// ---------- 粒子池（爆炸 / 闪光）与材质命中特效 ----------
+const impactVfx = new ImpactVfx(scene);
 const pool = [];
 function makePool(n) {
   for (let i = 0; i < n; i++) {
@@ -2959,10 +3093,8 @@ function makePool(n) {
     pool.push({ m, life: 0.2, t: 1, base: 0.2, vel: null, grav: 0 });
   }
 }
-// 池子从 140 提到 170：血雾从 7 粒加到 12 粒 + 1 层雾、火花 6 → 10 之后，
-// 一次连续开火的单帧峰值会比原来高一截。`emit` 是 `find(p => p.t >= p.life)` 复用，
-// 池子一旦不够就是**静默饿死**（找不到空位直接 return，不报错），所以这里要留余量。
-makePool(170);
+// 血雾和表面碎屑已有独立池；此池只服务手雷与闪光的短促效果。
+makePool(32);
 
 function emit(point, hex, big, vel, grav, life) {
   const o = pool.find((p) => p.t >= p.life);
@@ -2977,31 +3109,12 @@ function emit(point, hex, big, vel, grav, life) {
   o.m.visible = true;
 }
 
-function spawnTracer(p) { emit(p, 0xffd080, false, null, 0, 0.12); }
-// 打中掩体：黄白火花 + 尘
-function spawnSparks(p) {
-  for (let i = 0; i < 10; i++) {
-    emit(p, i < 5 ? 0xffe08a : 0xffffff, true, new THREE.Vector3(
-      (Math.random() - 0.5) * 3, Math.random() * 2.4, (Math.random() - 0.5) * 3
-    ), 9, 0.34);
-  }
-}
-// 打中敌人：血雾（红色，带重力）
-//
-// 血滴（12 粒、初速高、带重力）读起来是「**溅开**」；单靠它缺一层「喷出的雾」——
-// 所以补一粒**大、慢、短命**的贴脸血雾。它不参与重力飞散，只负责在命中点糊一下，
-// 让这一下在 240ms 内有个体量（原来 7 粒小血滴在快速移动时几乎看不见）。
-function spawnBlood(p) {
-  for (let i = 0; i < 12; i++) {
-    emit(p, i % 3 === 0 ? 0xff4444 : 0x9e1414, true, new THREE.Vector3(
-      (Math.random() - 0.5) * 2.2, Math.random() * 1.4, (Math.random() - 0.5) * 2.2
-    ), 12, 0.42);
-  }
-  emit(p, 0x7a1010, true, new THREE.Vector3(0, 0.7, 0), 1.2, 0.2);
-}
+function spawnBlood(p, dir) { impactVfx.blood(p, dir); }
+function spawnHeadshotBurst(p, dir) { impactVfx.headshot(p, dir); }
 function spawnImpact(p, solid) { emit(p, solid ? 0xffffff : 0xfff0b0, true); }
 
 function updatePool(dt) {
+  impactVfx.update(dt);
   for (const o of pool) {
     if (o.t >= o.life) continue;
     o.t += dt;
@@ -3017,12 +3130,14 @@ function updatePool(dt) {
 
 // ---------- 敌人开火 ----------
 function enemiesShoot() {
-  if (!enemyManager.enemies.length) return;
+  if (dead || state !== "playing" || !enemyManager.enemies.length) return;
   const eye = new THREE.Vector3(player.pos.x, player.pos.y + EYE, player.pos.z);
   const losMeshes = obstacleFlat;
   const pSpeed = Math.hypot(player.vel.x, player.vel.z);
 
   for (const e of enemyManager.enemies) {
+    // 本轮循环里上一具敌人可能刚打出致命一枪。
+    if (dead || state !== "playing") break;
     if (!e.wantShoot || e.dead || e.blindT > 0) continue;
     const from = e.eyeline;
     const dx = eye.x - from.x, dy = eye.y - from.y, dz = eye.z - from.z;
@@ -3036,12 +3151,11 @@ function enemiesShoot() {
     if (smokeBlocks(from.x, from.y, from.z, eye.x, eye.y, eye.z)) continue;
 
     // 枪口火光打在手里的枪管前端（不再是胸口下方的近似位），看着才是「他在开枪」
+    e.recoil();   // 同帧更新枪身/手臂，再从新枪口取火光位置
     const mz = e.muzzleWorld(_mz);
-    emit(mz, 0xffd080, true);
     // 开火即暴露：小地图上无视视野锥与掩体、1.5s 内亮一个红点（枪口火光暴露位置）。
     e.combatAt = time;
-    sfx.enemyShoot(mz.x, mz.y, mz.z);
-    e.recoil();   // 骨架来一下后坐：枪往肩里推 + 枪口上跳（每发一下）
+    sfx.enemyShoot(mz.x, mz.y, mz.z, e.gunId);
 
     // 走位能躲枪：玩家移动时敌人命中率下降。难度只缩这一处 —— 伤害在 Enemy.reset
     // 里按 ENEMY_TUNING.dmg 定，不在命中后再乘（免得同一个乘数算两遍）。
@@ -3063,8 +3177,7 @@ function enemiesShoot() {
 // ---------- 玩家受击 ----------
 function damagePlayer(amount, byEnemy = true, killer = null) {
   if (state !== "playing") return;
-  // 死亡视角期间敌人仍在开火（enemiesShoot 不看你死没死）。不早退的话会反复走进
-  // 下面的死亡分支：比分、名册击杀数、击杀信息条全部被重复记账。
+  // 死亡视角期间不重复计伤；敌人停火另由 loseTarget 和 enemiesShoot 的守卫保证。
   if (dead) return;
   if (player.invuln > 0) return;
   player.hp -= amount;
@@ -3101,7 +3214,21 @@ function normAngle(a) {
 function beginDeath(killer, byEnemy = true) {
   cancelMelee();cancelGrenade();
   sfx.cancelStreak();
+  hideStreakCallout();
   dead = true;
+  enemyManager.loseTarget(); // 当帧清掉待发射，连同一轮后续敌人也不得朝尸体补枪
+  // 阵亡一并终结连杀（用户 2026-10-10 定的规则：死亡立刻清空）。
+  // 这一行补的是**窗口自然过期管不到**的那个漏洞：3 秒死亡视角期间 `time` 照常走，
+  // 但「每杀一人把窗口从这一发重新起算」的语义会让快速复活把两段连杀接成一条 ——
+  // 0s 击杀 → 0.2s 阵亡 → 3.2s 复活 → 4s 再击杀会播「双杀!」，中间明明死过一次。
+  // 与 gameStart() 里那两行同源，两处都是「明确的段落边界」；窗口过期（onKill 与
+  // 主循环各一处）是**时间**上的边界，这两处是**事件**上的边界，互不替代。
+  // 紧邻上一行的 `sfx.cancelStreak()` 已经收了人声，清计数与它是同一时刻的事。
+  streakCount = 0;
+  lastKillAt = -Infinity;
+  // 当帧就收起进度条：`updateStreakHud()` 在 update() 里排在敌人开枪**之前**
+  // （见主循环顺序），靠它自己下一帧才刷新会留一帧残影。dead 已置上 ⇒ active 为假 ⇒ 直接收。
+  updateStreakHud();
   // 击杀者的嘲讽。自雷（killer === null）没有发言人，退化成系统播报一句。
   // 这里**不收聊天输入框** —— CF 允许死后继续打字，死亡视角只有 3 秒，
   // 而且 chat.handleKey 排在各处 dead 守卫之前，功能上天然可用。
@@ -3289,12 +3416,12 @@ document.addEventListener("keydown", (e) => {
   if (backpackOpen()) {
     e.preventDefault();
     if (e.repeat) return;
-    if (/^Digit[123]$/.test(e.code)) confirmBackpack(Number(e.code[5]) - 1);
+    if (/^Digit[1234]$/.test(e.code)) confirmBackpack(Number(e.code[5]) - 1);
     else if (e.code === "KeyB" || e.code === "Escape") { closeBackpack(true); showToast(""); }
     return;
   }
   if (chat.handleKey(e)) return;
-  if (e.repeat && /^Digit[123]$/.test(e.code)) return;
+  if (e.repeat && /^Digit[1234]$/.test(e.code)) return;
   if (state === "playing" && !locked) return;
   keys[e.code] = true;
   // Tab 是浏览器的焦点切换键，不管在不在游戏里都要挡掉，否则按住会把焦点移走
@@ -3422,6 +3549,7 @@ function refreshPlayerPosition() {
 function quitMatchToLobby() {
   if (state !== "playing") return;
   state = "menu";
+  updateMapChoiceUi();
   lockRequestCancelled = true;
   matchPaused = false;
   backpackResumePending = false;
@@ -3543,17 +3671,17 @@ document.addEventListener("mousedown", (e) => {
   if (!locked || backpackOpen() || gameMenuOpen() || state !== "playing" || dead || chat.isTyping()) return;
   if (isSecondaryClick(e)) {
     e.preventDefault();
-    // 刀出鞘时右键 = **重击**（经典小刀翻握下刺）。这一句必须问在 `cycleScope()` 之前：
+    // 刀出鞘时右键 = **重击**（举刀下刺）。这一句必须问在 `cycleScope()` 之前：
     // `isSecondaryClick` 对没有 `stats.zoom` 的武器本来就返回 false，只有**真右键**
     // （`button === 2`）能走到这里，所以刀的重击不会被 Mac 那条 Ctrl+单击的判定搅进来。
     if (WEAPON_DEFS[currentId].type === "melee") { knifeHeavyHeld=true;fireEnabled=false;meleeAttack(true);return; }
     cycleScope();
     return;
   }
-  if (e.button === 0) { knifeChain=0;knifeHeavyHeld=false;fireEnabled = true; fire(); }
+  if (e.button === 0) { knifeHeavyHeld=false;fireEnabled = true; fire(); }
 });
 document.addEventListener("mouseup", (e) => {
-  if (e.button === 0 || e.which === 1) {fireEnabled = false;knifeChain=0;releaseGrenade();}
+  if (e.button === 0 || e.which === 1) {fireEnabled = false;releaseGrenade();}
   if (e.button === 2) knifeHeavyHeld=false;
 });
 // pointer lock 下右键仍会冒泡出右键菜单。这里不再只看 locked：
@@ -3578,7 +3706,10 @@ function gameStart() {
   closeGameMenu();
   closeBackpack();
   sfx.cancelStreak();
+  hideStreakCallout();
   state = "playing";
+  impactVfx.clear();
+  updateMapChoiceUi();
   kills = 0;
   enemyScore = 0;
   // 死亡中重开一局：必须连死亡计时一起清掉，否则新一局会继承上一局的倒计时
@@ -3740,7 +3871,7 @@ function updateAmmoHud() {
   if (badge) { badge.textContent = curBp + 1; badge.title = "背包 " + (curBp + 1); }
   if (hudWeaponIcon.dataset.weapon !== currentId) {
     hudWeaponIcon.innerHTML = weaponIconSvg(currentId, "hud-gun-icon");
-    if (["ak", "m4", "awm"].includes(currentId)) hudWeaponIcon.firstElementChild.setAttribute("viewBox", "0 7 24 14");
+    if (PRIMARY_IDS.includes(currentId)) hudWeaponIcon.firstElementChild.setAttribute("viewBox", "0 7 24 14");
     hudWeaponIcon.dataset.weapon = currentId;
   }
   if (def.type === "grenade") {
@@ -4069,13 +4200,12 @@ function animateWeapon(dt) {
   // 现在按各武器的握把实测位置（见 viewarms.js 的锚点表）分别定：步枪保持在右下、
   // 手枪握把更靠后所以**推远一点**（-0.5 → -0.56，手才落回画面内）、投掷物抬高拿在身前。
   let bx, by, bz;
-  // 近战这三行是**跟着 `WEAPON_DEFS.knife` 的 `orient`/`targetLen` 一起量的**：
-  // 换了刀的朝向与标尺，握点在世界里的位置就变了，组位置必须跟着走，
-  // 否则手会从刀柄上滑开（实测：旧值 0.34/-0.15/-0.42 配新朝向时手停在刀身上）。
-  if (def.type === "melee") { bx = 0.4081; by = -0.0754; bz = -0.6138; }
+  // 军刀竖持时右腕落在画面右下，刀尖朝上；左手由 viewArms 固定在画面左下。
+  // 此位置与下面的待机滚转配套，让旋转后的手仍握在刀柄上。
+  if (def.type === "melee") { bx = 0.29; by = -0.16; bz = -0.50; }
   else if (def.type === "grenade") { bx = 0.26; by = -0.14; bz = -0.52; }
-  else if (def.type === "pistol") { bx = 0.40; by = -0.19; bz = -0.72; }
-  else if (vid==='awm') { bx=.29;by=-.19;bz=-.59; }
+  else if (def.type === "pistol") { bx = 0.35; by = -0.16; bz = -0.64; }
+  else if (vid==='awm' || vid==='barrett') { bx=.29;by=-.19;bz=-.59; }
   else if (vid==='m4') { bx=.29;by=-.18;bz=-.56; }
   else { bx = 0.30; by = -0.18; bz = -0.55; }
 
@@ -4098,7 +4228,7 @@ function animateWeapon(dt) {
     knifeBind ||= {p:c.gun.position.clone(),q:c.gun.quaternion.clone()};
     const pivot=new THREE.Vector3().fromArray(ARM_ANCHORS.knife.r);
     const flip=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),knifeFlip);
-    // Reverse the knife inside the grip; the wrist need not rotate 180 degrees.
+    // Share the small roll between blade and wrist without twisting the forearm.
     c.gun.position.copy(knifeBind.p).sub(pivot).applyQuaternion(flip).add(pivot);
     c.gun.quaternion.copy(flip).multiply(knifeBind.q);
   }
@@ -4110,7 +4240,7 @@ function animateWeapon(dt) {
   c.group.rotation.set(
     kPitch - rRot * 0.22 + swRx + mp[3],
     bobX * 0.5 + kYaw - rYaw + swRy + mp[4],
-    bobX + kRoll + rRoll * 0.30 + swRz + mp[5] - knifeFlip
+    (def.type === "melee" ? -1.75 : 0) + bobX + kRoll + rRoll * 0.30 + swRz + mp[5] - knifeFlip
   );
 
   // 组矩阵先算好：手臂与枪口光都要用它。
@@ -4259,8 +4389,8 @@ function update(dt, rawDt) {
   if (WEAPON_STATE.cooldown > 0) WEAPON_STATE.cooldown -= dt;
   updateMelee(dt);
   if(currentId==='knife'&&!dead&&!chat.isTyping()&&!switchBlocking()) {
-    if(knifeHeavyHeld)meleeAttack(true,true);
-    else if(fireEnabled)meleeAttack(false,true);
+    if(knifeHeavyHeld)meleeAttack(true);
+    else if(fireEnabled)meleeAttack(false);
   }
   if (WEAPON_STATE.throwCd > 0) WEAPON_STATE.throwCd -= dt;
   updateReload(dt);
@@ -4288,7 +4418,7 @@ function update(dt, rawDt) {
 
   // bounds 与 colliders 一起灌给敌人：敌人现在走的是和玩家同一套分轴碰撞解算
   // （见 scripts/enemies.js 的 blockedAt / moveBy），少了边界这一项它会被绕行逻辑推出舷外。
-  enemyManager.update(dt, player, colliders, bounds);
+  enemyManager.update(dt, player, colliders, bounds, !dead);
   enemiesShoot();
 }
 
@@ -4318,13 +4448,18 @@ const LOBBY_CAM = {
   riseRate: 0.33,       // → 周期 ≈ 19s
   rollAmp: 0.006,       // 极轻微的滚转，免得画面像一张静止贴图
 };
+const PALACE_LOBBY_CAM = {
+  pos: [3.2, 2.2, 23], target: [0, 3.0, 0],
+  yawAmp: .035, yawRate: .075, riseAmp: .15, riseRate: .33, rollAmp: .002,
+};
 const _lcTarget = new THREE.Vector3();
 const _lcPos = new THREE.Vector3();
 
 function applyLobbyCamera(t) {
-  const yaw = Math.sin(t * LOBBY_CAM.yawRate) * LOBBY_CAM.yawAmp;
-  const [px, py, pz] = LOBBY_CAM.pos;
-  const [tx, ty, tz] = LOBBY_CAM.target;
+  const spec = selectedMapId === "palace" ? PALACE_LOBBY_CAM : LOBBY_CAM;
+  const yaw = Math.sin(t * spec.yawRate) * spec.yawAmp;
+  const [px, py, pz] = spec.pos;
+  const [tx, ty, tz] = spec.target;
   // 绕目标点做水平摆动：取「目标 → 机位」的水平偏移，转 yaw，再加回去。
   const ox = px - tx;
   const oz = pz - tz;
@@ -4332,7 +4467,7 @@ function applyLobbyCamera(t) {
   const s = Math.sin(yaw);
   _lcPos.set(
     tx + ox * c - oz * s,
-    py + Math.sin(t * LOBBY_CAM.riseRate) * LOBBY_CAM.riseAmp,
+    py + Math.sin(t * spec.riseRate) * spec.riseAmp,
     tz + ox * s + oz * c
   );
   _lcTarget.set(tx, ty, tz);
@@ -4340,7 +4475,7 @@ function applyLobbyCamera(t) {
   camera.lookAt(_lcTarget);
   // lookAt 会把 rotation 整个重算（order 是 YXZ），滚转必须叠在它**之后**。
   // 相机看向自身 -z，所以 rotation.z 就是绕视轴的滚转。
-  camera.rotation.z += Math.sin(t * LOBBY_CAM.yawRate * 1.7) * LOBBY_CAM.rollAmp;
+  camera.rotation.z += Math.sin(t * spec.yawRate * 1.7) * spec.rollAmp;
 }
 
 let lastT = performance.now();
@@ -4468,11 +4603,18 @@ function syncVmLighting() {
 
 // ---------- 初始化 ----------
 async function init() {
-  // 音效素材（`audio/` 下的 CC0 录音）**不 await**：它是纯下载 + 解码的副作用，
-  // 拖住开局只会让菜单晚出现。preload() 内部幂等、每个文件独立 try/catch、**永不 reject**
-  // （异步 reject 会绕过 `__errs` 与 `loopErrors()`，所以那条兜底必须写在 audio.js 里面）。
-  // `ensure()` 里也补触发一次（它可能是被「进入战场」那个 click 先叫起来的），两处谁先到都行。
-  sfx.preload();
+  // 音效与地图/模型并行加载；只有所有文件都完成（成功或已明确降级）才放行首页。
+  // preload() 幂等且永不 reject，音效失败会由 SFX 退回合成音。
+  bootPhase("map", "正在装载运输船地图", "读取地图网格与材质");
+  const audioLoad = sfx.preload();
+  const updateAudioProgress = () => {
+    const state = sfx.audioState();
+    const completed = state.loadedStems + state.failed.length;
+    bootPart("audio", state.totalStems ? completed / state.totalStems : (state.preloadDone ? 1 : 0));
+    if (bootStage === "audio") bootDetail.textContent = completed + " / " + state.totalStems + " 条音效已处理";
+  };
+  const audioTimer = setInterval(updateAudioProgress, 80);
+  audioLoad.finally(() => { clearInterval(audioTimer); updateAudioProgress(); });
   // 大厅必须在 `buildMenuMatch()` **之前**建好 —— 后者（下一句）会调 `lobby.setMatch()`
   // 写顶栏徽章，晚一步那一句就是空转（`lobby` 还是 null），要等到第一次点难度才显示。
   // 模块脚本在 `</body>` 之前执行，所以这里查 DOM 是安全的（四个页签都已在文档里）。
@@ -4501,22 +4643,34 @@ async function init() {
   vmCamera.aspect = camera.aspect;
   vmCamera.updateProjectionMatrix();
 
-  // 天空贴图由 map.js 生成并同时用作 background / environment
-  try { mapData = await buildClassicMap(scene); }
+  // Two arenas share the same renderer and combat systems. The transport map
+  // remains the default; the lobby can switch only between matches.
+  const beforeMap = new Set(scene.children);
+  try { mapData = await buildClassicMap(scene, (fraction) => bootPart("map", fraction * .68)); }
   catch (error) {
     console.warn('经典地图加载失败，使用内置场景：', error);
     mapData = await buildMap(scene);
+    mapData.visuals = scene.children.filter((child) => !beforeMap.has(child));
   }
-  colliders = mapData.colliders;
-  obstacleMeshes = mapData.obstacles;
-  obstacleFlat = [];
-  for (const o of obstacleMeshes) {
-    if (o.isMesh) obstacleFlat.push(o);
-    else o.traverse((m) => { if (m.isMesh) obstacleFlat.push(m); });
+  mapData.name = "运输船";
+  mapData.background = scene.background;
+  mapCatalog.transport = mapData;
+  try {
+    mapCatalog.palace = await buildPalaceMap(scene,
+      (fraction) => bootPart("map", .68 + fraction * .32));
+  } catch (error) {
+    console.warn('王宫回廊加载失败，保留运输船：', error);
   }
-  bounds = mapData.bounds;
-  enemyManager.spawnPoints = mapData.spawns?.enemy || null;
-  enemyManager.navigation = mapData.source ? new GroundNavigation(colliders,bounds) : null;
+  activateMap("transport");
+  document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (state === "playing" || !mapCatalog[button.dataset.map]) return;
+      sfx.ui("click");
+      activateMap(button.dataset.map);
+    });
+  });
+  bootPart("map", 1);
+  bootPhase("actors", "正在部署人物与武器", "加载第一人称视模、敌人和枪械");
   // 小地图：布局来自 map.js 的 topdown（构建期顺手推入的大件，**不是从 colliders 反推**）。
   // 尺寸不在这里给 —— Minimap 每帧从 canvas 的 clientWidth 现读，`#hud` 在菜单里隐藏时
   // 那一读为 0、它会跳过烘图并保留上次的底图，进入战场第一帧自动补上。
@@ -4539,31 +4693,40 @@ async function init() {
     lobbyTimeEl.textContent = String(mins).padStart(2, "0") + ":00";
   }
 
+  let assetsDone = 0;
+  const trackAsset = async (promise) => {
+    try { return await promise; }
+    finally { bootPart("assets", ++assetsDone / 14); }
+  };
+  const requiredWeapon = async (id) => {
+    if (!await loadWeapon(WEAPON_DEFS[id])) throw new Error("武器模型加载失败：" + id);
+  };
   await Promise.all([
-    ClassicView.load().then(async v=>{
+    trackAsset(ClassicView.load().then(async v=>{
       classicView=v;
       if(v){vmScene.add(v.root);v.root.visible=false;handsOk=viewArms.loadClassic(v);}
       else await loadHands();
-    }),
-    ...['frag','flash','smoke'].map(async id=>{
+    })),
+    ...['frag','flash','smoke'].map(id=>trackAsset((async()=>{
       const v=await ClassicView.load('grenades/'+id);
       if(v){classicNades[id]=v;v.root.name='cf-grenade-'+id;v.root.visible=false;v.projectile();vmScene.add(v.root);}
-    }),
-    loadClassicSoldier(),
-    loadAK(),
-    loadWeapon(WEAPON_DEFS.pistol),
-    loadWeapon(WEAPON_DEFS.knife),
-    loadWeapon(WEAPON_DEFS.frag),
-    loadWeapon(WEAPON_DEFS.flash),
-    loadWeapon(WEAPON_DEFS.smoke),
+    })())),
+    trackAsset(loadClassicSoldier()),
+    ...PRIMARY_IDS.map(id=>trackAsset(requiredWeapon(id))),
+    ...['pistol','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
   ]);
   // 手臂加载失败是**明确降级**（枪照常、只是没有手），所以必须让玩家看见，
   // 不能像别的失败路径那样静默 —— 那会变成「画面里手没了，控制台之外无提示」。
   if (!handsOk) showToast("手臂模型加载失败，已降级为无手（枪械照常）", true);
-  // Load the three default models before making the shared world catalog, so
+  // Load the three alternate skin models before making the shared world catalog, so
   // picking up a dropped gun preserves its actual appearance.
+  bootPhase("actors", "正在整理武器库", "加载经典皮肤与世界模型");
   for (const id of ["ak","m4","awm"]) mountGunModel(id,DEFAULT_SKIN[id]);
-  await Promise.all(["ak","m4","awm"].map(id=>owned[id]?.modelLoads[DEFAULT_SKIN[id]]));
+  let skinsDone = 0;
+  await Promise.all(["ak","m4","awm"].map(async id=>{
+    await owned[id]?.modelLoads[DEFAULT_SKIN[id]];
+    bootPart("skins", ++skinsDone / 3);
+  }));
   // 世界模型目录（敌人手持 + 地面掉落）。**必须在全部武器加载完之后** ——
   // 它从玩家这几把枪派生「枪型 × 皮肤」的全部变体。建目录这一步不存在异步，
   // 几毫秒的事（就是一批 clone + 上漆）。
@@ -4572,6 +4735,7 @@ async function init() {
     ak: owned.ak && owned.ak.baseGun,
     m4: owned.m4 && owned.m4.baseGun,
     awm: owned.awm && owned.awm.baseGun,
+    barrett: owned.barrett && owned.barrett.baseGun,
     pistol: owned.pistol && owned.pistol.baseGun,
   }, {ak:owned.ak?.models,m4:owned.m4?.models,awm:owned.awm?.models});
   // 敌人每次刷出都随机抽一把经典主武器；世界目录与玩家共用已加载几何。
@@ -4623,6 +4787,18 @@ async function init() {
   renderer.shadowMap.needsUpdate = true; // 先烘一次……
   renderer.shadowMap.autoUpdate = false; // ……然后关掉每帧重算（three 烘完会自己清 needsUpdate）
 
+  bootPhase("audio", "正在检查战斗音效", "等待音效下载与解码完成");
+  await audioLoad;
+  bootPart("audio", 1);
+  // 首页队伍徽章及对局 HUD 图标一并完成解码，避免遮罩退场后才跳出图片。
+  const hudImages = ["./assets/ui/headshot_solo.png", "./assets/ui/streak_eagle.png"].map(async src => {
+    const img = new Image();
+    img.src = src;
+    await img.decode().catch(() => {});
+  });
+  await Promise.all([...Array.from(document.images, (img) => img.decode().catch(() => {})), ...hudImages]);
+  bootPart("ready", .5);
+
   gameReady = true;
   requestAnimationFrame(loop);
 
@@ -4636,6 +4812,12 @@ async function init() {
       flashState:()=>({intensity:flashIntensity,duration:flashDur}),clearFlash,
       grenadeExposure, detonateFlash, classicNades,
       ready: () => gameReady,
+      mapState: () => ({ id: selectedMapId, name: mapData?.name,
+        available: Object.keys(mapCatalog), bounds: { ...bounds },
+        colliders: colliders.length, obstacles: obstacleFlat.length,
+        navNodes: enemyManager.navigation?.points?.length || 0,
+        spawns: mapData?.spawns }),
+      impactFx: () => impactVfx.stats(),
       movementStep: (dt) => movePlayer(dt),
       supportAt,
       curId: () => currentId,
@@ -5093,6 +5275,11 @@ async function init() {
           hasBadge: !!killIconEl.querySelector(".ki-hs"),
           badgeGold: !!killIconEl.querySelector(".ki-hs.gold"),
           hasGun: !!killIconEl.querySelector(".ki-gun"),
+          soloHeadshot: killIconEl.classList.contains("solo-headshot"),
+          highStreakEagle: !!killIconEl.querySelector(".ki-high-streak-eagle"),
+          tier: Number(killIconEl.querySelector(".ki-medal")?.dataset.tier || 0),
+          streak: streakCount,
+          goldRays: killIconEl.querySelectorAll(".ki-ray.lit").length,
           animating: killIconEl.classList.contains("show"),
         };
       },
@@ -5374,9 +5561,35 @@ async function init() {
         name: e.name, gunId: e.gunId, skin: e.gunSkin, weaponName: e.weaponName,
         hasRifle: !!(e.rig && e.rig.rifle), dead: e.dead,
       })),
+      enemyRig: () => enemyManager.enemies.map((e) => {
+        const r=e.rig;
+        const gloveError=(bone,anchor)=>{
+          const mesh=r.meshes[3];
+          if(!mesh?.isSkinnedMesh)return null;
+          const index=mesh.geometry.attributes.skinIndex;
+          const position=mesh.geometry.attributes.position;
+          const center=new THREE.Vector3(),point=new THREE.Vector3();let count=0;
+          for(let i=0;i<position.count;i++) {
+            if(index.getX(i)!==bone)continue;
+            point.fromBufferAttribute(position,i);
+            mesh.applyBoneTransform(i,point);mesh.localToWorld(point);
+            center.add(point);count++;
+          }
+          return count?center.divideScalar(count).distanceTo(r.mount.localToWorld(anchor.clone())):null;
+        };
+        return {
+          source:r.source||'fallback', meshes:r.meshes.length,
+          skinned:r.meshes.filter(m=>m.isSkinnedMesh).length,
+          textured:r.meshes.filter(m=>!!m.material.map).length,
+          head:r.meshes.filter(m=>m.userData.part==='head').length,
+          helmet:r.helmetMeshes.length,
+          walkW:r.walkW, phase:r.phase, aim:r.aimBlend,
+          gripError:gloveError(31,r.anchors.grip),
+          supportError:gloveError(18,r.anchors.handguard),
+        };
+      }),
       // 目录自检：每个「枪型 × 皮肤」组合是否都产出了世界模型/敌人模型。
-      // 四个可持有枪型相加是 **12**（ak 2 / m4 6 / awm 3 / pistol 1）—— 皮肤表里只剩
-      // 「原厂 + 模型皮肤」两类，所以这就是各型号的条目数。
+      // 每把枪均有原厂外观；部分枪还带模型皮肤。巴雷特只有原厂外观。
       // 模型皮肤照样得有世界/敌人变体（已预加载的经典模型优先，其余采用基础模型配色）。
       // 断言时**一定要把条目数一并打出来**：`world` 全 false 的空跑也是「全绿」。
       worldModels: (id) => skinsFor(id).map((s) => ({
@@ -5410,6 +5623,9 @@ async function init() {
       EYE,
     };
   }
+  bootPhase("ready", "正在进入游戏房间", "完成首帧渲染");
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  bootFinish();
 }
 window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -5419,4 +5635,4 @@ window.addEventListener("resize", () => {
   vmCamera.aspect = camera.aspect;
   vmCamera.updateProjectionMatrix();
 });
-init();
+init().catch(bootFail);

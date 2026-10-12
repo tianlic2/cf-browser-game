@@ -1,9 +1,9 @@
 音频素材署名 / Audio asset credits
 =================================
 
-本目录的素材按来源分别列示。Freesound 录音适用所列 CC0；用户提供的大厅音乐与第四节 CF 游戏语音、第五节 CF AK 音效不据此宣称 CC0 或商用授权。
+本目录的素材按来源分别列示。Freesound 录音适用所列 CC0；用户提供的大厅音乐与第四节 CF 游戏语音、第五节 CF AK 音效、第八节 M4A1-C 音效及第九节巴雷特音效不据此宣称 CC0 或商用授权。
 
-除第五节保留原 WAV 外，已有转码文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
+除第五、八、九节保留原 WAV 外，已有转码文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
   <stem>.ogg  —— Ogg Vorbis。Chrome / Firefox / Edge 走这一份。
   <stem>.m4a  —— MP4 容器 + AAC。Safari 走这一份（Chrome/Firefox 也认）。
   **ui/ 与 sw/ 下的 14 个 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
@@ -159,7 +159,7 @@ classic/ak47_out.wav  <- G_MZC_AK47_CLIPOUT.WAV
 classic/ak47_in.wav   <- G_MZC_AK47_CLIPIN.WAV
 classic/ak47_bolt.wav <- G_RELOAD_AK47.WAV
 
-原速播放；AK 第一人称改用导入骨架后，换弹事件按来源 QC 的第 39、102、202 帧（共 299）映射到本项目换弹周期。其他枪械/敌人通用枪声仍走既有声音。
+原速播放；AK 第一人称改用导入骨架后，换弹事件按来源 QC 的第 39、102、202 帧（共 299）映射到本项目换弹周期。M4A1-C 的独立声音见第八节。
 完整资产记录：assets/classic/CREDITS.md。
 
 Classic CF grenade sounds (not CC0)
@@ -204,6 +204,7 @@ vo/fireinthehole.wav         <- 用户提供的 fireinthehole.wav（原在仓库
 **自带扩展名的 stem**（`vo/fireinthehole.wav`），加载器那条「自带扩展名就原样用」的分支
 只请求这一个 URL（不带 .ogg/.m4a 两个候选、不产生 404），也因此不进 M4A_ONLY。
 
+
 ⚠️ **为什么另开 `vo/` 这一层目录，而不放进 `announcer/`**：两者都是人声，但**角色与路由
 都不同**，放一起会让目录名撒谎。`announcer/`（第四节的 cf_gr_*）是**比赛播报人声**，播放时
 传 `hudBus: true`，刻意绕开距离衰减、闪光弹低通与货舱混响；这一条是**玩家自己的台词**，
@@ -226,3 +227,35 @@ vo/fireinthehole.wav         <- 用户提供的 fireinthehole.wav（原在仓库
 （`cf_grenade_pin`）；闪光/烟雾同一次投掷里同样三标记同帧，但整段序列
 `["grenadePin","throwGrenade","holster"]` 中不含 `fireInTheHole`。
 **听感（够不够劲）未经人耳确认。**
+
+
+------------------------------------------------------------
+八、CF M4A1-C 移植包声音（非 CC0）
+------------------------------------------------------------
+来源：https://gamebanana.com/mods/211325 （CF M4A1-C Weapon Pack）
+文件：cf_m4a1_custom_pack_update.rar，GameBanana 文件编号 217470。
+该页面将原始声音归于 SmileGate，同时注明更新包修改了声音；本地只确认取自此包，
+不据此声称是某一版本客户端的逐字节原声。页面未给本项目独立的公开再分发授权。
+
+classic/m4c_fire.wav <- Required/sound/weapons/sg552/sg552-1.WAV
+classic/m4c_out.wav  <- Required/sound/weapons/m4a1/m4a1_clipout.WAV
+classic/m4c_in.wav   <- Required/sound/weapons/m4a1/m4a1_clipin.WAV
+classic/m4c_bolt.wav <- Required/sound/weapons/m4a1/m4a1_boltpull.WAV
+
+四段 WAV 原样复制、未转码。开火用原速完整采样，不再复用 AK 变调或叠合成爆音；
+玩家和敌人的 M4 由同一个采样槽位发声。三段换弹声只供 M4 使用。
+
+
+------------------------------------------------------------
+九、巴雷特 M82A1 开火与拉栓声（CF 来源模组）
+------------------------------------------------------------
+classic/barrett_fire.wav  <-  Barrett_M82A1/sound/weapons/awp/awp1.WAV
+classic/barrett_bolt.wav  <-  Barrett_M82A1/sound/weapons/awp/awp_bolt.WAV
+来源：https://gamebanana.com/mods/211139 （zhu553272794 的 CF Barrett M82A1 CS:S 模组）
+档案：cf_barrett_alltexture.rar / CF_Barrett_AllTexture/CF_Barrett_All.zip
+档案 MD5：9a70a00e573ab1d4c5255f608d3a9988（与 GameBanana 公布值相同）。
+模组说明明确写有「CF Sounds From Crossfire」，并将原声音归功于 SmileGate。
+模组页标注 CC BY-NC-ND 4.0；这不等于 SmileGate 对原游戏声音授予了独立再分发许可。
+两段 WAV 均逐字节提取、未转码或变速：44.1 kHz、16-bit、单声道，时长分别约
+4.792 s（含长尾回响）和 0.666 s。游戏以原速播放，巴雷特枪声不再使用通用录音或
+AWM 枪声，拉栓也走独立采样。上一版 qubodup CC0 通用「Sniper Fire」已移出游戏。

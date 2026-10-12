@@ -18,7 +18,11 @@ const ENGAGE_NEAR = 7;    // 比这更近就后撤
 const ENGAGE_FAR = 16;    // 比这更远就压上
 const CORPSE_HOLD = 5.0;  // 尸身平躺保留时长
 const CORPSE_SINK = 0.9;  // 之后下沉消失的时长
-const CORPSE_FALL = 0.4;  // 倒地用时
+const CORPSE_FALL = 0.4;  // 普通击杀前扑用时
+const HEADSHOT_KNOCKBACK = 0.72; // 致命爆头只向身后推出小半步（场景米）
+const HEADSHOT_KNOCKBACK_TIME = 0.28;
+const HEADSHOT_FALL = 0.40; // 后仰腾空到仰面落地，一条连续动作
+const HEADSHOT_LIFT = 0.80;
 
 // ---- 朝向 / 移动的平滑参数 ----
 const BODY_PIVOT = 1.15;   // 倒地前扑的转轴高度（腰）。绕脚转会让整个人像块板子一样倒
@@ -122,6 +126,7 @@ export class Enemy {
 
   // 复用（对象池）或首次出生都走这里
   reset(x, z, opts = {}) {
+    this.clearHelmetDrop();
     this.health = ENEMY_HP;
     this.maxHealth = ENEMY_HP;
     this.damage = ENEMY_DAMAGE * ENEMY_TUNING.dmg;
@@ -134,7 +139,11 @@ export class Enemy {
     this.weaponName = opts.weaponName || "步枪";
     this.fireMul = opts.fireMul || 1;
     this.dead = false;
+    this.deathHeadshot = false;
     this.corpseT = 0;
+    this.headshotPushCurve = 0;
+    this.headshotPushDistance = 0;
+    this.headshotPushBlocked = false;
     this.blindT = 0;
     // 最近一次「暴露自己」的时刻（开火 / 被玩家命中），由 main.js 写入（见 enemiesShoot
     // 与命中处理）。小地图用它做「交火中显形」，见 scripts/minimap.js 的 mmVisible。
@@ -223,14 +232,39 @@ export class Enemy {
     if (!this.group.parent) this.scene.add(this.group);
   }
 
+  // 玩家死亡时立即丢失目标；复活后从一次新的点射停顿开始。
+  loseTarget() {
+    this.wantShoot = false;
+    this.burstLeft = 0;
+    this.burstTimer = 0;
+    this.burstPause = Math.max(this.burstPause, 0.45);
+    this.vel.set(0, 0, 0);
+    this.turnVel = 0;
+    this.aimSeeded = false;
+  }
+
   // peers = EnemyManager 本帧的活体数组（分离力用）。可缺省 —— 缺省时分离力整段跳过，
   // 所以 `e.update(dt, player)` 这种老写法仍然工作（/tmp 那批寻路用例不受影响）。
-  update(dt, player, peers = null) {
+  update(dt, player, peers = null, targetAlive = true) {
     if (this.dead) { this.updateCorpse(dt); return; }
 
     this.animT += dt * 8;
     if (this.blindT > 0) this.blindT -= dt;
     if (this.flinch > 0) this.flinch = Math.max(0, this.flinch - dt * 4);
+
+    if (!targetAlive) {
+      this.loseTarget();
+      const k = 1 - Math.exp(-2 * dt);
+      this.aimLevel += (0 - this.aimLevel) * k;
+      this.scanPhase += dt * (0.6 + this.traits.scan * 0.8);
+      this.rig.animate(dt, {
+        moved: 0, speed: 0, aim: this.aimLevel, aimPitch: this.aimPitch,
+        blind: this.blindT > 0 ? 1 : 0, flinch: this.flinch, dead: false,
+        scan: 1 - this.aimLevel, scanPhase: this.scanPhase,
+      });
+      this.applyFlash(dt);
+      return;
+    }
 
     const gp = this.group.position;
     const dx = player.pos.x - gp.x;
@@ -426,7 +460,15 @@ export class Enemy {
     } else { this.noProgT = 0; this.lastDist = dist; }
 
     // ---------- ③ 走位/瞄准/受击全部交给骨架 ----------
-    const speedNow = Math.hypot(this.vel.x, this.vel.z);
+    // Drive the legs from displacement that actually passed collision, not
+    // intended velocity: a soldier pressed against a container should stop
+    // running in place. Resolve that displacement in the facing frame so
+    // forward, backpedal and lateral steps read differently.
+    const speedNow = Math.min(this.speed * 1.35, moved / Math.max(dt, 1e-4));
+    const yaw = this.group.rotation.y;
+    const stepX = gp.x - before.x, stepZ = gp.z - before.z;
+    const moveSide = moved > 1e-4 ? (stepX * Math.cos(yaw) - stepZ * Math.sin(yaw)) / moved : 0;
+    const moveForward = moved > 1e-4 ? (stepX * Math.sin(yaw) + stepZ * Math.cos(yaw)) / moved : 1;
     // 瞄准俯仰：>0 = 目标比自己低（骨架把它加在枪的俯仰上，身体朝向不受影响）
     const wantPitch = Math.atan2((gp.y + 1.5) - (player.pos.y + 1.35), Math.max(dist, 1));
     this.aimPitch += (Math.max(-0.22, Math.min(0.22, wantPitch)) - this.aimPitch) * k(6);
@@ -436,6 +478,8 @@ export class Enemy {
     this.rig.animate(dt, {
       moved,                          // 本帧实际走过的路程 → 步频/步幅
       speed: speedNow,
+      moveSide,
+      moveForward,
       aim: this.aimLevel,
       aimPitch: this.aimPitch,
       blind: blind ? 1 : 0,
@@ -481,7 +525,7 @@ export class Enemy {
   }
 
   // 每开一枪：骨架来一下后坐（枪往肩里推 + 枪口上跳），由 main.js 的 enemiesShoot 调
-  recoil() { this.rig.recoil(); }
+  recoil() { this.rig.recoil(this.gunId === 'awm' ? 1.35 : this.gunId === 'm4' ? 0.8 : 1); }
 
   updateBurst(dt, dist) {
     if (dist > ENGAGE_FAR + 4) { this.burstLeft = 0; this.wantShoot = false; return; }
@@ -602,42 +646,142 @@ export class Enemy {
   }
 
   // 击杀 → 进入倒地状态（先不销毁：尸身要留在场上）
-  takeDamage(amount) {
+  takeDamage(amount, headshot = false) {
     if (this.dead) return false;
     this.health -= amount;
     this.setFlash();
     if (this.health <= 0) {
       this.dead = true;
+      // 地上的掉落枪由 onEnemyDeath 单独生成；尸体不再保留胸前的持枪模型。
+      this.rig.mount.visible = false;
+      this.deathHeadshot = !!headshot;
       this.corpseT = 0;
       this.wantShoot = false;
       this.blindT = 0;
       this.flashAmt = 0;
       this.applyFlash(0); // 清掉受击闪红，尸体不该继续发光
+      if (this.deathHeadshot) this.launchHelmet();
       return true;
     }
     return false;
   }
 
+  launchHelmet() {
+    const helmet = this.rig.detachHelmet();
+    if (!helmet) return;
+    const back = new THREE.Vector3(0, 0, -1).applyQuaternion(this.group.quaternion);
+    const side = new THREE.Vector3(-back.z, 0, back.x);
+    const scatter = Math.sin(this.seed * 3.7) * 0.65;
+    this.helmetDrop = {
+      ...helmet, age: 0, floorY: this.group.position.y, bounds: new THREE.Box3(),
+      velocity: back.multiplyScalar(2.3).addScaledVector(side, scatter).add(new THREE.Vector3(0, 3.2, 0)),
+      spin: new THREE.Vector3(5.4, 2.8 + scatter, 6.2),
+    };
+    this.scene.add(helmet.group);
+  }
+
+  updateHelmetDrop(dt) {
+    const drop = this.helmetDrop;
+    if (!drop) return;
+    drop.age += dt;
+    if (drop.age >= CORPSE_HOLD + CORPSE_SINK) { this.clearHelmetDrop(); return; }
+    const substeps = Math.max(1, Math.ceil(dt / (1 / 60)));
+    const step = dt / substeps;
+    for (let i = 0; i < substeps; i++) {
+      drop.velocity.y -= 9.8 * step;
+      drop.group.position.addScaledVector(drop.velocity, step);
+      drop.group.rotation.x += drop.spin.x * step;
+      drop.group.rotation.y += drop.spin.y * step;
+      drop.group.rotation.z += drop.spin.z * step;
+      // Test the rotated prop, not just its centre: a spinning helmet has a
+      // different bottom edge each frame and must not sink into the deck.
+      drop.group.updateWorldMatrix(true, true);
+      if (this.navigation) drop.floorY = this.navigation.heightAt(
+        drop.group.position.x, drop.group.position.z, drop.floorY
+      );
+      const minY = drop.bounds.setFromObject(drop.group).min.y;
+      if (minY < drop.floorY + 0.015) {
+        drop.group.position.y += drop.floorY + 0.015 - minY;
+        drop.velocity.y = Math.abs(drop.velocity.y) > 0.45 ? -drop.velocity.y * 0.24 : 0;
+        drop.velocity.x *= 0.72;
+        drop.velocity.z *= 0.72;
+        drop.spin.multiplyScalar(0.77);
+      }
+    }
+    // Leave the helmet on the deck briefly, then shrink it with the corpse.
+    const fade = Math.max(0, Math.min(1, (CORPSE_HOLD + CORPSE_SINK - drop.age) / CORPSE_SINK));
+    drop.group.scale.setScalar(fade);
+  }
+
+  clearHelmetDrop() {
+    const drop = this.helmetDrop;
+    if (!drop) return;
+    this.scene.remove(drop.group);
+    drop.group.traverse(node => {
+      if (node.isMesh) { node.geometry.dispose(); node.material.dispose(); }
+    });
+    this.helmetDrop = null;
+  }
+
   // 倒地 → 平躺保留 → 下沉消失（主程序据此回收进对象池）
   updateCorpse(dt) {
     this.corpseT += dt;
-    const p = Math.min(this.corpseT / CORPSE_FALL, 1);
-    const ease = 1 - Math.pow(1 - p, 3);
-    // 绕腰向前扑倒。转轴在腰上，所以倒地时必须把 pivot 一起降到甲板面，
-    // 否则整具尸体会以齐腰的高度悬在空中（绕脚底转才不需要这一步）
-    this.tilt.rotation.x = ease * Math.PI * 0.5;
+    this.updateHelmetDrop(dt);
+    if (this.deathHeadshot && !this.headshotPushBlocked && this.headshotPushCurve < HEADSHOT_KNOCKBACK) {
+      // 用累计时间算目标路程，再只移动本帧增量：起跳后向后飞出小半步，
+      // 30/60/144 fps 最终距离相同。每小段都走存活敌人的碰撞与边界判定。
+      const p = Math.min(this.corpseT / HEADSHOT_KNOCKBACK_TIME, 1);
+      const target = HEADSHOT_KNOCKBACK * (1 - Math.pow(1 - p, 3));
+      const delta = target - this.headshotPushCurve;
+      this.headshotPushCurve = target;
+      const backX = -Math.sin(this.group.rotation.y);
+      const backZ = -Math.cos(this.group.rotation.y);
+      const steps = Math.max(1, Math.ceil(delta / 0.08));
+      for (let i = 0; i < steps; i++) {
+        const distance = delta / steps;
+        const pos = this.group.position;
+        const x = backX * distance, z = backZ * distance;
+        if (this.blockedAt(pos.x, pos.z) || this.blockedAt(pos.x + x, pos.z + z)) {
+          this.headshotPushBlocked = true;
+          break;
+        }
+        const beforeX = pos.x, beforeZ = pos.z;
+        this.moveBy(x, z);
+        const moved = (pos.x - beforeX) * backX + (pos.z - beforeZ) * backZ;
+        this.headshotPushDistance += Math.max(0, moved);
+        if (moved < distance - 1e-4) {
+          this.headshotPushBlocked = true;
+          break;
+        }
+      }
+      if (this.navigation) this.group.position.y = this.navigation.heightAt(
+        this.group.position.x, this.group.position.z, this.group.position.y
+      );
+    }
+    const restHeight=(this.deathHeadshot ? this.rig.corpseHeightBack : this.rig.corpseHeight) || .26;
+    let fallEase;
+    if (this.deathHeadshot) {
+      const p = Math.min(this.corpseT / HEADSHOT_FALL, 1);
+      const airborne = Math.sin(Math.PI * p);
+      fallEase = p * (2 - p);
+      // 受击后向后腾起，双腿随身体上扬，再顺势仰面落地。
+      // 只转到 -90°：一整圈会让角色在空中重新站直，显得像多翻了一圈。
+      // 角度、高度和影子共用同一个 p，起跳与落地之间没有停顿或姿势跳变。
+      this.tilt.rotation.x = -Math.PI * 0.5 * fallEase;
+      this.tilt.position.y = BODY_PIVOT * (1 - fallEase) + restHeight * fallEase
+        + HEADSHOT_LIFT * airborne;
+      this.blob.scale.set(BLOB_W * (1 - 0.14 * fallEase) * (1 - 0.18 * airborne), 1,
+        BLOB_D * (1 + 0.85 * fallEase) * (1 - 0.18 * airborne));
+    } else {
+      const p = Math.min(this.corpseT / CORPSE_FALL, 1);
+      fallEase = 1 - Math.pow(1 - p, 3);
+      this.tilt.rotation.x = fallEase * Math.PI * 0.5;
+      this.tilt.position.y = BODY_PIVOT * (1 - fallEase) + restHeight * fallEase;
+      this.blob.scale.set(BLOB_W * (1 - 0.14 * fallEase), 1, BLOB_D * (1 + 0.85 * fallEase));
+    }
     this.tilt.rotation.z = 0;
-    // 放平后的高度 = 「身体的腰线离地多高」。绕腰转 90° 后，身体前方变成下方，
-    // 所以这个值必须 ≥ 身体前表面的深度（胸甲 0.125 / 头盔脸罩 ~0.18），
-    // 否则整个前半身会插进甲板。0.26 是实测出来的平衡点（见 enemy_model.js 的倒地段）。
-    const restHeight=this.rig.corpseHeight || .26;
-    this.tilt.position.y = BODY_PIVOT * (1 - ease) + restHeight * ease;
-    // 假影跟着尸体放平：绕腰转 90° 后身体沿 +z 铺开（躯干落在约 +0.35），所以影子要
-    // 一边往前挪一边沿 z 拉长。**每一帧都从基准尺寸重设，绝不用 `*= ` 累乘** ——
-    // 累乘在 60fps 与 20fps 下会漂到不同的值（这正是 AGENTS.md 那条「平滑一律用
-    // 1-e^(-k·dt)，不要用 dt*k」的同族坑）。
-    this.blob.scale.set(BLOB_W * (1 - 0.14 * ease), 1, BLOB_D * (1 + 0.85 * ease));
-    this.blob.position.z = 0.30 * ease;
+    // 假影留在甲板；只有落地时才随尸体拉长。每帧从基准尺寸重设，避免帧率漂移。
+    this.blob.position.z = (this.deathHeadshot ? -0.30 : 0.30) * fallEase;
     if (this.corpseT > CORPSE_HOLD) {
       this.tilt.position.y -= restHeight * Math.min(1,(this.corpseT-CORPSE_HOLD)/CORPSE_SINK);
       // 尸身正沉进甲板，影子必须跟着收掉 —— 否则尸体没了、地上一块黑斑还留着。
@@ -647,7 +791,8 @@ export class Enemy {
     }
     // 骨架同步进入瘫倒姿势：膝盖跪折、上身塌下、双手松开
     // （所以尸体是「瘫下去」的，而不是一整块板子拍在甲板上）
-    this.rig.animate(dt, { moved: 0, speed: 0, aim: 0, aimPitch: 0, blind: 0, flinch: 0, dead: true });
+    const headSnap = this.deathHeadshot ? Math.max(0, 1 - this.corpseT / 0.18) : 0;
+    this.rig.animate(dt, { moved: 0, speed: 0, aim: 0, aimPitch: 0, blind: 0, flinch: headSnap, dead: true });
   }
 
   get corpseDone() {
@@ -716,10 +861,10 @@ export class EnemyManager {
 
   // colliders / bounds 每帧现灌：地图边界与碰撞体只在 init 时定，但敌人是对象池里的，
   // 复用出来的实例也要拿到当前这份（否则新实例的 this.bounds 是 undefined、边界夹紧静默失效）。
-  update(dt, player, colliders, bounds) {
+  update(dt, player, colliders, bounds, targetAlive = true) {
     this._colliders = colliders || null;
     this._bounds = bounds || this._bounds || null;
-    this.navigation?.update(player.pos);
+    if (targetAlive) this.navigation?.update(player.pos);
 
     // 先推进尸身。本帧刚死的下一帧才开始倒地，避免同一帧被推进两次
     for (let i = this.corpses.length - 1; i >= 0; i--) {
@@ -736,7 +881,7 @@ export class EnemyManager {
         e.colliders = this._colliders;
         e.bounds = this._bounds;
         e.navigation = this.navigation;
-        e.update(dt, player, this.enemies);
+        e.update(dt, player, this.enemies, targetAlive);
         if(this.navigation) e.group.position.y=this.navigation.heightAt(e.group.position.x,e.group.position.z,e.group.position.y);
       }
     }
@@ -750,6 +895,10 @@ export class EnemyManager {
     this.enemies = alive;
 
     return { aliveCount: this.enemies.length, allCleared: false };
+  }
+
+  loseTarget() {
+    for (const e of this.enemies) e.loseTarget();
   }
 
   // 供闪光弹使用

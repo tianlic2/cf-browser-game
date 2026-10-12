@@ -15,8 +15,37 @@
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
     <link rel="stylesheet" href="./styles/game.css" />
+    <link rel="stylesheet" href="./styles/boot.css" />
+    <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
+    <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
   </head>
   <body>
+    <div id="bootScreen" class="boot-screen" aria-label="游戏资源加载中">
+      <div class="boot-grid" aria-hidden="true"></div>
+      <div class="boot-frame">
+        <div class="boot-topline"><span>TACTICAL STRIKE // CF CLASSIC</span><span>LOCAL OPERATIONS SYSTEM</span></div>
+        <div class="boot-main">
+          <div class="boot-emblem" aria-hidden="true"><span class="boot-emblem-core">CF</span></div>
+          <div class="boot-copy">
+            <p class="boot-kicker">TRANSPORT SHIP · TEAM DEATHMATCH</p>
+            <h1>战术<span>突击</span></h1>
+            <p class="boot-subtitle">正在部署作战资源</p>
+          </div>
+          <div class="boot-percent" id="bootPercent">0<span>%</span></div>
+        </div>
+        <div class="boot-progress" id="bootProgress" role="progressbar" aria-label="资源加载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="boot-progress-fill" id="bootProgressFill"></div>
+          <div class="boot-progress-grid" aria-hidden="true"></div>
+        </div>
+        <div class="boot-status" role="status" aria-live="polite"><span class="boot-status-dot" aria-hidden="true"></span><span id="bootStatus">正在连接作战系统</span><span id="bootDetail">准备加载清单</span></div>
+        <button id="bootRetry" class="boot-retry" type="button" hidden>重新加载</button>
+        <div class="boot-steps" aria-hidden="true">
+          <span data-boot-step="map">01 / 地图</span><span data-boot-step="actors">02 / 人物与武器</span><span data-boot-step="audio">03 / 音效</span><span data-boot-step="ready">04 / 就绪</span>
+        </div>
+        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>双地图 · 团队竞技</span></div>
+      </div>
+      <noscript>需要启用 JavaScript 才能加载游戏。</noscript>
+    </div>
     <!-- 3D 渲染画布 -->
     <div id="viewport"></div>
 
@@ -135,7 +164,7 @@
         <div class="hud-match-details" aria-hidden="true"><div id="ammoFill"></div></div>
       </div>
 
-      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1/2/3 确认并收起） -->
+      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1/2/3/4 确认并收起） -->
       <div id="backpack" class="backpack hidden">
         <div class="bp-heading"><span class="bp-heading-icon" aria-hidden="true">▰</span><span>更换背包</span><span class="bp-title">选择背包</span></div>
         <div id="bpList" class="bp-list" role="group" aria-label="选择背包编号"></div>
@@ -215,11 +244,11 @@
       </section>
     </div>
 
-    <div id="menu" class="menu lobby">
+    <div id="menu" class="menu lobby" inert>
       <div class="lobby-shell">
       <header class="lobby-top">
         <div class="lobby-id"><h1 class="lobby-title">战术突击</h1><span class="lobby-brand">游戏房间</span></div>
-        <div class="lobby-chips"><span class="lobby-chip">运输船 · 团队竞技</span><span class="lobby-chip" id="lobbyMatchChip">8 人 · 普通</span></div>
+        <div class="lobby-chips"><span class="lobby-chip" id="lobbyMapChip">运输船 · 团队竞技</span><span class="lobby-chip" id="lobbyMatchChip">8 人 · 普通</span></div>
       </header>
       <div class="lobby-body">
         <section class="lobby-content">
@@ -233,7 +262,12 @@
               <section class="room-team room-bl" aria-label="潜伏者电脑队伍"><div class="room-team-list" id="roomEnemyList"></div></section>
               <section class="room-team room-gr" aria-label="保卫者队伍"><div class="room-team-list" id="roomPlayerList"></div></section>
             </div>
-            <div class="room-match-info"><span>地图 <b>运输船</b></span><span>团队竞技</span><span><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
+            <div class="room-map-select" id="mapSelect" aria-label="选择对战地图">
+              <span class="room-map-caption">对战地图 <small>SELECT MAP</small></span>
+              <button type="button" class="room-map-option active" data-map="transport" aria-pressed="true"><b>运输船</b><small>集装箱货轮 · 经典对抗</small></button>
+              <button type="button" class="room-map-option" data-map="palace" aria-pressed="false"><b>王宫回廊</b><small>王座大厅 · 双层侧廊</small></button>
+            </div>
+            <div class="room-match-info"><span>地图 <b id="lobbyMapName">运输船</b></span><span>团队竞技</span><span><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
             <div class="room-actions">
               <div class="menu-setup">
                 <div class="ml-row"><span class="ml-label">电脑人数</span><div class="ml-stepper"><button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button><span class="ml-step-val" id="enemyCountVal">8</span><button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button></div></div>
@@ -255,7 +289,7 @@
       </div>
       <footer class="room-chat">
         <div class="room-chat-log" id="roomChatLog" role="log" aria-label="房间消息">
-          <p class="room-message-system">欢迎进入运输船。准备就绪后，点击「开始游戏」。</p>
+          <p class="room-message-system">选择地图后，点击「开始游戏」。</p>
           <p class="room-message-hint">可调整电脑人数与难度；按 Esc 返回房间后，可继续当前对局。</p>
           <p class="room-message-system" id="lobbyTicker"></p>
         </div>
@@ -285,6 +319,18 @@
           "three/addons/": "./vendor/three/examples/jsm/"
         }
       }
+    </script>
+    <script>
+      document.getElementById("bootRetry").onclick = () => location.reload();
+      window.addEventListener("error", (event) => {
+        if (!(event instanceof ErrorEvent)) return;
+        const screen = document.getElementById("bootScreen");
+        if (!screen || screen.classList.contains("is-complete")) return;
+        screen.classList.add("is-error");
+        document.getElementById("bootStatus").textContent = "资源部署失败";
+        document.getElementById("bootDetail").textContent = "请检查文件并重新加载";
+        document.getElementById("bootRetry").hidden = false;
+      });
     </script>
     <script type="module" src="./scripts/main.js"></script>
   </body>

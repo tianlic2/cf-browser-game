@@ -3,9 +3,9 @@ import { intersectsBrush, brushSupport } from './brush_collision.js';
 // A shared flow field with separate nodes for stacked floors. A tunnel and the
 // deck above it must never become the same node merely because X/Z coincide.
 export class GroundNavigation {
-  constructor(colliders,bounds) {
+  constructor(colliders,bounds,options={}) {
     this.colliders=colliders;
-    this.groundBrushes=colliders.filter(c=>c.h<=.5);
+    this.groundBrushes=colliders.filter(c=>c.walkable!==false&&c.h<=(options.maxHeight??.5));
     this.floorY=Math.min(0,...this.groundBrushes.map(c=>c.h));
     this.step=.55;this.hw=bounds.hw;this.hl=bounds.hl;
     this.xs=Array.from({length:Math.ceil(bounds.hw*2/this.step)+1},(_,i)=>i*this.step-this.hw);
@@ -25,7 +25,8 @@ export class GroundNavigation {
       const px=this.xs[x],pz=z*this.step-this.hl,cell=z*this.w+x;
       const nearby=colliders.filter(c=>Math.abs(px-c.x)<=c.hx+.6&&Math.abs(pz-c.z)<=c.hz+.6);
       this.local[cell]=nearby;
-      const heights=nearby.map(c=>brushSupport(c,px,pz)).filter(y=>Number.isFinite(y)&&y>=this.floorY-.01&&y<=.5).sort((a,b)=>a-b);
+      const heights=nearby.filter(c=>c.walkable!==false).map(c=>brushSupport(c,px,pz))
+        .filter(y=>Number.isFinite(y)&&y>=this.floorY-.01&&y<=(options.maxHeight??.5)).sort((a,b)=>a-b);
       let last=-Infinity;
       for(const y of heights) {
         if(y-last<.02)continue;last=y;
@@ -100,7 +101,7 @@ export class GroundNavigation {
     for(let i=0;i<=steps;i++) {
       const f=i/steps,x=a.x+(b.x-a.x)*f,z=a.z+(b.z-a.z)*f;
       const next=this.heightAt(x,z,y),nearby=this.local[this.cell(x,z)];
-      if(!nearby||!nearby.some(c=>Math.abs(brushSupport(c,x,z)-next)<.01)||
+      if(!nearby||!nearby.some(c=>c.walkable!==false&&Math.abs(brushSupport(c,x,z)-next)<.01)||
          Math.abs(next-y)>.5||nearby.some(c=>intersectsBrush(c,x,z,next,.46)))return false;
       y=next;
     }

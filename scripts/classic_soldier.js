@@ -2,50 +2,57 @@
 // Geometry/textures are shared; skeletons and hit-flash materials are per actor.
 import * as THREE from 'three';
 import { SoldierRig } from './enemy_model.js';
+import { makeGLTFLoader } from './gltf.js';
 
 const BASE=new URL('../assets/classic/',import.meta.url).href;
+const SWAT_BL=new URL('../models/swat_bl.glb',import.meta.url).href;
 const C=new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2);
 const CI=C.clone().invert();
+const MODEL_SCALE=0.00957;
+const MODEL_FLOOR=109.597 * MODEL_SCALE;
 let asset=null;
 export async function loadClassicSoldier() {
   try {
     const r=await fetch(BASE+'swat/swat.json');if (!r.ok) throw new Error('SWAT 数据缺失');
     const data=await r.json();
-    const response=await fetch(BASE+'swat/swat.bin');if (!response.ok) throw new Error('SWAT 网格缺失');
-    const binary=await response.arrayBuffer();
-    const textures=await Promise.all(data.parts.map(p=>new THREE.TextureLoader().loadAsync(BASE+p.material.map)));
+    const [gltf,weightResponse]=await Promise.all([
+      makeGLTFLoader().loadAsync(SWAT_BL),
+      fetch(BASE+'swat/swat_bl_weights.bin'),
+    ]);
+    if(!weightResponse.ok)throw new Error('SWAT BL 蒙皮权重缺失');
+    const weights=new Uint8Array(await weightResponse.arrayBuffer());
+    gltf.scene.updateMatrixWorld(true);
+    const parts=[];
+    gltf.scene.traverse(node=>{if(node.isMesh)parts.push(node);});
+    if(parts.length!==4 || parts.some((mesh,i)=>mesh.geometry.attributes.position.count!==[498,478,55,1641][i]))
+      throw new Error('SWAT BL 网格布局与蒙皮权重不匹配');
+    const expected=parts.reduce((sum,mesh)=>sum+mesh.geometry.attributes.position.count*8,0);
+    if(weights.length!==expected)throw new Error('SWAT BL 蒙皮权重长度不匹配');
     const geometries=[];
-    data.parts.forEach((p,pi)=>{
-      textures[pi].colorSpace=THREE.SRGBColorSpace;textures[pi].anisotropy=8;
-      const a=new Float32Array(binary,p.offset,p.count*16);
-      const buckets={body:[],head:[]};
-      for (let i=0;i<p.count;i+=3) {
-        let head=0;
-        for(let v=0;v<3;v++)for(let w=0;w<4;w++) if(a[(i+v)*16+8+w]===14)head+=a[(i+v)*16+12+w];
-        const bucket=buckets[head>1.5?'head':'body'];
-        for(let v=0;v<3;v++)for(let k=0;k<16;k++)bucket.push(a[(i+v)*16+k]);
+    let offset=0;
+    parts.forEach((mesh,i)=>{
+      // The GLB scene's -90° X rotation changes Z-up into the game's Y-up.
+      // Keep the source geometry, normals, UVs and embedded diffuse textures.
+      const geometry=mesh.geometry.clone();
+      geometry.applyMatrix4(mesh.matrixWorld);
+      geometry.rotateY(Math.PI);
+      geometry.scale(MODEL_SCALE,MODEL_SCALE,MODEL_SCALE);
+      geometry.translate(0,MODEL_FLOOR,0);
+      const count=geometry.attributes.position.count;
+      const skinIndex=new Uint8Array(count*4),skinWeight=new Uint8Array(count*4);
+      for(let v=0;v<count;v++) {
+        const at=offset+v*8;
+        skinIndex.set(weights.subarray(at,at+4),v*4);
+        skinWeight.set(weights.subarray(at+4,at+8),v*4);
       }
-      for(const [part,values] of Object.entries(buckets)) {
-        if(!values.length)continue;
-        const n=values.length/16, positions=[],normals=[],uv=[],joints=[],weights=[];
-        const v=new THREE.Vector3();
-        for(let i=0;i<n;i++) {
-          const o=i*16;
-          v.fromArray(values,o).applyQuaternion(C).multiplyScalar(.0254);positions.push(v.x,v.y,v.z);
-          v.fromArray(values,o+3).applyQuaternion(C);normals.push(v.x,v.y,v.z);
-          uv.push(values[o+6],1-values[o+7]);
-          joints.push(...values.slice(o+8,o+12));weights.push(...values.slice(o+12,o+16));
-        }
-        const g=new THREE.BufferGeometry();
-        g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
-        g.setAttribute('normal',new THREE.Float32BufferAttribute(normals,3));
-        g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
-        g.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(joints,4));
-        g.setAttribute('skinWeight',new THREE.Float32BufferAttribute(weights,4));
-        geometries.push({geometry:g,part,texture:pi});
-      }
+      offset+=count*8;
+      geometry.setAttribute('skinIndex',new THREE.Uint8BufferAttribute(skinIndex,4));
+      geometry.setAttribute('skinWeight',new THREE.Uint8BufferAttribute(skinWeight,4,true));
+      if(mesh.material.map)mesh.material.map.anisotropy=8;
+      geometries.push({geometry,part:i<2?'head':'body',helmet:i===1,
+        map:mesh.material.map});
     });
-    asset={data,textures,geometries};return true;
+    asset={data,geometries};return true;
   }catch(error){console.warn('经典角色加载失败，使用内置骨架：',error);return false;}
 }
 
@@ -53,15 +60,19 @@ export class ClassicSoldierRig extends SoldierRig {
   constructor(rifle) {
     super(rifle);
     if(!asset)return;
-    this.source='cf-swat-reborn';
+    this.source='swat-bl-glb';
     this.corpseHeight=.35;
+    this.corpseHeightBack=.26;
     // Keep only the driver's transform hierarchy and rifle. Hidden primitive
     // meshes do not participate in raycasting; actual skinned triangles do.
     for(const m of this.meshes)m.visible=false;
     for(const m of this.mats)m.dispose();
     this.meshes=[];
-    this.mats=asset.textures.map(map=>new THREE.MeshStandardMaterial({map,roughness:.88,metalness:0,envMapIntensity:.22}));
+    this.mats=asset.geometries.map(entry=>new THREE.MeshStandardMaterial({
+      map:entry.map,roughness:.88,metalness:0,envMapIntensity:.22,
+    }));
     this.headMats=[];
+    this.helmetMeshes=[];
     this.bones=asset.data.bones.map(b=>{
       const bone=new THREE.Bone();bone.name=b.name;
       bone.position.fromArray(b.position).applyQuaternion(C).multiplyScalar(.0254);
@@ -73,18 +84,34 @@ export class ClassicSoldierRig extends SoldierRig {
       const parent=asset.data.bones[i].parent;
       (parent>=0?this.bones[parent]:this.skinRoot).add(bone);
     });
+    // This GLB is an unrigged, forward-reaching pose. Its shoulders, elbows
+    // and palms sit above/in front of the older SWAT bind pose. Set limb bind
+    // pivots to the new mesh before recording inverse matrices, so the same
+    // weapon IK brings the *visible* gloves to the gun instead of only its
+    // invisible driver hands. Source geometry itself remains untouched.
+    const armBind={
+      16:[.23,1.60,-.04],17:[.37,1.38,-.01],18:[.50,1.15,.25],
+      29:[-.23,1.60,-.04],30:[-.37,1.38,-.01],31:[-.50,1.15,.25],
+    };
+    this.skinRoot.updateMatrixWorld(true);
+    for(const [key,point] of Object.entries(armBind)) {
+      const i=Number(key),bone=this.bones[i],parent=bone.parent;
+      bone.position.copy(parent.worldToLocal(new THREE.Vector3(...point)));
+      bone.updateMatrixWorld(true);
+    }
     this.skinRoot.updateMatrixWorld(true);
     this.bindPos=this.bones.map(b=>b.getWorldPosition(new THREE.Vector3()));
     this.bindQ=this.bones.map(b=>b.getWorldQuaternion(new THREE.Quaternion()));
     this.rest=this.bones.map(b=>({p:b.position.clone(),q:b.quaternion.clone()}));
     this.skeleton=new THREE.Skeleton(this.bones);
-    for(const entry of asset.geometries) {
-      const m=new THREE.SkinnedMesh(entry.geometry,this.mats[entry.texture]);
+    for(const [i,entry] of asset.geometries.entries()) {
+      const m=new THREE.SkinnedMesh(entry.geometry,this.mats[i]);
       m.name='classic-swat-'+entry.part;m.userData.part=entry.part;
       m.frustumCulled=false;
       m.boundingSphere=new THREE.Sphere(new THREE.Vector3(0,.9,0),2.5);
       this.skinRoot.add(m);m.bind(this.skeleton,new THREE.Matrix4());this.meshes.push(m);
       if(entry.part==='head')this.headMats.push(m.material);
+      if(entry.helmet)this.helmetMeshes.push(m);
     }
     this._retarget();
   }

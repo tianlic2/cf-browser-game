@@ -23,6 +23,10 @@
     "cf-grenades-pack.rar": {
       "bytes": 43976889,
       "sha256": "3409ba43deeb90198032f908a9c2cfd425af894169e708fbbcbb00468010fb7f"
+    },
+    "cf_m4a1_custom_pack_update.rar": {
+      "bytes": 1778831,
+      "sha256": "c303380a05abbacaaad8d8533614f1cbcd66280a54343a79fd30d2d78d17076d"
     }
   },
   "files": {
@@ -54,21 +58,41 @@
       "bytes": 47888,
       "sha256": "c9956165b1155445cc8dbb8feffe11bb87232f5179eb46e040b1ac92ddac527f"
     },
+    "swat/models_player_cf_swat_backpack_normal.png": {
+      "bytes": 39186,
+      "sha256": "c70cba154e6ae535d0caa05632e57f0edf967d24dad91a1420dd5fdceeb5b28e"
+    },
     "swat/models_player_cf_swat_ct_urban.png": {
       "bytes": 962532,
       "sha256": "090c28028ff9f6a14173da954088c7a7758b6e87746f428e8a1d2ba1ba50b148"
+    },
+    "swat/models_player_cf_swat_ct_urban_normal.png": {
+      "bytes": 706419,
+      "sha256": "1079493f557c360923a01efca16d41e9dd5340f36b67fe50c3700a8df4d47f5a"
     },
     "swat/models_player_cf_swat_eb9a780.png": {
       "bytes": 932489,
       "sha256": "b7547306c5acbe059da99864dcfbe31199ece497f7023c2d4aa9e640777b6e00"
     },
+    "swat/models_player_cf_swat_eb9a780_normal.png": {
+      "bytes": 1028578,
+      "sha256": "193c739acd190f30aa89c72badb9ab2fc6af7b745511b59ff5dfc195d381a1c2"
+    },
     "swat/models_player_cf_swat_ebc2ae0.png": {
       "bytes": 48441,
       "sha256": "987cac9d56dd8eeeadf574055af99fc84f804c32787b481b2651ce150d0248f0"
     },
+    "swat/models_player_cf_swat_ebc2ae0_normal.png": {
+      "bytes": 40338,
+      "sha256": "621b989139056d035067648d7f77e44704459cc45538989a0d5c2edc1f239602"
+    },
     "swat/models_player_cf_swat_ec02a80.png": {
       "bytes": 134481,
       "sha256": "9434c630fffda5ff990f699565b041acbebe2fe524175f16d8e347682bbc54cd"
+    },
+    "swat/models_player_cf_swat_ec02a80_normal.png": {
+      "bytes": 147855,
+      "sha256": "5289cf81ded866ccee50f8a22cc71050340f7647eed6a0948e24acd0af8c5127"
     },
     "swat/models_player_cf_swat_ec17ee0.png": {
       "bytes": 69567,
@@ -79,8 +103,12 @@
       "sha256": "fba46ab766edb4ac42bafd1ba5f2eafcb94ca4e14223a74dd9fdd0905c01ffe2"
     },
     "swat/swat.json": {
-      "bytes": 11805,
-      "sha256": "7f62597df45aaf0c5311a6241a0d2404acbd5f258ec80fbf4c0fe18ab674b735"
+      "bytes": 12107,
+      "sha256": "030dc1a7fa0d539af48906eaec59a1961dbe03469b9383bef931b8215c5f4098"
+    },
+    "swat/swat_bl_weights.bin": {
+      "bytes": 21376,
+      "sha256": "dab8227a42bbbb79d341e654fb162d108e2eb219bd831e8d2d4bd5f272334430"
     },
     "transport/blackrockshooter_brsbodyinterior.png": {
       "bytes": 151394,
@@ -405,6 +433,10 @@
     "../../audio/classic/grenade_explode.wav": {
       "bytes": 150060,
       "sha256": "b7e4ab957be37d8035336851b6960b3a4943596355a3629ce9f43beb73265c1a"
+    },
+    "m4c/m4a1_custom.glb": {
+      "bytes": 1390344,
+      "sha256": "0f9d15dcec15c4c7ae3c376bd2c766fe0a2f179eeb3c8db121067c9e954c0427"
     }
   },
   "audioFiles": {
@@ -423,6 +455,22 @@
     "audio/classic/ak47_out.wav": {
       "bytes": 20040,
       "sha256": "bdde38bf63204c23f85944826ea4fe265f6818fa937ad56e7a031a742d544872"
+    },
+    "audio/classic/m4c_fire.wav": {
+      "bytes": 11810,
+      "sha256": "589ba1143ebc963abb677d7fb1603f6098742d7bebee7231fe82caf9ba12ec53"
+    },
+    "audio/classic/m4c_out.wav": {
+      "bytes": 35400,
+      "sha256": "09b3922216191e8f5cf18b64b01b58aa04555091a12792d02ebcceb2a3c5a4b8"
+    },
+    "audio/classic/m4c_in.wav": {
+      "bytes": 35710,
+      "sha256": "7e802462d88bc1a2dd727b40952df740a08d62835af701969df69eab863a542f"
+    },
+    "audio/classic/m4c_bolt.wav": {
+      "bytes": 39546,
+      "sha256": "a060f59b7758d0e8d19e022fdefd6e89a60687d34c00187d03889bc529e00672"
     }
   }
 }

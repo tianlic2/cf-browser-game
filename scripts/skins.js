@@ -72,18 +72,15 @@ export const SKINS = {
   m4: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
     {
-      // Reuse the detailed M4 geometry with classic parkerized steel / polymer.
-      // The source has no albedo textures; material slots preserve every model detail.
-      id: "classic", name: "经典", slots: {
+      // GameBanana CF M4A1-C black/original model and textures. The slots below
+      // color the base low-poly fallback; the imported model keeps its own maps.
+      id: "classic", name: "C", slots: {
         Primary: { color: 0x343b3e, metalness: 0.55, roughness: 0.52 },
         Secondary: { color: 0x262b2b, metalness: 0.12, roughness: 0.76 },
         Highlight: { color: 0x5b6160, metalness: 0.60, roughness: 0.46 },
-        matM4_1: { color: 0x303334, metalness: 0.32, roughness: 0.62, envMapIntensity: 0.35 },
-        matM4_2: { color: 0x444847, metalness: 0.38, roughness: 0.55, envMapIntensity: 0.35 },
-        matM4_3: { color: 0x222624, metalness: 0.08, roughness: 0.78, envMapIntensity: 0.3 },
       },
       accent: 0x343b3e, muzzle: 0xffbc72,
-      model: { file: "./models/skins/m4_gold.glb", rotY: 0, targetLen: 0.82, anchorKey: "m4_goldenm4" },
+      model: { file: "./assets/classic/m4c/m4a1_custom.glb", rotY: Math.PI, targetLen: 0.82, anchorKey: "m4_custom" },
     },
     {
       id: "thor", name: "雷神", slots: {
@@ -225,15 +222,18 @@ export const SKINS = {
     },
   ],
 
+  // 巴雷特从授权 FBX 转成带烘焙贴图的 GLB，只有原厂外观。
+  barrett: [
+    { id: STOCK, name: "原厂", slots: {}, accent: 0x4d514b },
+  ],
+
   // 手枪没有模型皮肤 —— 只剩原厂。
   pistol: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
   ],
 
-  // 匕首也只有原厂。曾经的两款（「屠龙」「龙啸」）点的槽位是 `knife_s_1` / `knife_s_2`，
-  // 那是**换刀之前**那把 knife.glb 的材质名；现在 models/knife.glb 是 3 个网格共用
-  // **一个** `Knife` 材质，这两个名字在整个仓库里一个 GLB 都对应不上，选中时画面纹丝不动。
-  // 新刀的材质名是 `Knife`，本身带贴图（蓝钢刀身），原厂即正确外观。
+  // 匕首只有原厂。旧「屠龙」「龙啸」皮肤按已废弃模型的材质名上色，
+  // 与当前 M9 的 Knife/Handle 双材质不匹配，不能把它们误当作可选外观。
   knife: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
   ],
@@ -245,7 +245,7 @@ export const SKINS = {
 // `DEFAULT_SKIN[gunId] || STOCK`，一旦指向一个被删掉的 id，`findSkin` 会静静地回退成原厂，
 // 表现为「默认皮肤莫名其妙没了」。
 export const DEFAULT_SKIN = {
-  ak: "classic", m4: "classic", awm: "classic", pistol: STOCK, knife: STOCK,
+  ak: "classic", m4: "classic", awm: "classic", barrett: STOCK, pistol: STOCK, knife: STOCK,
 };
 
 // 枪口焰没上皮肤时的原色（与 muzzleShot / muzzleLight 的构造值一致）

@@ -21,8 +21,8 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
 import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js";
 
-// 会出现在世界里的枪。前三把是敌人随机携带的池子；手枪只用于「玩家丢掉副武器」。
-const WORLD_GUN_IDS = ["ak", "m4", "awm", "pistol"];
+// 会出现在世界里的枪。经典三把是敌人随机携带的池子；巴雷特可由玩家丢弃。
+const WORLD_GUN_IDS = ["ak", "m4", "awm", "barrett", "pistol"];
 export const ENEMY_GUN_IDS = ["ak", "m4", "awm"];
 
 const cache = {}; // id → { world: {skinId: Object3D}, enemy: {skinId: Object3D} }

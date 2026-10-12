@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { waterMaps } from './map.js';
 
 const BASE = new URL('../assets/classic/', import.meta.url).href;
-export async function buildClassicMap(scene) {
+export async function buildClassicMap(scene, onProgress = () => {}) {
   const response = await fetch(BASE+'transport/map.json');
   if (!response.ok) throw new Error('经典地图资源缺失');
   const data = await response.json();
+  onProgress(.06);
   // Reflect across the ship's long axis, keeping the teams at their own ends.
   // Geometry, brush halfspaces, spawns and radar must use the same transform.
   for (const c of data.colliders) {
@@ -16,17 +17,21 @@ export async function buildClassicMap(scene) {
   for (const face of data.topdown) face.x = -face.x;
   data.floorY = Math.min(0, ...data.colliders.map(c => c.h));
   const binary = await fetch(BASE+'transport/map.bin').then(r => { if (!r.ok) throw new Error('地图网格缺失'); return r.arrayBuffer(); });
+  onProgress(.28);
   const loader=new THREE.TextureLoader();
+  const textureCount=7+data.parts.filter(p=>p.material.map).length;
+  let texturesDone=0;
+  const textureReady=(count=1)=>onProgress(.28+.72*(texturesDone+=count)/textureCount);
   const texture=async(path,repeat=false) => {
     const t=await loader.loadAsync(BASE+path);t.colorSpace=THREE.SRGBColorSpace;
     if (repeat) t.wrapS=t.wrapT=THREE.RepeatWrapping;
-    t.anisotropy=8;return t;
+    t.anisotropy=8;textureReady();return t;
   };
   const [light,sky,textures]=await Promise.all([
     texture('transport/lightmap.png'),
     // Source face names differ from WebGL's +X,-X,+Y,-Y,+Z,-Z order.
     // ft.right meets lf.left; swapping the last pair keeps all sky edges continuous.
-    new THREE.CubeTextureLoader().loadAsync(['ft','bk','up','dn','rt','lf'].map(f=>BASE+data.sky[f])),
+    new THREE.CubeTextureLoader().loadAsync(['ft','bk','up','dn','rt','lf'].map(f=>BASE+data.sky[f])).then(t=>{textureReady(6);return t;}),
     Promise.all(data.parts.map(p=>p.material.map ? texture(p.material.map,true) : null)),
   ]);
   sky.colorSpace=THREE.SRGBColorSpace;
@@ -56,7 +61,8 @@ export async function buildClassicMap(scene) {
     color:0xffffff,roughness:1,metalness:.06,
   }));
   sea.rotation.x=-Math.PI/2;sea.position.y=-3.42;scene.add(sea);
-  return {...data, obstacles, source:'cf-transportship-source-port', update(t){
+  return {...data, obstacles, visuals:[group,sea], background:sky,
+    source:'cf-transportship-source-port', update(t){
     for(const k of ['map','normalMap','roughnessMap'])water[k].offset.set(t*.008,t*.004);
   }};
 }

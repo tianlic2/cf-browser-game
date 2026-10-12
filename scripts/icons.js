@@ -1,9 +1,9 @@
-// CF 风格的击杀图标图形库：**纯字符串常量 + 两个拼装函数**。
+// CF 风格的击杀图标图形库：**纯字符串常量 + SVG 拼装函数**。
 // 不 import THREE、不碰游戏状态（照 scripts/chat.js 的独立性）。
 //
 // 为什么是内联 SVG 字符串，而不是贴图 / Sprite / 字体图标：
-//   ① 图标是 HUD 层的 2D 图元，走 DOM 才能跟着 CSS 的 `currentColor` 走 ——
-//      普通击杀黄 / 爆头红 / 黄金爆头金各一档只改一个 class，不需要三份资源；
+//   ① 图标是 HUD 层的 2D 图元；武器剪影继承 CSS 的 `currentColor`，圆形连杀章
+//      在 SVG 内用蓝钢与金色渐变画六档，不需要六张位图；
 //   ② 不需要任何额外网络请求（本项目「无外部资源依赖」那条约定，见 audio.js）；
 //   ③ 进 `.hud` 层就天然压在 `.scope` 之上（CF 开镜后击杀图标照常可见）。
 //
@@ -18,6 +18,7 @@ export const ICON_KIND = {
   ak: "rifle",
   m4: "rifle",
   awm: "sniper",
+  barrett: "sniper",
   pistol: "pistol",
   knife: "melee",
   frag: "grenade",
@@ -114,18 +115,48 @@ export function headshotBadgeSvg(golden, cls) {
   return svg('<path d="' + SKULL + '"/>', (cls || "ico-hs") + (golden ? " gold" : ""), true);
 }
 
-// Original vector artwork in the classic military-medal vocabulary, not a game asset rip.
-// Only one central medal exists, so the gradient id cannot collide with kill-feed icons.
-export function killMedalSvg(weaponId, headshot, golden) {
-  const metal = golden ? ["#fff3b9", "#b7862e", "#ead798"] : ["#eef0e6", "#777f7c", "#bdc2b7"];
-  const wing = '<path d="M62 30 18 12 24 28 54 39 21 31 29 43 55 47 29 46 38 57 59 56 43 60 52 69 67 62Z"/>';
-  return '<svg class="ki-medal" viewBox="0 0 180 100" aria-hidden="true">' +
-    '<defs><linearGradient id="kill-metal" x1="0" y1="0" x2="0.2" y2="1"><stop stop-color="' + metal[0] + '"/><stop offset=".45" stop-color="' + metal[1] + '"/><stop offset=".52" stop-color="' + metal[0] + '"/><stop offset="1" stop-color="' + metal[2] + '"/></linearGradient></defs>' +
-    '<g fill="url(#kill-metal)" stroke="#262925" stroke-width="2" stroke-linejoin="round">' + wing +
-    '<g transform="translate(180 0) scale(-1 1)">' + wing + '</g>' +
-    '<path d="M90 8 122 27 117 62 90 84 63 62 58 27Z"/><path d="M90 14 116 30 111 59 90 76 69 59 64 30Z" fill="#303831" stroke="#d4cfb0" stroke-width="1"/></g>' +
-    (headshot
-      ? '<g class="ki-hs' + (golden ? ' gold' : '') + '" transform="translate(65 19) scale(2.08)" fill="' + (golden ? '#edcf83' : '#d8d6c5') + '" fill-rule="evenodd"><path d="' + SKULL + '"/></g><path d="M90 11V24 M90 61V74 M60 42H72 M108 42H120" stroke="' + (golden ? '#e6c866' : '#a8362e') + '" stroke-width="3"/>'
-      : '<g class="ki-gun" transform="translate(64 22) scale(2.2)" fill="#dadccd">' + ICON_BODY[iconKindFor(weaponId)] + '</g>') +
-    '<path d="M51 72H129L123 88H57Z" fill="#292e29" stroke="' + metal[2] + '"/><text x="90" y="83" text-anchor="middle" fill="' + metal[0] + '" font-family="Arial,sans-serif" font-weight="bold" font-size="9" letter-spacing="1">' + (headshot ? 'HEAD SHOT' : 'KILL') + '</text></svg>';
+// 参考经典 CF 的八角星圆章：深钢外圈、蓝灰底、每杀一人点亮一道金色星芒。
+// 八杀之后增加真实的星芒数量，不把连杀计数截断在八。
+const MEDAL_GOLD_ORDER = [0, 1, 7, 2, 6, 3, 5, 4];
+const medalPoint = (radius, angle) => {
+  const x = 50 + radius * Math.cos(angle), y = 50 + radius * Math.sin(angle);
+  return `${x.toFixed(2)} ${y.toFixed(2)}`;
+};
+const medalTeeth = Array.from({ length: 32 }, (_, i) =>
+  medalPoint(i % 2 ? 43.4 : 47.4, -Math.PI / 2 + i * Math.PI / 16)
+).join("L");
+function medalRay(angle, halfAngle, gold) {
+  const left = medalPoint(14.5, angle - halfAngle);
+  const tip = medalPoint(36, angle);
+  const right = medalPoint(14.5, angle + halfAngle);
+  return '<path class="ki-ray ' + (gold ? 'lit' : 'steel') + '" d="M50 50L' + left + 'L' + tip + 'L' + right + 'Z" fill="url(#ki-' + (gold ? 'gold' : 'steel') + ')" stroke="#152124" stroke-width="1.7" stroke-linejoin="round"/>' +
+    '<path d="M50 50L' + left + 'L' + tip + 'Z" fill="' + (gold ? '#ffe8a1' : '#afc0be') + '" opacity=".52"/>';
+}
+
+export function killMedalSvg(streakCount, headshot, golden) {
+  const count = Math.max(1, Math.floor(streakCount) || 1);
+  const steelRays = Array.from({ length: 8 }, (_, i) =>
+    medalRay(-Math.PI / 2 + i * Math.PI / 4, Math.PI / 8, false)
+  ).join("");
+  const goldRays = Array.from({ length: count }, (_, i) => {
+    const slot = count <= 8 ? MEDAL_GOLD_ORDER[i] : i;
+    const slots = count <= 8 ? 8 : count;
+    return medalRay(-Math.PI / 2 + slot * 2 * Math.PI / slots,
+      Math.min(Math.PI / 8, Math.PI / slots * 0.84), true);
+  }).join("");
+  return '<svg class="ki-medal" viewBox="0 0 100 100" data-tier="' + count + '" data-streak="' + count + '" aria-hidden="true">' +
+    '<defs>' +
+      '<radialGradient id="ki-rim"><stop stop-color="#768c8a"/><stop offset=".72" stop-color="#354c51"/><stop offset="1" stop-color="#152326"/></radialGradient>' +
+      '<linearGradient id="ki-steel" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#9eb2b2"/><stop offset=".45" stop-color="#536d75"/><stop offset="1" stop-color="#233b42"/></linearGradient>' +
+      '<linearGradient id="ki-gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff4bd"/><stop offset=".42" stop-color="#dfa84c"/><stop offset="1" stop-color="#805023"/></linearGradient>' +
+    '</defs>' +
+    '<path d="M' + medalTeeth + 'Z" fill="#101c20" stroke="#091114" stroke-width="2"/>' +
+    '<circle cx="50" cy="50" r="42" fill="url(#ki-rim)" stroke="#a5b2a9" stroke-width="1.5"/>' +
+    '<circle cx="50" cy="50" r="37" fill="#23383d" stroke="#0e1a1e" stroke-width="2.4"/>' +
+    steelRays + goldRays +
+    '<circle cx="50" cy="50" r="' + (count > 8 ? 9 : 7) + '" fill="' + (count > 8 ? '#21363c' : count >= 5 ? '#dba54c' : '#7d9798') + '" stroke="#17272a" stroke-width="2"/>' +
+    (count > 8 ? '<text x="50" y="52.7" text-anchor="middle" fill="#fff0b5" font-family="Arial,sans-serif" font-weight="bold" font-size="' + (count >= 100 ? 5.5 : 8) + '">' + count + '</text>' : '') +
+    (headshot ? '<circle class="ki-hs' + (golden ? ' gold' : '') + '" cx="50" cy="' + (count > 8 ? 39 : 50) + '" r="3.2" fill="' + (golden ? '#fff3bb' : '#d9e6df') + '"/>' : '') +
+    '<circle cx="50" cy="50" r="40" fill="none" stroke="#0b171a" stroke-width="1.2"/>' +
+    '</svg>';
 }

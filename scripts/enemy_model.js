@@ -15,6 +15,9 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
+let enemyMuzzleTexture = null;
+export function setEnemyMuzzleTexture(texture) { enemyMuzzleTexture = texture; }
+
 // ---------- 骨架尺寸（身高 ≈ 1.82，与旧 GLB 的 1.8 同量级，命中体积不变）----------
 // 骨盆静止高度：必须让「髋(0.95-0.04) → 踝(0.10)」的距离接近腿长(0.82)，否则站立时
 // 膝盖会一直弯着 40° 以上 —— 站着也像半蹲（实测 PELVIS_Y=0.90 时膝角 44°）。
@@ -39,17 +42,17 @@ const UPPER = 0.32;      // 上臂
 const FORE = 0.29;       // 前臂
 const LEG_REACH = THIGH + SHIN;
 
-// ---------- 配色（CF 潜伏者：深橄榄制服 + 黑战术装具 + 红队标）----------
+// ---------- 配色（CF 潜伏者风格：浅沙色制服 + 橄榄棕装具 + 红队标）----------
 //
 // 三档涂装轮排（`PALETTES`），肤色两档交错（`SKINS`）—— 8 具骨架一眼分得出谁是谁，
 // 但仍读作同一支「潜伏者」部队。**只改颜色值、一件几何都不动**，所以逐敌配色是零调用代价的。
 // 面具 / 镜片 / 队标三色**逐具固定**（那是装备规格，不是涂装；队标红色是全队的识别色）。
 const PALETTES = [
   //  制服主色   深色件     装具     辅袋     靴       手套
-  { cloth: 0x42464b, cloth2: 0x30343a, gear: 0x26292b, pouch: 0x454741, boot: 0x242527, glove: 0x36322a },
-  { cloth: 0x3e4d5f, cloth2: 0x303b49, gear: 0x24282c, pouch: 0x444b50, boot: 0x26282b, glove: 0x35322c },
-  { cloth: 0x55604e, cloth2: 0x434c3e, gear: 0x2e3237, pouch: 0x6f7566, boot: 0x33373a, glove: 0x6b5a41 },
-  { cloth: 0x6b6654, cloth2: 0x4d4b40, gear: 0x2e302b, pouch: 0x5c5947, boot: 0x282a2d, glove: 0x4a3f2f },
+  { cloth: 0xc7ad7b, cloth2: 0xa58b61, gear: 0x786c4e, pouch: 0xa58e62, boot: 0x414033, glove: 0x68583e },
+  { cloth: 0xbeb38c, cloth2: 0x9c906f, gear: 0x706c52, pouch: 0x9d9272, boot: 0x424338, glove: 0x665b43 },
+  { cloth: 0xb6a37b, cloth2: 0x95815d, gear: 0x6b684d, pouch: 0x97845d, boot: 0x3e4036, glove: 0x61543e },
+  { cloth: 0xd0b788, cloth2: 0xab9468, gear: 0x756d50, pouch: 0xaa946b, boot: 0x434135, glove: 0x6a5b40 },
 ];
 const SKINS = [0xa8815c, 0x8a6743];
 // 面具 / 镜片 / 队标：逐具不变
@@ -555,9 +558,11 @@ export class SoldierRig {
     head.position.y = 0.14;
     neck.add(head);
     add(head, G.head, this.matSkin, "head");
+    const helmetStart = this.meshes.length;
     addN(head, G.helmetSet, G.helmetParts, this.matGear, "head");
+    this.helmetMeshes = this.meshes.slice(helmetStart);
     add(head, G.mask, this.matMask, "head");
-    add(head, G.goggles, this.matLens, "head");
+    this.helmetMeshes.push(add(head, G.goggles, this.matLens, "head"));
 
     // 双臂（肩 → 上臂 → 肘 → 前臂 → 手）
     const mkArm = (side) => {
@@ -602,6 +607,18 @@ export class SoldierRig {
     // 也要能换枪，不能只在构造函数里挂一次。
     this.mount = new THREE.Group();
     chest.add(this.mount);
+    // Same flash silhouette as the player's weapon. It follows the actual
+    // third-person barrel, and is not part of the raycast hit meshes.
+    this.muzzleFlash = enemyMuzzleTexture ? new THREE.Sprite(new THREE.SpriteMaterial({
+      map: enemyMuzzleTexture, color: 0xffc876, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    })) : null;
+    if (this.muzzleFlash) {
+      this.muzzleFlash.position.set(0, 0.02, RIFLE_HALF + 0.03);
+      this.muzzleFlash.scale.set(0.30, 0.30, 1);
+      this.muzzleFlash.visible = false;
+      this.mount.add(this.muzzleFlash);
+    }
     this.rifle = null;
     this.rifleYaw = RIFLE_YAW;
     this.anchors = RIFLE_ANCHORS.ak;
@@ -628,6 +645,8 @@ export class SoldierRig {
     this.breath = 0;
     this.deathBlend = 0;
     this.walkW = 0;
+    this.motionSide = 0;
+    this.motionForward = 1;
     this.reset();
   }
 
@@ -647,12 +666,19 @@ export class SoldierRig {
   }
 
   reset() {
+    // Headshot helmets are hidden on the corpse; object-pool reuse restores them.
+    if (this.helmetMeshes) for (const mesh of this.helmetMeshes) mesh.visible = true;
+    this.mount.visible = true;
     this.phase = Math.random() * Math.PI * 2;
     this.pelvisY = PELVIS_Y;
     this.aimBlend = 0;
     this.kick = 0;
+    this.flashLife = 0;
+    if (this.muzzleFlash) this.muzzleFlash.visible = false;
     this.deathBlend = 0;
     this.walkW = 0;
+    this.motionSide = 0;
+    this.motionForward = 1;
     this.breath = Math.random() * Math.PI * 2;
     this.pelvis.position.set(0, PELVIS_Y, 0);
     this.pelvis.rotation.set(0, 0, 0);
@@ -668,8 +694,59 @@ export class SoldierRig {
     this.animate(0, { moved: 0, speed: 0, aim: 0, blind: 0, flinch: 0, dead: false });
   }
 
+  // Freeze the current helmet pose into a small world-space prop. The head
+  // meshes can then be hidden while this independent copy follows ballistics.
+  // Skinned SWAT vertices are baked here; the fallback meshes use their normal
+  // local-to-world matrix. Geometry/materials belong to the prop and are freed
+  // when its short animation ends. Textures remain shared with the soldier.
+  detachHelmet() {
+    const sources = (this.helmetMeshes || []).filter(mesh => mesh.visible);
+    if (!sources.length) return null;
+    this.root.updateWorldMatrix(true, true);
+    const group = new THREE.Group();
+    const bounds = new THREE.Box3();
+    const vertex = new THREE.Vector3();
+    for (const source of sources) {
+      if (source.isSkinnedMesh) source.skeleton.update();
+      const geometry = source.geometry.clone();
+      const positions = geometry.attributes.position;
+      for (let i = 0; i < positions.count; i++) {
+        vertex.fromBufferAttribute(source.geometry.attributes.position, i);
+        if (source.isSkinnedMesh) source.applyBoneTransform(i, vertex);
+        vertex.applyMatrix4(source.matrixWorld);
+        positions.setXYZ(i, vertex.x, vertex.y, vertex.z);
+      }
+      positions.needsUpdate = true;
+      geometry.deleteAttribute("skinIndex");
+      geometry.deleteAttribute("skinWeight");
+      geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
+      bounds.union(geometry.boundingBox);
+      const material = source.material.clone();
+      material.side = THREE.DoubleSide;
+      const piece = new THREE.Mesh(geometry, material);
+      piece.name = "fallen-helmet";
+      group.add(piece);
+    }
+    const center = bounds.getCenter(new THREE.Vector3());
+    for (const piece of group.children) piece.geometry.translate(-center.x, -center.y, -center.z);
+    group.position.copy(center);
+    for (const source of sources) source.visible = false;
+    return { group, radius: bounds.getSize(new THREE.Vector3()).y * 0.5 };
+  }
+
   // 开火后坐：由 enemies.js 每发调用一次
-  recoil() { this.kick = 1; }
+  recoil(power = 1) {
+    this.kick = Math.max(this.kick, power);
+    this.flashLife = 0.075;
+    if (this.muzzleFlash) {
+      this.muzzleFlash.material.rotation = Math.random() * Math.PI * 2;
+      this.muzzleFlash.scale.setScalar(0.30 * (0.85 + 0.25 * power));
+    }
+    // The shot and the pose change land in the same rendered frame. dt=0
+    // keeps locomotion/aim clocks still while the imported SWAT skin retargets.
+    if (this._lastPose) this.animate(0, { ...this._lastPose, moved: 0 });
+  }
 
   // 受击闪红（几何体共享、材质每人一份，所以只管这套材质）
   setFlash(k) {
@@ -683,22 +760,37 @@ export class SoldierRig {
   // 解析式而不是 localToWorld：后者依赖 matrixWorld，要等下一次 render 才更新，
   // 新生敌人会算到世界原点（历史上 attachMuzzleTo 踩过同一个坑）。
   muzzleBody(out) {
-    out.set(0, 0.02, RIFLE_HALF + 0.03).applyMatrix4(this.mount.matrix);
-    out.y += this.pelvis.position.y + SPINE_Y + CHEST_Y;
+    // Read the local matrices written by animate(), including the torso lean
+    // and firing impulse. No scene/world matrix refresh is needed here.
+    this.chest.updateMatrix();this.spine.updateMatrix();this.pelvis.updateMatrix();
+    out.set(0, 0.02, RIFLE_HALF + 0.03)
+      .applyMatrix4(this.mount.matrix).applyMatrix4(this.chest.matrix)
+      .applyMatrix4(this.spine.matrix).applyMatrix4(this.pelvis.matrix);
     return out;
   }
 
   // ---------- 每帧程序化动画 ----------
   // s: { moved, speed, aim, aimPitch, blind, flinch, dead }
   animate(dt, s) {
+    this._lastPose = s;
     const moved = Math.max(0, Number.isFinite(s.moved) ? s.moved : 0);
     const speed = Math.max(0, Number.isFinite(s.speed) ? s.speed : 0);
     const aim = clamp01(s.aim || 0);
     const aimPitch = Number.isFinite(s.aimPitch) ? s.aimPitch : 0;   // >0 = 目标更低
     const blind = clamp01(s.blind || 0);
     const flinch = clamp01(s.flinch || 0);
+    const side = Math.max(-1, Math.min(1, Number.isFinite(s.moveSide) ? s.moveSide : 0));
+    const forward = Math.max(-1, Math.min(1, Number.isFinite(s.moveForward) ? s.moveForward : 1));
+    const follow = 1 - Math.exp(-dt * 13);
+    this.motionSide += (side - this.motionSide) * follow;
+    this.motionForward += (forward - this.motionForward) * follow;
     this.breath += dt * 1.6;
     this.kick *= Math.exp(-dt * 11);                  // 后坐衰减（帧率无关）
+    this.flashLife = Math.max(0, this.flashLife - dt);
+    if (this.muzzleFlash) {
+      this.muzzleFlash.visible = this.flashLife > 0;
+      this.muzzleFlash.material.opacity = this.flashLife / 0.075;
+    }
     this.aimBlend += (aim - this.aimBlend) * (1 - Math.exp(-dt * 5.5));
     this.deathBlend += ((s.dead ? 1 : 0) - this.deathBlend) * (1 - Math.exp(-dt * 7));
 
@@ -720,7 +812,9 @@ export class SoldierRig {
         out.z = -halfStride * Math.cos(Math.PI * u);
         out.lift = 0.15 * Math.sin(Math.PI * u);
       }
-      out.z *= walkW;                           // 站定时把脚收回髋下（避免僵在跨步姿势上）
+      const travel = out.z;
+      out.z = travel * (Math.abs(this.motionForward) < 0.2 ? 0.2 : this.motionForward) * walkW;
+      out.x = Math.max(-0.10, Math.min(0.10, travel * 0.34 * this.motionSide)) * walkW;
       out.lift *= walkW;
       return out;
     };
@@ -732,18 +826,18 @@ export class SoldierRig {
     //    **必须在算脚的目标点之前定下来**：目标点是「相对骨盆」的，
     //    用上一帧的骨盆高度会把脚带偏 1~2cm（实测脚掌会切进甲板）。
     const bound = (s) =>
-      ANKLE_Y - HIP_DY + s.lift + Math.sqrt(Math.max(0.02, (LEG_REACH * 0.99) ** 2 - s.z * s.z));
+      ANKLE_Y - HIP_DY + s.lift + Math.sqrt(Math.max(0.02, (LEG_REACH * 0.99) ** 2 - s.z * s.z - s.x * s.x));
     const wantY = Math.min(PELVIS_Y, Math.min(bound(sR), bound(sL))) - 0.012 * walkW;
     this.pelvisY += (wantY - this.pelvisY) * (1 - Math.exp(-dt * 15));
     const idleW = 1 - walkW;
     this.pelvis.position.y = this.pelvisY + idleW * Math.sin(this.breath) * 0.008;
     this.pelvis.position.x = Math.sin(this.phase) * 0.022 * walkW;
     this.pelvis.rotation.z = Math.sin(this.phase) * 0.05 * walkW;
-    this._fR.v.set(-HIP_X, -this.pelvisY + ANKLE_Y + sR.lift, sR.z);
-    this._fL.v.set(HIP_X, -this.pelvisY + ANKLE_Y + sL.lift, sL.z);
+    this._fR.v.set(-HIP_X + sR.x, -this.pelvisY + ANKLE_Y + sR.lift, sR.z);
+    this._fL.v.set(HIP_X + sL.x, -this.pelvisY + ANKLE_Y + sL.lift, sL.z);
     const fR = this._fR, fL = this._fL;
 
-    // ④ 腿：纯 2D 解算（腿只在矢状面里摆，解析式比四元数 IK 更稳更省）
+    // ④ 腿：前后方向解析 IK，侧移加小幅髋部外展，脚掌保持水平。
     const solveLeg = (leg, f) => {
       const dy = f.v.y - HIP_DY, dz = f.v.z;
       const d = Math.min(LEG_REACH * 0.995, Math.hypot(dy, dz));
@@ -753,9 +847,12 @@ export class SoldierRig {
       const kneeZ = Math.sin(thighA) * THIGH, kneeY = -Math.cos(thighA) * THIGH;
       const shinA = Math.atan2(f.v.z - kneeZ, -(f.v.y - kneeY));
       leg.hip.rotation.x = -thighA;
+      leg.hip.rotation.z = Math.atan2(f.v.x - leg.hip.position.x, -dy);
       leg.knee.rotation.x = thighA - shinA;
+      leg.knee.rotation.z = 0;
       // 脚掌踩平（抵消小腿的绝对倾角），摆动期再让脚尖下垂一点
       leg.ankle.rotation.x = shinA - f.lift * 1.6;
+      leg.ankle.rotation.z = -leg.hip.rotation.z;
     };
     solveLeg(this.legR, fR);
     solveLeg(this.legL, fL);
@@ -763,7 +860,9 @@ export class SoldierRig {
     // ⑤ 躯干：跑起来前倾、走起来左右微扭、受击后仰（都是小幅，不夺走「朝向=瞄准」这个前提）
     this.spine.rotation.x = 0.05 + 0.09 * walkW + 0.05 * blind - flinch * 0.26;
     this.spine.rotation.y = Math.sin(this.phase) * 0.09 * walkW * (1 - this.aimBlend) - flinch * 0.14;
-    this.spine.rotation.z = blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06);
+    this.spine.rotation.z = blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06)
+      - this.motionSide * walkW * 0.065;
+    this.chest.rotation.x = -this.kick * 0.04 * (1 - this.deathBlend);
 
     // ⑥ 头：跑动时抬起来一点、致盲时低头乱晃、受击时向后甩
     this.neck.rotation.x = -0.04 * walkW + Math.sin(this.breath * 0.9) * 0.02
@@ -781,7 +880,7 @@ export class SoldierRig {
     this.head.rotation.y = (s.scan || 0) * Math.sin(s.scanPhase || 0) * MAX_SCAN * (1 - this.deathBlend);
 
     // ⑦ 枪：低姿 ↔ 据枪 插值，开火时往肩里推 + 抬枪口
-    const k = this.aimBlend;
+    const k = this.aimBlend * (1 - 0.20 * walkW);
     const kick = this.kick;
     const db = this.deathBlend;
     this.mountPos.set(
@@ -791,11 +890,7 @@ export class SoldierRig {
     );
     this.mountPitch = MOUNT_CARRY.pitch + (MOUNT_AIM.pitch - MOUNT_CARRY.pitch) * k
       - kick * 0.10 - aimPitch * (0.35 + 0.65 * k) + blind * 0.30;   // 注意是**减**：↑符号约定见文件头，负 pitch = 抬枪口
-    // 倒地：枪从肩上滑下来，位置收回体侧、并把整根枪**绕 Y 横过来**。
-    // 这不是审美而是一条几何硬约束：倒地时 enemies.js 的 tilt 会绕腰把整具身体转 90° 放平，
-    // 「身体前方」随之变成「身体下方」，而枪口在胸前方 0.85m 处 —— 不横过来，整根枪管
-    // 会从甲板底下捅出去（实测尸体最低点 -0.586m，等于甲板上插着一杆埋进去的枪）。
-    // 横过来之后枪沿 ±x 躺着，x 轴在放平变换里不变，高度恒定在甲板之上。
+    // 致命伤时持枪节点已隐藏；仍更新挂点姿势，让双臂的 IK 顺畅过渡到松手状态。
     if (db > 0.001) {
       this.mountPos.lerp(_mountDeadP, db);
       this.mountPitch += (_MOUNT_DEAD_PITCH - this.mountPitch) * db;

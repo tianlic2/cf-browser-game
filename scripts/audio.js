@@ -39,9 +39,9 @@
 //    换弹声不能接着响）。
 //
 // 已知局限（如实记录，不要当成做完了）：
-//   · 只搬了一段 AK 换弹录音、切成三段，**M4 / 手枪 / AWM 共用** ⇒ 音色与枪不符。
+//   · 手枪 / AWM 的换弹仍共用 AK 换弹录音切出的三段，音色与枪不符；M4 已有独立三段。
 //   · 三段之间是独立的 foley，不再是连续点击声 —— 这是一次真实的听感行为变化。
-//   · **手枪与 M4 没有独立录音**，用 AK 变调（rate 1.22 / 1.08）派生，差异可辨但不如独立录音。
+//   · 手枪没有独立录音，仍用 AK 变调（rate 1.22）派生。
 //   · 脚步录音是**混凝土/石材**，而地图是钢甲板 —— 用叠加合成金属环来补偿，不是真钢面脚步。
 // =============================================================================
 
@@ -52,6 +52,10 @@ const SAMPLES = {
   cf_ak_out: ["classic/ak47_out.wav"],
   cf_ak_in: ["classic/ak47_in.wav"],
   cf_ak_bolt: ["classic/ak47_bolt.wav"],
+  cf_m4c_fire: ["classic/m4c_fire.wav"],
+  cf_m4c_out: ["classic/m4c_out.wav"],
+  cf_m4c_in: ["classic/m4c_in.wav"],
+  cf_m4c_bolt: ["classic/m4c_bolt.wav"],
   cf_grenade_pin: ["classic/grenade_pin.wav"],
   cf_grenade_explode: ["classic/grenade_explode.wav"],
   cf_grenade_flash: ["classic/grenade_flash.wav"],
@@ -67,6 +71,9 @@ const SAMPLES = {
   ak47_fire:    ["weapons/ak47_fire"],
   ak47_distant: ["weapons/ak47_distant_a", "weapons/ak47_distant_b"],
   awp_fire:     ["weapons/awp_fire"],
+  // CF M82A1 原枪声与拉栓声：见 audio/CREDITS.txt 第九节。
+  barrett_fire: ["classic/barrett_fire.wav"],
+  barrett_bolt: ["classic/barrett_bolt.wav"],
   awp_bolt:     ["weapons/awp_bolt_1", "weapons/awp_bolt_2"],
   reload_1:     ["weapons/ak47_reload_1"],   // 弹匣出 / 弹匣入 / 拉栓上膛 —— 三段各自一个固定槽位，
   reload_2:     ["weapons/ak47_reload_2"],   // **绝不合成一个多元素槽位**（变体轮换会把三段顺序打乱）
@@ -147,11 +154,12 @@ const M4A_ONLY = new Set([
 ]);
 
 // 自动武器只播「初始爆裂声」，丢掉 1.7 s 的尾巴（不丢的话 0.09 s 的射击间隔会堆成一团糊音）。
-// window = 0 表示整段播完（狙击的射击间隔 1.45 s，够长）。
+// window = 0 表示整段播完（巴雷特原声含较长的回响尾部）。
 const GUN = {
   ak:     { sample: "cf_ak_fire", rate: 1.00, window: 0.8, vol: 0.85, crack: 0 },
-  m4:     { sample: "ak47_fire", rate: 1.08, window: 0.26, vol: 0.92, crack: 0.55 },
+  m4:     { sample: "cf_m4c_fire", rate: 1.00, window: 0, vol: 0.92, crack: 0 },
   awm:    { sample: "awp_fire",  rate: 1.00, window: 0,    vol: 1.00, crack: 0 },
+  barrett:{ sample: "barrett_fire", rate: 1.00, window: 0, vol: 1.00, crack: 0 },
   pistol: { sample: "ak47_fire", rate: 1.22, window: 0.22, vol: 0.78, crack: 0.25 },
 };
 const GUN_BY_TYPE = { rifle: "ak", sniper: "awm", pistol: "pistol" };
@@ -580,7 +588,7 @@ export class SFX {
   // 采集入口（采样优先）
   // ==========================================================================
 
-  // 枪声。`id` 是**武器 id**（ak/m4/awm/pistol）—— 只有它能区分 AK 与 M4，两者的
+  // 枪声。`id` 是**武器 id**（ak/m4/awm/barrett/pistol）—— 只有它能区分 AK 与 M4，两者的
   // `def.type` 都是 "rifle"。省略时按 type 兜底。
   shoot(kind, id) {
     if (!this.ready()) return;
@@ -590,9 +598,11 @@ export class SFX {
       id: id || kind || "rifle",   // 记录的是**武器 id**，读口靠它区分 AK / M4
       sample: g.sample,
       kind: kind || "rifle",
-      rate: g.rate, window: g.window, vol: g.vol, rateJitter: key==='ak'?0:0.012, wet: key==='ak'?0:1,
+      rate: g.rate, window: g.window, vol: g.vol,
+      rateJitter: (key==='ak' || key==='barrett')?0:0.012,
+      wet: (key==='ak' || key==='barrett')?0:1,
     }, () => this._shootSynth(kind));
-    // M4 / 手枪没有独立录音（用 AK 变调派生）—— 叠一层更高的合成机匣爆音把音色拉开
+    // 手枪仍由 AK 变调派生；M4A1-C 自带完整开火瞬态，无需合成爆音。
     if (g.crack > 0) this._crackLayer(g.crack);
     // 空弹壳：0.42s 后落地。**quiet** —— 这是子层，不该覆盖 lastAttempt
     this._playMapped("brass", {
@@ -600,13 +610,17 @@ export class SFX {
     }, () => this.shellPing(this.ctx.currentTime + 0.055));
   }
 
-  // 拉栓（AWM）。延迟 0.20s 让 1.31s 枪声的起音先出来。
-  // 两个 take 是**独立的两段录音**，随机选一个，不是一段动作的两半 —— 所以是一个多元素槽位。
-  bolt() {
+  // 拉栓：按武器选自己的采样。巴雷特的原声前 0.8s 很响，因此让拉栓
+  // 在 0.55s 后进入；AWM 保持原来的 0.20s。两段声都不变速。
+  // AWM 的两个 take 是独立录音、随机选一个；巴雷特只有原枪专用的一段。
+  bolt(id = "awm") {
     if (!this.ready()) return;
+    const sample = id === "barrett" ? "barrett_bolt" : "awp_bolt";
+    const delay = id === "barrett" ? 0.55 : 0.2;
     this._playMapped("bolt", {
-      id: "awp_bolt", delay: 0.2, vol: 1.0, wet: 0.4, rateJitter: 0.03, schedule: "bolt",
-    }, () => this._boltSynth(0.2));
+      id: sample, delay, vol: 1.0, wet: id === "barrett" ? 0 : 0.4,
+      rateJitter: id === "barrett" ? 0 : 0.03, schedule: "bolt",
+    }, () => this._boltSynth(delay));
   }
 
   // 换弹。三段**按 reloadDur 的比例**排程（p = 0.16 / 0.58 / 0.80），
@@ -618,7 +632,9 @@ export class SFX {
     const wid = (o && o.id) || "reload";
     // AK's authored reload events are frames 39 / 102 / 202 of 299.
     const ps = wid==='ak' ? [39/299,102/299,202/299] : [0.16, 0.58, 0.80];
-    const ids = wid==='ak' ? ["cf_ak_out", "cf_ak_in", "cf_ak_bolt"] : ["reload_1", "reload_2", "reload_3"];
+    const ids = wid==='ak' ? ["cf_ak_out", "cf_ak_in", "cf_ak_bolt"]
+      : wid==='m4' ? ["cf_m4c_out", "cf_m4c_in", "cf_m4c_bolt"]
+      : ["reload_1", "reload_2", "reload_3"];
     const fs = [900, 650, 700];
     const times = ps.map((p) => this.ctx.currentTime + p * dur);
     const hits = [];
@@ -661,19 +677,23 @@ export class SFX {
       () => this._hurtSynth());
   }
 
-  // 敌人射击。远（> 25m）用专门录的「隔着战场的一枪」，近用枪声本体。
-  // **一律 wet 0**：录音本身已经过了空间渲染，再叠我们的 convolver 就是双重空间化。
-  // 仍走 panner —— 方向感是 FPS 的关键信息。
-  enemyShoot(x, y, z) {
+  // 敌人使用与玩家相同的枪型采样/变调/截窗；距离只改变空间听感，
+  // 不再把 M4/AWM（或远处的 AK）替换成统一的 AK 远景录音。
+  // gunId 缺省为 AK，兼容原有的三坐标调用。
+  enemyShoot(x, y, z, gunId = "ak") {
     if (!this.ready()) return;
+    const key = GUN[gunId] ? gunId : "ak";
+    const g = GUN[key];
     const dist = this._dist3(x, y, z);
     const far = dist > 25;
     this._playMapped("enemyShoot", {
-      id: far ? "ak47_distant" : "ak47_fire",
+      id: key, sample: g.sample,
       kind: far ? "far" : "near",
-      x, y, z, wet: 0, vol: far ? 0.72 : 0.85, rateJitter: 0.05,
+      x, y, z, wet: 0, vol: g.vol * (far ? 0.72 : 1),
+      rate: g.rate, window: g.window, rateJitter: key === "ak" ? 0 : 0.012,
       lowpass: this._absorb(dist),
-    }, () => this._enemyShootSynth(x, y, z));
+    }, () => this._enemyShootSynth(x, y, z, key));
+    if (g.crack > 0) this._crackLayer(g.crack, x, y, z, this._absorb(dist));
   }
 
   // 爆头（奖励音调，但也换成了采样：那一声「叮」本来就是录音更好听）
@@ -1005,19 +1025,25 @@ export class SFX {
     }
   }
 
-  // AWM 开镜 / 退镜：镜筒贴脸的短促「咔」。
-  // 两段**不同**的录音（725403 里两次真静音包围的极轻握持摩擦），方向感另用 rate 补
-  // （进 1.10 往上、退 0.90 往下）—— 这两下本来就该「几乎听不见」，音色故意接近。
-  scopeIn() {
+  // 两把狙击枪共用真实的镜筒操作录音；巴雷特调低音高，二级倍率再短促地响一次。
+  // 素材的 RMS 约 0.098，原 0.55 增益在枪声旁容易被盖住；这里让机械声清楚但不削波。
+  scopeIn(weaponId = "awm", stage = 1) {
     if (!this.ready()) return;
+    const heavy = weaponId === "barrett";
     this._playMapped("scopeIn", {
-      id: "sw_scope_in", vol: 0.55, rate: 1.10, rateJitter: 0.03, wet: 0.05,
-    }, () => this._scopeInSynth());
+      id: "sw_scope_in", kind: weaponId + ":" + stage,
+      vol: heavy ? (stage === 2 ? 0.95 : 1.12) : (stage === 2 ? 0.88 : 1.05),
+      rate: heavy ? (stage === 2 ? 1.02 : 0.90) : (stage === 2 ? 1.20 : 1.07),
+      volJitter: 0.06, rateJitter: 0.01, wet: 0.02,
+    }, () => this._scopeInSynth(weaponId, stage));
   }
-  scopeOut() {
+  scopeOut(weaponId = "awm") {
     if (!this.ready()) return;
+    const heavy = weaponId === "barrett";
     this._playMapped("scopeOut", {
-      id: "sw_scope_out", vol: 0.55, rate: 0.90, rateJitter: 0.03, wet: 0.05,
+      id: "sw_scope_out", kind: weaponId,
+      vol: heavy ? 0.85 : 0.78, rate: heavy ? 0.82 : 0.93,
+      volJitter: 0.06, rateJitter: 0.01, wet: 0.02,
     }, () => this._scopeOutSynth());
   }
 
@@ -1086,8 +1112,8 @@ export class SFX {
     // 弹壳不在这里 —— 它是独立的一层（采样优先，见 shoot()），保证两条路径只发一次
   }
 
-  // M4 / 手枪的高频机匣爆音（采样是 AK 变调，靠这一层把音色拉开）
-  _crackLayer(level) {
+  // 手枪的高频机匣爆音（仍由 AK 变调派生，靠这一层把音色拉开）
+  _crackLayer(level, x, y, z, lowpass) {
     const ctx = this.ctx, t = ctx.currentTime;
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer(0.045);
@@ -1098,8 +1124,13 @@ export class SFX {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.28 * level, t + 0.003);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    src.connect(hp).connect(g);
-    this.send(g, 0.4);
+    src.connect(hp);
+    if (lowpass) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = lowpass;
+      hp.connect(lp).connect(g);
+    } else hp.connect(g);
+    this.out3d(g, x, y, z, x === undefined ? 0.4 : 0);
     src.start(t);
     src.stop(t + 0.06);
   }
@@ -1303,7 +1334,9 @@ export class SFX {
   }
 
   // 开镜 / 退镜回退：镜筒贴脸的短促「咔」+ 一层很轻的金属共鸣
-  _scopeInSynth() { this._scopeClick(760, 0.05, 0.14); }
+  _scopeInSynth(weaponId = "awm", stage = 1) {
+    this._scopeClick((weaponId === "barrett" ? 600 : 760) + (stage === 2 ? 110 : 0), 0.05, 0.19);
+  }
   _scopeOutSynth() { this._scopeClick(520, 0.045, 0.11); }
   _scopeClick(freq, dur, vol) {
     const ctx = this.ctx, t = ctx.currentTime;
@@ -1384,23 +1417,30 @@ export class SFX {
     osc.stop(t + 0.24);
   }
 
-  // 敌人射击（远处闷响；给了坐标就做左右/远近定位）
-  _enemyShootSynth(x, y, z) {
+  // 采样暂不可用时也保留三种枪的不同瞬态与尾长，不退回统一的闷响。
+  _enemyShootSynth(x, y, z, gunId = "ak") {
     const ctx = this.ctx, t = ctx.currentTime;
-    const noise = this.noiseBuffer(0.14);
+    const profile = {
+      ak: { dur: 0.16, hi: 2400, lo: 300, amp: 0.42 },
+      m4: { dur: 0.12, hi: 3100, lo: 500, amp: 0.34 },
+      awm: { dur: 0.38, hi: 1700, lo: 180, amp: 0.58 },
+      barrett: { dur: 0.42, hi: 1500, lo: 150, amp: 0.65 },
+      pistol: { dur: 0.10, hi: 3500, lo: 650, amp: 0.28 },
+    }[gunId] || { dur: 0.16, hi: 2400, lo: 300, amp: 0.42 };
+    const noise = this.noiseBuffer(profile.dur);
     const src = ctx.createBufferSource();
     src.buffer = noise;
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(2200, t);
-    filter.frequency.exponentialRampToValueAtTime(320, t + 0.12);
+    filter.frequency.setValueAtTime(profile.hi, t);
+    filter.frequency.exponentialRampToValueAtTime(profile.lo, t + profile.dur - 0.02);
     const g = ctx.createGain();
-    g.gain.setValueAtTime(0.42, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    g.gain.setValueAtTime(profile.amp, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + profile.dur);
     src.connect(filter).connect(g);
     this.out3d(g, x, y, z, 0);
     src.start(t);
-    src.stop(t + 0.15);
+    src.stop(t + profile.dur);
   }
 
   // 爆头：比普通命中更亮更脆的金属「叮」，CF 里最爽的一声（headshot 采样缺失时的回退）

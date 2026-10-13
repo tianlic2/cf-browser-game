@@ -1140,7 +1140,8 @@ body {
   text-shadow: 0 1px 2px #000; cursor: pointer;
   box-shadow: inset 0 1px #76847b44;
 }
-#backpack .bp-item:hover { border-color: #91aaa9; }
+#backpack .bp-item:not(:disabled):hover { border-color: #91aaa9; }
+#backpack .bp-item:disabled { opacity: .38; cursor: not-allowed; }
 #backpack .bp-item.active {
   color: #e6f5ff; border-color: #719ab1;
   background: linear-gradient(#427b96, #244d64);
@@ -1157,6 +1158,7 @@ body {
 }
 #backpack .bp-slot-primary { grid-column: span 7; height: 176px; }
 #backpack .bp-slot-secondary { grid-column: span 5; height: 176px; }
+#backpack .bp-loadout.sniper-match .bp-slot-melee { grid-column: span 5; height: 176px; }
 #backpack .bp-slot-label { padding: 4px 8px 0; color: #9ea99e; font-size: 12px; }
 #backpack .bp-weapon-name {
   position: relative; z-index: 1; padding: 2px 8px 0;
@@ -2035,6 +2037,9 @@ body {
 }
 #menu .room-map-option[data-map="palace"] {
   background: linear-gradient(112deg, #594729, #292321 72%);
+}
+#menu .room-map-option[data-map="prison"] {
+  background: linear-gradient(112deg, #4c5659, #20272b 72%);
 }
 #menu .room-map-option.active {
   border-color: #e1bd6c; color: #f6eac3;

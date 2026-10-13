@@ -20,6 +20,7 @@ export const ICON_KIND = {
   awm: "sniper",
   barrett: "sniper",
   pistol: "pistol",
+  deagle: "pistol",
   knife: "melee",
   frag: "grenade",
   flash: "grenade",

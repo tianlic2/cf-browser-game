@@ -56,6 +56,10 @@ const SAMPLES = {
   cf_m4c_out: ["classic/m4c_out.wav"],
   cf_m4c_in: ["classic/m4c_in.wav"],
   cf_m4c_bolt: ["classic/m4c_bolt.wav"],
+  cf_deagle_fire: ["classic/deagle_fire.wav"],
+  cf_deagle_out: ["classic/deagle_clipout.wav"],
+  cf_deagle_in: ["classic/deagle_clipin.wav"],
+  cf_deagle_deploy: ["classic/deagle_deploy.wav"],
   cf_grenade_pin: ["classic/grenade_pin.wav"],
   cf_grenade_explode: ["classic/grenade_explode.wav"],
   cf_grenade_flash: ["classic/grenade_flash.wav"],
@@ -162,6 +166,7 @@ const GUN = {
   awm:    { sample: "awp_fire",  rate: 1.00, window: 0,    vol: 1.00, crack: 0 },
   barrett:{ sample: "barrett_fire", rate: 1.00, window: 0, vol: 1.00, crack: 0 },
   pistol: { sample: "ak47_fire", rate: 1.22, window: 0.22, vol: 0.78, crack: 0.25 },
+  deagle: { sample: "cf_deagle_fire", rate: 1.00, window: 0, vol: 0.95, crack: 0 },
 };
 const GUN_BY_TYPE = { rifle: "ak", sniper: "awm", pistol: "pistol" };
 
@@ -635,6 +640,7 @@ export class SFX {
     const ps = wid==='ak' ? [39/299,102/299,202/299] : [0.16, 0.58, 0.80];
     const ids = wid==='ak' ? ["cf_ak_out", "cf_ak_in", "cf_ak_bolt"]
       : wid==='m4' ? ["cf_m4c_out", "cf_m4c_in", "cf_m4c_bolt"]
+      : wid==='deagle' ? ["cf_deagle_out", "cf_deagle_in", "cf_deagle_deploy"]
       : ["reload_1", "reload_2", "reload_3"];
     const fs = [900, 650, 700];
     const times = ps.map((p) => this.ctx.currentTime + p * dur);

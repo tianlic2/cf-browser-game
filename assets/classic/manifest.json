@@ -27,6 +27,14 @@
     "cf_m4a1_custom_pack_update.rar": {
       "bytes": 1778831,
       "sha256": "c303380a05abbacaaad8d8533614f1cbcd66280a54343a79fd30d2d78d17076d"
+    },
+    "cf_prison_fixed.rar": {
+      "bytes": 2725996,
+      "sha256": "61f2858d2c687eea06cbf2e187a644282e6d88ef8f1a62a2f0e3bae1ab059072"
+    },
+    "cf_deagle_pack.rar": {
+      "bytes": 2105410,
+      "sha256": "3d6f0f091f85cc6823cb64148f83ab3404e1b6ac7a0a61fffd75f0198d1badb6"
     }
   },
   "files": {
@@ -437,6 +445,122 @@
     "m4c/m4a1_custom.glb": {
       "bytes": 1390344,
       "sha256": "0f9d15dcec15c4c7ae3c376bd2c766fe0a2f179eeb3c8db121067c9e954c0427"
+    },
+    "prison/map.bin": {
+      "bytes": 409920,
+      "sha256": "b615d3386313db7c100eaf7bd6ca804265fe32357e31b47b643036d329bf8403"
+    },
+    "prison/fallback_glass_glasswindow026a.png": {
+      "bytes": 46415,
+      "sha256": "67a3e955dbb09bd37529cd10df0a0887f637886bce7107798be02f35386ad3f3"
+    },
+    "prison/cf_031.png": {
+      "bytes": 165056,
+      "sha256": "f9d7ec22473eb095e315b2d2e758e91220d5fc446fa5e4ed1a3bb3f155e999ff"
+    },
+    "prison/cf_025.png": {
+      "bytes": 132993,
+      "sha256": "dd8a0153814a67f3b0f4d55b1c9b0e836d0f50083475839b2e29686511c0ab31"
+    },
+    "prison/cf_024.png": {
+      "bytes": 139529,
+      "sha256": "5559d7313e46c99165a6f8a5cab4fcaafb1b7790b6a9f0ba4435cc4daac59459"
+    },
+    "prison/cf_030.png": {
+      "bytes": 179409,
+      "sha256": "1b5357aa031e11e155a8e815ee66412d47526df1420cd6abf7ae05ad57c157a9"
+    },
+    "prison/cf_018.png": {
+      "bytes": 54223,
+      "sha256": "81d85fd300060c30188762a3a00364acecee5d8bc862a1409140934a772f4fd6"
+    },
+    "prison/fallback_metal_metalrail003a.png": {
+      "bytes": 49331,
+      "sha256": "c8f162832bfa803f97595f2e5f5d9a73134991c05d44a8d48724173763f6bf46"
+    },
+    "prison/cf_032.png": {
+      "bytes": 231590,
+      "sha256": "0f6f7d8d8c2e9add641dc720ced07cc7f715f3a5a5eeeaaea3dbe50d15a3dd52"
+    },
+    "prison/cf_033.png": {
+      "bytes": 121940,
+      "sha256": "dcc458f88bc3cd5a1e631d10143060846a0f5278d6267586b1b9041204f6d4d2"
+    },
+    "prison/fallback_concrete_concretefloor008a.png": {
+      "bytes": 65730,
+      "sha256": "3d3ee2b872ee93597c058242740f62f0d8648a7de8fa4eac86c1ae434bcc7121"
+    },
+    "prison/cf_022.png": {
+      "bytes": 68197,
+      "sha256": "d941ac72c5b96a4d9431695a0bfc7ee9ac532bfd9687e42ce99bd54517bfbeda"
+    },
+    "prison/cf_034.png": {
+      "bytes": 49335,
+      "sha256": "ce4fa8db572ae69dc54356dc3239d5d4bd84f2af692da441769b6ba9f78c8dbd"
+    },
+    "prison/cf_021.png": {
+      "bytes": 99616,
+      "sha256": "e7ea3480653d8cf3154c987a618f16919f72f8363914a78507bba8f23ba18fd3"
+    },
+    "prison/lightmap.png": {
+      "bytes": 95425,
+      "sha256": "217bf70fea7ff84d3618b1229c860426d3ce6a8d982f938280052048f6118164"
+    },
+    "prison/fallback_metal_metaltruss017a.png": {
+      "bytes": 49003,
+      "sha256": "b9805e42234b810c2536977741ab94102d5dd40947afeb643167bc042512f3fa"
+    },
+    "prison/fallback_maps_shouwangzhicheng_d_glass_offwndwb_-2529_162_-29.png": {
+      "bytes": 46442,
+      "sha256": "03456d40408fa1215f9452a1a93df018e2064d03de25684ac404ca64b9c68087"
+    },
+    "prison/cf_006.png": {
+      "bytes": 83854,
+      "sha256": "87fbc0081b721e4dcbb87c721ed4ebded2ba6ced6a5da63003a1f5adb6351c88"
+    },
+    "prison/cf_016.png": {
+      "bytes": 82725,
+      "sha256": "28233d6626e6e9a169bb8dd410746b0a189b96654659df59d1870cf0d5b615fc"
+    },
+    "prison/cf_015.png": {
+      "bytes": 69189,
+      "sha256": "77d12b3802234528f1c6f1725a25576fb3732ab8e7d1e02ceb26937dc1e4eed3"
+    },
+    "prison/fallback_cable_cable.png": {
+      "bytes": 48873,
+      "sha256": "51276737f6b94f1552e35e847fba0992cd3fdabd43e96112557f6d0e4ef503b6"
+    },
+    "prison/fallback_metal_metalpipe003a_cheap.png": {
+      "bytes": 49317,
+      "sha256": "be00ad0179b8ece19335706e5439cfdc1466c4c8aa7e3819d51da58b417a8f2d"
+    },
+    "prison/fallback_cs_italy_marketwall06c.png": {
+      "bytes": 65828,
+      "sha256": "9c06d7b13c175abd267938a71ac580fb51e39b4d3daed8b1288633110a91edb7"
+    },
+    "prison/map.json": {
+      "bytes": 121661,
+      "sha256": "b40e0743c90ac4c9ddb295d0336f7e9163cf4459191e068300baa516cacbcbda"
+    },
+    "deagle/desert_eagle.glb": {
+      "bytes": 995560,
+      "sha256": "72687fa064b31737109c68d3fb9079c3be8ac7fe7fd284b53240f1ffa9cb4efe"
+    },
+    "../../audio/classic/deagle_deploy.wav": {
+      "bytes": 37578,
+      "sha256": "fa6d6b06f1795a37fe776c689915d5712d15b0315694b87f55d07c1e0c2add3b"
+    },
+    "../../audio/classic/deagle_clipin.wav": {
+      "bytes": 23710,
+      "sha256": "c15b84b68154a7f1e9c186e8cae35121511f6c484c1f0764b7d243df2d2e4333"
+    },
+    "../../audio/classic/deagle_clipout.wav": {
+      "bytes": 12304,
+      "sha256": "786908b1193e56761f487439187f2159300654efbde56844d69cebc6d908ed38"
+    },
+    "../../audio/classic/deagle_fire.wav": {
+      "bytes": 46428,
+      "sha256": "fe451012cbc9f324f27071bdd7a9bf4c3e22d4b199912736b046f333622bc913"
     }
   },
   "audioFiles": {

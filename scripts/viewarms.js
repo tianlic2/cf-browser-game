@@ -755,6 +755,7 @@ export const ARM_ANCHORS = {
   // 手枪只由右手握持。左腕在镜头下方待命，换弹时沿既有时间线抬起；
   // 两腕若都挤在这支短 USP 的握把下，会让两条前臂交叉成一团。
   pistol: { r: [-0.013, -0.047,  0.076], l: [-0.550, -0.500,  0.040], s: 0.700, m: [ 0.0, -0.109, 0.066] },
+  deagle: { r: [-0.013, -0.045,  0.083], l: [-0.550, -0.500,  0.040], s: 0.700, m: [ 0.0, -0.115, 0.060] },
   knife:  { r: [ 0.055, -0.005,  0.068], s: 0.743, l: [-.62,-.18,.04] },
   frag:   { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
   flash:  { r: [-0.030, -0.035,  0.080], s: 0.650, l: null },
@@ -1114,7 +1115,7 @@ export class ViewArms {
     if(this.classic) {
       if(weaponId.startsWith('m4'))this.anchorL.add(new THREE.Vector3(.025,.035,0));
       if(weaponId.startsWith('awm'))this.anchorL.x+=.015;
-      if(weaponId==='pistol'){this.anchorR.y+=.05;this.anchorL.y+=.05;}
+      if(weaponId==='pistol'||weaponId==='deagle'){this.anchorR.y+=.05;this.anchorL.y+=.05;}
     }
     // 手部缩放：缩的是 grp，而 grp 的原点就是腕点 —— 所以整只手（含前臂、弹匣）
     // 是「绕腕点缩小」，腕点本身不动、仍然咬在握把上。
@@ -1129,6 +1130,8 @@ export class ViewArms {
     this.armR.palm.rotation.fromArray(a.hr || [0, 0, 0]);
     this.armL.palm.rotation.fromArray(a.hl || [0, 0, 0]);
     this.armL.grp.visible = this.hasLeft;
+    this.armR.palm.visible = true;
+    this.armL.palm.visible = true;
     this.magL.visible = false;
     this._solveElbows();
     // 立刻摆到静止位：切枪那一帧手臂不这么放的话，会有一帧停在上一把枪的握位上
@@ -1266,6 +1269,51 @@ export class ViewArms {
       this._aim(this.armL, this.anchorL, this.elbL);
       this.magL.visible = false;
     }
+  }
+
+  // The imported knife sleeves end visibly halfway up the screen. Keep its
+  // animated gloves, and extend matching classic sleeves to off-screen elbows.
+  followAuthoredKnifeHands(rightWrist, leftWrist, invM) {
+    if (!rightWrist || !leftWrist) return;
+    this.armR.palm.visible = false;
+    this.armL.palm.visible = false;
+    this.magL.visible = false;
+    _tmpR.copy(rightWrist).applyMatrix4(invM);
+    _tmpL.copy(leftWrist).applyMatrix4(invM);
+    _tmpE.set(.82, -.96, -.27).applyMatrix4(invM);
+    this._aim(this.armR, _tmpR, _tmpE);
+    this.armR.armStretch.scale.y = Math.max(1,
+      _tmpR.distanceTo(_tmpE) / (this.armR.armLen * this.armR.grp.scale.x) + .1);
+    _tmpE.set(-.47, -.96, -.32).applyMatrix4(invM);
+    this._aim(this.armL, _tmpL, _tmpE);
+    this.armL.armStretch.scale.y = Math.max(1,
+      _tmpL.distanceTo(_tmpE) / (this.armL.armLen * this.armL.grp.scale.x) + .1);
+  }
+
+  // Keep the classic firing glove on the animated Deagle grip and recoil.
+  followAuthoredRightHand(cameraWrist, invM) {
+    if (!cameraWrist) return;
+    _tmpR.copy(cameraWrist);
+    _tmpR.x -= .06;
+    _tmpR.y += .04;
+    _tmpR.applyMatrix4(invM);
+    _tmpE.copy(this.elbR).add(_tmpR).sub(this.anchorR);
+    this._aim(this.armR, _tmpR, _tmpE);
+  }
+
+  // The reload clip owns its magazine movement. Follow its support wrist and
+  // hide the procedural magazine while retaining the same classic sleeve.
+  followAuthoredReloadHand(cameraWrist, invM) {
+    if (!this.hasLeft || !cameraWrist) return;
+    _tmpL.copy(cameraWrist);
+    _tmpL.x += .045;
+    _tmpL.y += .09;
+    _tmpL.applyMatrix4(invM);
+    _tmpE.set(.12, -.66, -.15).applyMatrix4(invM);
+    this._aim(this.armL, _tmpL, _tmpE);
+    this.armL.armStretch.scale.y = Math.max(1,
+      _tmpL.distanceTo(_tmpE) / (this.armL.armLen * this.armL.grp.scale.x) + .1);
+    this.magL.visible = false;
   }
 }
 

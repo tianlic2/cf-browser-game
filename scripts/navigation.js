@@ -7,7 +7,7 @@ export class GroundNavigation {
     this.colliders=colliders;
     this.groundBrushes=colliders.filter(c=>c.walkable!==false&&c.h<=(options.maxHeight??.5));
     this.floorY=Math.min(0,...this.groundBrushes.map(c=>c.h));
-    this.step=.55;this.hw=bounds.hw;this.hl=bounds.hl;
+    this.step=options.step??.55;this.climb=options.climb??.5;this.hw=bounds.hw;this.hl=bounds.hl;
     this.xs=Array.from({length:Math.ceil(bounds.hw*2/this.step)+1},(_,i)=>i*this.step-this.hw);
     // The authored spawn stairs have a central divider. Their 1.05m lanes
     // need a centre sample; a uniform .55m grid can miss the entire clearance.
@@ -30,7 +30,7 @@ export class GroundNavigation {
       let last=-Infinity;
       for(const y of heights) {
         if(y-last<.02)continue;last=y;
-        if(nearby.some(c=>intersectsBrush(c,px,pz,y,.46)))continue;
+        if(nearby.some(c=>intersectsBrush(c,px,pz,y,.46,this.climb)))continue;
         const id=this.points.length;this.cells[cell].push(id);
         this.points.push({x:px,y,z:pz});this.nodeCells.push(cell);
       }
@@ -44,9 +44,9 @@ export class GroundNavigation {
       for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++) {
         if(!dx&&!dz||x+dx<0||x+dx>=this.w||z+dz<0||z+dz>=this.h)continue;
         for(const j of this.cells[cell+dz*this.w+dx]) {
-          if(Math.abs(this.points[j].y-p.y)>.5)continue;
-          if(dx&&dz&&(!this.cells[cell+dx].some(k=>Math.abs(this.points[k].y-p.y)<=.5)||
-             !this.cells[cell+dz*this.w].some(k=>Math.abs(this.points[k].y-p.y)<=.5)))continue;
+          if(Math.abs(this.points[j].y-p.y)>this.climb)continue;
+          if(dx&&dz&&(!this.cells[cell+dx].some(k=>Math.abs(this.points[k].y-p.y)<=this.climb)||
+             !this.cells[cell+dz*this.w].some(k=>Math.abs(this.points[k].y-p.y)<=this.climb)))continue;
           if(this.clear(p,this.points[j]))this.edges[i].push(j);
         }
       }
@@ -63,7 +63,7 @@ export class GroundNavigation {
     let y=this.floorY;
     for(const c of this.local[this.cell(x,z)]||[]) {
       const top=brushSupport(c,x,z);
-      if(top<=feet+.5)y=Math.max(y,top);
+      if(top<=feet+this.climb)y=Math.max(y,top);
     }
     return y;
   }
@@ -76,7 +76,7 @@ export class GroundNavigation {
   }
   point(i) { return this.points[i]; }
   nearest(x,z,feet=0) {
-    const i=this.index(x,z,feet);if(i>=0&&Math.abs(this.points[i].y-feet)<.55)return i;
+    const i=this.index(x,z,feet);if(i>=0&&Math.abs(this.points[i].y-feet)<this.climb+.05)return i;
     let best=-1,dist=Infinity;
     for(let dz=-10;dz<=10;dz++)for(let dx=-10;dx<=10;dx++) {
       const j=this.index(x+dx*this.step,z+dz*this.step,feet);if(j<0)continue;
@@ -102,10 +102,10 @@ export class GroundNavigation {
       const f=i/steps,x=a.x+(b.x-a.x)*f,z=a.z+(b.z-a.z)*f;
       const next=this.heightAt(x,z,y),nearby=this.local[this.cell(x,z)];
       if(!nearby||!nearby.some(c=>c.walkable!==false&&Math.abs(brushSupport(c,x,z)-next)<.01)||
-         Math.abs(next-y)>.5||nearby.some(c=>intersectsBrush(c,x,z,next,.46)))return false;
+         Math.abs(next-y)>this.climb||nearby.some(c=>intersectsBrush(c,x,z,next,.46,this.climb)))return false;
       y=next;
     }
-    return Math.abs(y-(b.y??0))<.55;
+    return Math.abs(y-(b.y??0))<this.climb+.05;
   }
   steer(position,target) {
     if(Math.hypot(target.x-position.x,target.z-position.z)<8&&this.clear(position,target))return null;

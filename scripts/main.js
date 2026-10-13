@@ -2,19 +2,22 @@
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
 import { SFX } from "./audio.js";
-import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js";
+import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=watch-city-1";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
 import { buildMap } from "./map.js";
 import { ClassicView } from "./classic_view.js";
+import { AUTHORED_VIEW_POSE, loadAuthoredViews } from "./authored_view.js?v=orient3";
 import { KNIFE, knifePose } from "./melee.js";
 import { GRENADE, advanceGrenade, sweepGrenade, grenadePose } from "./grenades.js";
 import { buildClassicMap } from "./classic_map.js";
 import { buildPalaceMap } from "./palace_map.js";
+import { buildPrisonMap } from "./prison_map.js?v=watch-city-tone-1";
+import { weaponMoveScale } from "./move_speed.js";
 import { ImpactVfx } from "./impact_vfx.js";
 import { loadClassicSoldier } from "./classic_soldier.js";
-import { GroundNavigation } from "./navigation.js";
+import { GroundNavigation } from "./navigation.js?v=watch-city-1";
 import { intersectsBrush, brushSupport, brushBottom } from "./brush_collision.js";
-import { ViewArms, ARM_ANCHORS, ELBOWS, MAGWELL } from "./viewarms.js";
+import { ViewArms, ARM_ANCHORS, ELBOWS, MAGWELL } from "./viewarms.js?v=orient5";
 import {
   SKINS, STOCK, DEFAULT_SKIN, DEFAULT_MUZZLE,
   skinsFor, findSkin, isSkinned, skinLabel, paintSkin, modelOf, allModelSkins,
@@ -256,6 +259,8 @@ let gameReady = false;
 let mapData = null;
 const mapCatalog = {};
 let selectedMapId = "transport";
+const sniperOnlyMatch = () => selectedMapId === "prison";
+const prisonWeaponAllowed = (id) => ["sniper", "melee"].includes(WEAPON_DEFS[id]?.type);
 let obstacleMeshes = [];
 // 拍平后的障碍 Mesh 列表。map 的 obstacles 是 Mesh 与 Group 混装（106 Mesh + 28 Group
 // 内含 392 Mesh），非递归 intersectObjects(obstacleMeshes,false) 会**静默漏掉** Group 里的
@@ -414,6 +419,16 @@ const WEAPON_DEFS = {
     // 取 0.25（> 0.17）之后连续射击不再漏恢复，连点的手枪抬枪轨迹才真的按表爬；单点之间
     // 0.25s 的静止仍然足够让它回落。**这条约束对 AK/M4 天然成立（0.1/0.0901 < 0.15），只对手枪要留意。**
     pattern: USP_PATTERN, recoilReset: 0.55, punchHold: 0.25, viewTrack: 1.0, punchDecay: { exp: 6, lin: 10 },
+    inacc: INACC_USP,
+  },
+  deagle: {
+    id: "deagle", slot: "secondary", type: "pistol", name: "沙漠之鹰",
+    model: "./assets/classic/deagle/desert_eagle.glb",
+    rotY: Math.PI, targetLen: 0.30, key: "2", fullAuto: false,
+    muzzleY: 0.055,
+    stats: { magSize: 7, reserve: 28, interval: 0.24, dmg: 54, reload: 2.35, rangeMod: 0.92 },
+    pattern: USP_PATTERN, recoilReset: 0.60, punchHold: 0.26,
+    viewTrack: 1.0, punchDecay: { exp: 6, lin: 10 },
     inacc: INACC_USP,
   },
   knife: {
@@ -961,6 +976,7 @@ let time = 0;
 let fireEnabled = false;
 let knifeHeavyHeld = false, knifeChain = 0, knifeLastSwingAt = -Infinity, meleeState = null, meleeHold = null;
 let classicView = null, classicFireT = Infinity;
+let authoredViews = null, deagleFireT = Infinity, deagleShotN = -1;
 let knifeBind = null;
 let strideAcc = 0;
 let curFov = BASE_FOV;
@@ -1364,23 +1380,20 @@ function updateDeathBar(p) {
 }
 
 // ---------- 背包与切枪 ----------
-// CF 式多背包：4 个背包各带一把主武器，副武器/近战/投掷物三件套共用。
+// CF 式多背包：4 个背包各带一把主武器；4 号配沙鹰，其余配 USP。
 // 数字键 1/2/3/4 切的是「当前背包内的槽位」，不是背包编号 —— 切背包走 B + 数字键，
 // 与 CF 一致（CF 里这也是两件不同的事）。
 // Classic loadout; modern model skins remain available to the existing skin API.
 const BACKPACKS = [
-  { primary: "ak", skin: DEFAULT_SKIN.ak },   // 背包 1 —— AK-47 老兵
-  { primary: "m4", skin: DEFAULT_SKIN.m4 },       // 背包 2 —— 黑色 M4A1-C
-  { primary: "awm", skin: DEFAULT_SKIN.awm },      // 背包 3 —— 军绿 AWM
-  { primary: "barrett", skin: DEFAULT_SKIN.barrett }, // 背包 4 —— 巴雷特 M82A1
+  { primary: "ak", skin: DEFAULT_SKIN.ak, secondary: "pistol" },
+  { primary: "m4", skin: DEFAULT_SKIN.m4, secondary: "pistol" },
+  { primary: "awm", skin: DEFAULT_SKIN.awm, secondary: "pistol" },
+  { primary: "barrett", skin: DEFAULT_SKIN.barrett, secondary: "deagle" },
 ];
 let curBp = 0;
 
-// 副武器/近战的皮肤是**全局一份**，不像主武器那样按背包分。
-// 理由：BACKPACKS 里根本没有副武器/近战的选择（所有人都固定 USP + 匕首），
-// 给它们按背包各配一份是「无差别的差别」，只会让菜单多出 6 行重复内容。
-// 手枪与匕首都没有模型皮肤，所以两把都只能是原厂。
-const GEAR_SKIN = { pistol: STOCK, knife: STOCK };
+// 副武器种类由背包选，皮肤仍按枪型共用；近战装备不变。
+const GEAR_SKIN = { pistol: STOCK, deagle: STOCK, knife: STOCK };
 
 // 出厂配装的一份只读副本。
 // **捡枪不改写 BACKPACKS / GEAR_SKIN** —— 捡来的枪记在 lifePickup 里，只活这一条命。
@@ -1395,8 +1408,10 @@ function resetLoadout() {
   BACKPACKS.forEach((b, i) => {
     b.primary = LOADOUT_DEFAULT.packs[i].primary;
     b.skin = LOADOUT_DEFAULT.packs[i].skin;
+    b.secondary = LOADOUT_DEFAULT.packs[i].secondary;
   });
   GEAR_SKIN.pistol = LOADOUT_DEFAULT.gear.pistol;
+  GEAR_SKIN.deagle = LOADOUT_DEFAULT.gear.deagle;
   GEAR_SKIN.knife = LOADOUT_DEFAULT.gear.knife;
 }
 
@@ -1424,7 +1439,8 @@ function activeSkinId(id) {
     if (lifePickup.primary && lifePickup.primary.id === id) return lifePickup.primary.skin;
     return BACKPACKS[curBp].skin;
   }
-  if (id === "pistol") return lifePickup.secondary ? lifePickup.secondary.skin : GEAR_SKIN.pistol;
+  if (def.slot === "secondary")
+    return lifePickup.secondary?.id === id ? lifePickup.secondary.skin : GEAR_SKIN[id];
   if (id === "knife") return GEAR_SKIN.knife;
   return null;
 }
@@ -1762,6 +1778,10 @@ function updateMinimap(dt) {
 // 否则 debug 钩子 switchWeapon("m4") 这类调用会悄悄改掉玩家的背包。
 function switchWeapon(id, force, opts) {
   if (!owned[id] || (id === currentId && !force)) return;
+  if (state === "playing" && sniperOnlyMatch() && !prisonWeaponAllowed(id)) {
+    showToast("守望之城仅限狙击枪与近身武器", true);
+    return;
+  }
   cancelMelee();cancelGrenade();
   const draw = !!(opts && opts.draw);
   const previousId = currentId;
@@ -1829,6 +1849,11 @@ function switchTimes(id) {
            deploy: SWITCH_DEPLOY[t] ?? SWITCH_DEPLOY.rifle };
 }
 function quickSwitch() {
+  if (sniperOnlyMatch()) {
+    const id = currentId === "knife" ? slotWeapon("primary") : "knife";
+    if (id) switchWeapon(id);
+    return;
+  }
   const to = WEAPON_DEFS[currentId].slot === "secondary" ? "primary" : "secondary";
   const id = slotWeapon(to);
   if (!id) { slotEmptyHint(to); return; }
@@ -1851,8 +1876,9 @@ function switchToPrimary() {
   if (!id) { slotEmptyHint("primary"); return; }
   switchWeapon(id);
 }
-// 数字键 2。副武器槽只有 USP 一个型号，但它同样可以被 G 丢掉。
+// 数字键 2：取当前背包的副武器，或这条命捡来的副武器。
 function switchToSecondary() {
+  if (sniperOnlyMatch()) { showToast("守望之城仅限狙击枪与近身武器", true); return; }
   const id = slotWeapon("secondary");
   if (!id) { slotEmptyHint("secondary"); return; }
   switchWeapon(id);
@@ -1863,6 +1889,11 @@ function switchToSecondary() {
 // 这个程序化入口也会顺手把面板收掉，而它在测试里是拿来改状态的、不该带 UI 副作用。
 function switchBackpack(i) {
   if (!BACKPACKS[i]) return false;
+  if (sniperOnlyMatch() && WEAPON_DEFS[BACKPACKS[i].primary].type !== "sniper") {
+    sfx.empty();
+    showToast("守望之城只能选择 3 / 4 号狙击背包", true);
+    return false;
+  }
   if (!canSwapBackpack()) {
     sfx.empty();
     showToast(swapBlockReason());
@@ -1872,17 +1903,20 @@ function switchBackpack(i) {
   // **这一句必须排在 `i === curBp` 的早退之前**：端着捡来的 M4 时按 B+1，面板上写着
   // 背包 1 是 AK，那一下就该真的换回 AK。排在后面的话，玩家最常按的那个编号
   // （自己正在用的背包）会是个空操作，「按 B 换回背包配枪」这条路等于不存在。
-  const hadPickup = lifePickup.primary !== null;
+  const hadPickup = lifePickup.primary !== null || lifePickup.secondary !== null;
+  const hadEmptySlot = emptySlot.primary || emptySlot.secondary;
   lifePickup.primary = null;
+  lifePickup.secondary = null;
   const same = i === curBp;
   // 纯粹的「按了一下自己正在用的背包」、手上也没有捡来的枪：无副作用，照旧收起面板
-  if (same && !hadPickup) return true;
+  if (same && !hadPickup && !hadEmptySlot) return true;
   curBp = i;
   // 换背包顺手把「主武器已丢空」的标记清掉。
   // 不清的话会出现「按 G 丢了 AK，再 B+2 切到背包 2，手上还是空的」—— 面板明明写着
   // 背包 2 是 M4 却拿不到，看着像坏了。放这里也没有被滥用的余地：能换背包就意味着
   // 站在复活点且本回合没开过火，而那种状态下本来就可以直接选任意一个背包。
   emptySlot.primary = false;
+  emptySlot.secondary = false;
   // force=true：换包后即使主武器恰好是同一把，也要刷新可见性与枪口火光
   switchWeapon(equippedPrimary(), true);
   updateBackpack();
@@ -1893,6 +1927,7 @@ function switchBackpack(i) {
 }
 // 数字键 4：在手雷 / 闪光弹 / 烟雾弹之间循环（CF 的投掷物槽行为）
 function switchNade() {
+  if (sniperOnlyMatch()) { showToast("守望之城仅限狙击枪与近身武器", true); return; }
   const avail = NADE_IDS.filter((id) => owned[id] && owned[id].state.count > 0);
   const list = avail.length ? avail : NADE_IDS;
   const idx = list.indexOf(currentId);
@@ -1916,7 +1951,8 @@ function toggleBackpack() {
   clearBackpackInput();
   sfx.ui("open");
   updateBackpack();
-  showToast(canSwapBackpack() ? "悬停编号预览 · 点击或按 1 / 2 / 3 / 4 确认" : "");
+  showToast(canSwapBackpack() ? (sniperOnlyMatch()
+    ? "狙击限定 · 选择 3 / 4 号背包" : "悬停编号预览 · 点击或按 1 / 2 / 3 / 4 确认") : "");
   backpackUnlockPending = true;
   document.exitPointerLock();
 }
@@ -1986,7 +2022,9 @@ function updateBackpack() {
     row.dataset.bp = String(i);
     row.type = "button";
     row.textContent = String(i + 1);
-    row.title = "背包 " + (i + 1) + " · " + gunDisplayName(bp.primary, bp.skin);
+    const lockedForMap = sniperOnlyMatch() && WEAPON_DEFS[bp.primary].type !== "sniper";
+    row.disabled = lockedForMap;
+    row.title = lockedForMap ? "守望之城仅限狙击枪" : "背包 " + (i + 1) + " · " + gunDisplayName(bp.primary, bp.skin);
     row.setAttribute("aria-label", row.title);
     row.setAttribute("aria-pressed", String(i === curBp));
     row.setAttribute("aria-controls", "bpLoadout");
@@ -2004,11 +2042,15 @@ function updateBackpack() {
 function updateBackpackLoadout() {
   const grid = document.getElementById("bpLoadout");
   if (!grid) return;
+  grid.classList.toggle("sniper-match", sniperOnlyMatch());
   grid.replaceChildren();
   const bp = BACKPACKS[previewBp];
-  const slots = [
+  const slots = sniperOnlyMatch() ? [
     ["主武器", bp.primary, bp.skin, "primary"],
-    ["副武器", "pistol", GEAR_SKIN.pistol, "secondary"],
+    ["近身武器", "knife", GEAR_SKIN.knife, "melee"],
+  ] : [
+    ["主武器", bp.primary, bp.skin, "primary"],
+    ["副武器", bp.secondary, GEAR_SKIN[bp.secondary], "secondary"],
     ["近身武器", "knife", GEAR_SKIN.knife, "melee"],
     ["投掷武器", "frag", null, "throwable"],
     ["战术装备", "flash", null, "throwable"],
@@ -2058,7 +2100,7 @@ function updateBpHint() {
   if (!hint) return;
   const canBp = canSwapBackpack();
   // 主循环每 0.25s 调一次，状态没变就别反复 createElement
-  const stateKey = canBp ? "ok" : swapBlockReason();
+  const stateKey = canBp ? (sniperOnlyMatch() ? "sniper" : "ok") : swapBlockReason();
   if (stateKey === bpHintKey) return;
   bpHintKey = stateKey;
 
@@ -2080,7 +2122,8 @@ function updateBpHint() {
     return box;
   };
 
-  if (canBp) keysLine.appendChild(item(["1", "2", "3", "4"], " 或点击编号确认 · 悬停预览"));
+  if (canBp) keysLine.appendChild(item(sniperOnlyMatch() ? ["3", "4"] : ["1", "2", "3", "4"],
+    " 或点击编号确认 · 悬停预览"));
   else keysLine.appendChild(item([], swapBlockReason(), true));
 
   // Slots are shown as actual equipment cards above; no duplicate text legend.
@@ -2101,7 +2144,9 @@ const GROUND_MAX = 14;
 // 某个槽位此刻装着哪把枪；空槽返回 null。
 function slotWeapon(slot) {
   if (slot === "primary") return emptySlot.primary ? null : equippedPrimary();
-  if (slot === "secondary") return emptySlot.secondary ? null : "pistol";
+  if (sniperOnlyMatch() && slot === "secondary") return null;
+  if (slot === "secondary")
+    return emptySlot.secondary ? null : (lifePickup.secondary?.id || BACKPACKS[curBp].secondary);
   return null;
 }
 function slotEmptyHint(slot) {
@@ -2176,6 +2221,7 @@ function spawnGroundGun(id, skin, slotKind, x, z, deckY, armed, ammo) {
 // 玩家按 G 丢枪。只接受主武器/副武器（刀与投掷物没有「地上的枪」这个表示）。
 // **不置 actedThisLife** —— 丢枪不算「行动」，与换弹一致（背包切换的限制不受影响）。
 function dropWeapon() {
+  if (sniperOnlyMatch()) { showToast("守望之城仅限狙击枪，不可丢枪", true); return false; }
   const slot = WEAPON_DEFS[currentId].slot;
   if (slot !== "primary" && slot !== "secondary") {
     sfx.empty();
@@ -2256,7 +2302,7 @@ function pickUpItem(it, idx) {
 // 连地上所有枪一起定住 3 秒，看起来像画面卡了。
 function updateGroundItems(dt) {
   if (!groundItems.length) return;
-  const canPick = !dead;
+  const canPick = !dead && !sniperOnlyMatch();
   for (let i = groundItems.length - 1; i >= 0; i--) {
     const it = groundItems[i];
     it.t += dt;
@@ -2291,6 +2337,7 @@ function clearGroundItems() {
 // 那是内层模型，见 enemies.js 的四层结构）。枪型/皮肤就是它活着时端在手里的那一把，
 // 所以「掉下来的枪」与「敌人手里的枪」永远对得上。
 function dropEnemyGun(e) {
+  if (sniperOnlyMatch()) return;
   if (!e || !e.gunId) return;
   const p = e.group.position;
   // 可能死在集装箱顶/舷侧走道上，落点高度按脚下实际台面取（不能抄 player.groundY）
@@ -2306,7 +2353,7 @@ function enemyWeaponName(e) {
 
 // 开始菜单里**只有对局设置**（敌人数 + 难度），没有键位表、也没有背包/皮肤配装。
 // 背包与皮肤改用预设值：BACKPACKS（AK / M4 / AWM / 巴雷特各占一个背包）
-// 与 GEAR_SKIN（USP 与匕首都是原厂 —— 这两把没有模型皮肤，见 skins.js 的 pistol/knife 表）。
+// 与 GEAR_SKIN（USP、沙鹰和匕首都是原厂外观，见 skins.js）。
 // 四个背包在游戏内可用 B + 数字键切换；配装在代码里预设好，菜单不提供入口。
 //
 // `skinForGun()` 保留着：皮肤归属校验的那条不变式（「M4 不许挂着 AK 的 skin id」）依然成立，
@@ -2361,6 +2408,7 @@ function activateMap(id) {
   impactVfx.clear();
   selectedMapId = id;
   mapData = mapCatalog[id];
+  if (sniperOnlyMatch() && WEAPON_DEFS[BACKPACKS[curBp].primary].type !== "sniper") curBp = 2;
   for (const [key, entry] of Object.entries(mapCatalog))
     for (const visual of entry.visuals || []) visual.visible = key === id;
   renderer.shadowMap.needsUpdate = true;
@@ -2368,8 +2416,8 @@ function activateMap(id) {
   // The enclosed hall uses its chandelier lights as the key. Restore the
   // outdoor daylight exactly when switching back to the transport ship.
   worldHemi.intensity = id === "palace" ? 0.82 : 1.25;
-  sun.intensity = id === "palace" ? 1.55 : 3.05;
-  renderer.toneMappingExposure = id === "palace" ? 1.12 : 1.18;
+  sun.intensity = id === "palace" ? 1.55 : id === "prison" ? 2.15 : 3.05;
+  renderer.toneMappingExposure = id === "palace" ? 1.12 : id === "prison" ? 1.12 : 1.18;
   colliders = mapData.colliders;
   obstacleMeshes = mapData.obstacles;
   obstacleFlat = [];
@@ -2381,7 +2429,8 @@ function activateMap(id) {
   enemyManager.spawnPoints = mapData.spawns?.enemy || null;
   if (mapData.source && !mapData.navigation)
     mapData.navigation = new GroundNavigation(colliders, bounds,
-      { maxHeight: mapData.navigationMaxHeight });
+      { maxHeight: mapData.navigationMaxHeight, step: mapData.navigationStep,
+        climb: mapData.stepHeight });
   enemyManager.navigation = mapData.navigation || null;
   if (minimap) minimap.setLayout(mapData.topdown, bounds);
   updateMapChoiceUi();
@@ -2454,7 +2503,8 @@ function lobbyStorageRows() {
     };
   };
   const rows = BACKPACKS.map((bp, i) => card("背包 " + (i + 1), bp.primary, bp.skin, i === curBp));
-  rows.push(card("副武器", "pistol", GEAR_SKIN.pistol, false));
+  rows.push(card("副武器", BACKPACKS[curBp].secondary,
+    GEAR_SKIN[BACKPACKS[curBp].secondary], false));
   rows.push(card("近战", "knife", GEAR_SKIN.knife, false));
   return rows;
 }
@@ -2898,6 +2948,7 @@ function fire() {
   sfx.shoot(def.type, def.id);
 
   if(currentId==='ak')classicFireT=0;
+  if(currentId==='deagle'){deagleFireT=0;deagleShotN=(deagleShotN+1)%3;}
   triggerKick(currentId);
   // 连发惩罚（**只喂准星张开**）。上限对齐 CS 的 `_baseInaccuracy` 在做完整梭时的量级。
   WEAPON_STATE.inaccPenalty = Math.min(WEAPON_STATE.inaccPenalty + (def.inacc?.fire ?? 0.008), 0.09);
@@ -3183,8 +3234,11 @@ function enemiesShoot() {
 
     // 走位能躲枪：玩家移动时敌人命中率下降。难度只缩这一处 —— 伤害在 Enemy.reset
     // 里按 ENEMY_TUNING.dmg 定，不在命中后再乘（免得同一个乘数算两遍）。
+    const baseHit = e.sniperCadence
+      ? Math.max(0.16, 0.62 - dist / 95)
+      : Math.max(0.12, 0.72 - dist / 46);
     const hitProb = Math.max(0.05, Math.min(0.95,
-      Math.max(0.12, 0.72 - dist / 46) * Math.max(0.5, 1 - pSpeed * 0.05) * ENEMY_TUNING.acc));
+      baseHit * Math.max(0.5, 1 - pSpeed * 0.05) * ENEMY_TUNING.acc));
     if (Math.random() < hitProb) damagePlayer(e.damage, true, e);
     else {
       // 打偏：子弹从耳边掠过。取「玩家眼睛沿弹道反向那一点」再**横向挪开**——
@@ -3949,7 +4003,7 @@ function updateTimerHud() {
 // 判据用「底面高过玩家头顶」而不是「高过脚底」：只要 y0 ≥ 脚底 + 身高，人就从底下过。
 function blockedBy(x, z, feetY) {
   for (const c of colliders) {
-    if (intersectsBrush(c,x,z,feetY,PLAYER_RADIUS,STEP_H,PLAYER_TOP)) return c;
+    if (intersectsBrush(c,x,z,feetY,PLAYER_RADIUS,mapData?.stepHeight ?? STEP_H,PLAYER_TOP)) return c;
   }
   return null;
 }
@@ -3959,11 +4013,12 @@ function blockedBy(x, z, feetY) {
 // 只取够得着的（c.h <= 脚底 + 一个台阶）—— 2.43m 高的集装箱顶不该在当前帧接住你。
 function supportAt(x, z, feetY) {
   let top = mapData?.floorY ?? 0;
+  const stepHeight = mapData?.stepHeight ?? STEP_H;
   for (const c of colliders) {
     const surface=brushSupport(c,x,z);
-    if (surface > feetY + STEP_H) continue;
+    if (surface > feetY + stepHeight) continue;
     // 悬空物（y0 > 脚底 + 一个台阶）不可能被站在上面 —— 人在它下面，顶面够不着。
-    if (c.y0 !== undefined && c.y0 > feetY + STEP_H) continue;
+    if (c.y0 !== undefined && c.y0 > feetY + stepHeight) continue;
     top = Math.max(top, surface);
   }
   return top;
@@ -3989,7 +4044,8 @@ function movePlayer(dt) {
     player.sneaking = !!keys[IS_SNEAK] && !player.crouching;
   }
 
-  let speed = player.crouching ? CROUCH_SPEED : player.sneaking ? SNEAK_SPEED : RUN_SPEED;
+  let speed = (player.crouching ? CROUCH_SPEED : player.sneaking ? SNEAK_SPEED : RUN_SPEED)
+    * weaponMoveScale(currentId);
   if (scoped) speed *= 0.42; // 开镜时明显拖慢
 
   const target = move.multiplyScalar(speed);
@@ -4136,6 +4192,7 @@ function animateWeapon(dt) {
   updateSkinGlow(vid);
   if(classicView)classicView.root.visible=false;
   for(const v of Object.values(classicNades))v.root.visible=false;
+  if(authoredViews)for(const v of Object.values(authoredViews))v.root.visible=false;
   c.gun.visible=true;viewArms.root.visible=true;
   // 开镜 / 阵亡都不显示枪模。火光跟着一起收：Sprite 挂在武器组上，组虽然隐藏了，
   // 但 muzzleT 会停在半路（这个早退不推进它），退镜/复活时会补闪一下。
@@ -4307,11 +4364,55 @@ function animateWeapon(dt) {
     muzzleShot.position.copy(_muzzleLocal);
     muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
+  if(authoredViews && (vid === 'knife' || vid === 'deagle')) {
+    const v=authoredViews[vid];
+    c.gun.visible=false;
+    if(vid==='knife')viewArms.root.visible=true;
+    v.root.visible=true;
+    if(vid==='knife') {
+      const pose=AUTHORED_VIEW_POSE.knife;
+      v.root.position.set(pose.x+bobX,pose.y+bobY+swDy,pose.z+swDz);
+      v.root.rotation.set(swRx,pose.yaw+swRy,swRz);
+      const attack=meleeHold||meleeState;
+      const kind=attack?.kind;
+      const deploy=switchState?.to===vid&&switchState.committed&&switchState.t<switchState.dur;
+      const name=kind==='light'||kind==='thrust'||kind==='heavy'?kind:deploy?'draw':'idle';
+      const dur=KNIFE[kind]?.interval||v.duration(name);
+      const t=attack?attack.t/dur*v.duration(name):deploy?
+        (switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*v.duration('draw'):
+        time%v.duration('idle');
+      v.sample(name,t);
+      viewArms.followAuthoredKnifeHands(v.rightHandCamera(_authoredRight),
+        v.leftHandCamera(_authoredLeft), _invGroup);
+    } else {
+      const pose=AUTHORED_VIEW_POSE.deagle;
+      v.root.position.set(pose.x+bobX,pose.y+bobY+swDy,pose.z+swDz);
+      v.root.rotation.set(swRx,pose.yaw+swRy,swRz);
+      deagleFireT+=dt;
+      const deploy=switchState?.to===vid&&switchState.committed&&switchState.t<switchState.dur;
+      const shotClip=['shoot','shoot2','shoot3'][Math.max(0,deagleShotN)];
+      const name=reloading?'reload':deploy?'draw':deagleFireT<.38?shotClip:moving?'walk':'idle';
+      const t=name==='reload'?reloadP*v.duration('reload'):
+        name==='draw'?(switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*v.duration('draw'):
+        name.startsWith('shoot')?deagleFireT/.38*v.duration(name):
+        name==='walk'?time*8%v.duration('walk'):time%v.duration('idle');
+      v.sample(name,t);
+      viewArms.followAuthoredRightHand(v.rightHandCamera(_authoredRight),_invGroup);
+      if(reloading)viewArms.followAuthoredReloadHand(v.leftHandCamera(_authoredLeft),_invGroup);
+      if(v.muzzleCamera(_authoredMuzzle)) {
+        muzzleShot.position.copy(_authoredMuzzle).applyMatrix4(_invGroup);
+        muzzleLight.position.copy(_authoredMuzzle);
+      }
+    }
+  }
   // 枪口焰的涨消。放在最后：它不改枪/手的位姿，但要用本帧的 dt。
   updateMuzzleFlash(dt);
 }
 const _muzzleLocal = new THREE.Vector3();
 const _invGroup = new THREE.Matrix4(); // 武器组矩阵的逆（相机空间 → 组局部），换弹时手臂用
+const _authoredLeft = new THREE.Vector3();
+const _authoredRight = new THREE.Vector3();
+const _authoredMuzzle = new THREE.Vector3();
 
 // 换弹姿势定格（调试用，见 __tactical.poseReload）
 let reloadHoldP = null;
@@ -4667,10 +4768,10 @@ async function init() {
   vmCamera.aspect = camera.aspect;
   vmCamera.updateProjectionMatrix();
 
-  // Two arenas share the same renderer and combat systems. The transport map
+  // All arenas share the same renderer and combat systems. The transport map
   // remains the default; the lobby can switch only between matches.
   const beforeMap = new Set(scene.children);
-  try { mapData = await buildClassicMap(scene, (fraction) => bootPart("map", fraction * .68)); }
+  try { mapData = await buildClassicMap(scene, (fraction) => bootPart("map", fraction * .55)); }
   catch (error) {
     console.warn('经典地图加载失败，使用内置场景：', error);
     mapData = await buildMap(scene);
@@ -4680,8 +4781,14 @@ async function init() {
   mapData.background = scene.background;
   mapCatalog.transport = mapData;
   try {
+    mapCatalog.prison = await buildPrisonMap(scene,
+      (fraction) => bootPart("map", .55 + fraction * .25));
+  } catch (error) {
+    console.warn('守望之城地图加载失败，保留其他地图：', error);
+  }
+  try {
     mapCatalog.palace = await buildPalaceMap(scene,
-      (fraction) => bootPart("map", .68 + fraction * .32));
+      (fraction) => bootPart("map", .80 + fraction * .20));
   } catch (error) {
     console.warn('王宫回廊加载失败，保留运输船：', error);
   }
@@ -4720,12 +4827,15 @@ async function init() {
   let assetsDone = 0;
   const trackAsset = async (promise) => {
     try { return await promise; }
-    finally { bootPart("assets", ++assetsDone / 14); }
+    finally { bootPart("assets", ++assetsDone / 16); }
   };
   const requiredWeapon = async (id) => {
     if (!await loadWeapon(WEAPON_DEFS[id])) throw new Error("武器模型加载失败：" + id);
   };
   await Promise.all([
+    trackAsset(loadAuthoredViews(vmCamera).then((views)=>{authoredViews=views;}).catch((error)=>{
+      console.warn('动作视模加载失败，使用原有动作：',error);
+    })),
     trackAsset(ClassicView.load().then(async v=>{
       classicView=v;
       if(v){vmScene.add(v.root);v.root.visible=false;handsOk=viewArms.loadClassic(v);}
@@ -4737,7 +4847,7 @@ async function init() {
     })())),
     trackAsset(loadClassicSoldier()),
     ...PRIMARY_IDS.map(id=>trackAsset(requiredWeapon(id))),
-    ...['pistol','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
+    ...['pistol','deagle','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
   ]);
   // 手臂加载失败是**明确降级**（枪照常、只是没有手），所以必须让玩家看见，
   // 不能像别的失败路径那样静默 —— 那会变成「画面里手没了，控制台之外无提示」。
@@ -4761,20 +4871,24 @@ async function init() {
     awm: owned.awm && owned.awm.baseGun,
     barrett: owned.barrett && owned.barrett.baseGun,
     pistol: owned.pistol && owned.pistol.baseGun,
+    deagle: owned.deagle && owned.deagle.baseGun,
   }, {ak:owned.ak?.models,m4:owned.m4?.models,awm:owned.awm?.models});
   // 敌人每次刷出都随机抽一把经典主武器；世界目录与玩家共用已加载几何。
   // 挂在 picker 上而不是一次性发下去：敌人是对象池复用的，acquire() 每次都调它
   // （见 enemies.js），所以池里捞出来的旧敌人也会换上新枪。
   enemyManager.loadoutPicker = () => {
-    const r = randomGunRoll();
+    const r = randomGunRoll(sniperOnlyMatch() ? ["awm", "barrett"] : undefined);
     const d = WEAPON_DEFS[r.id];
     return {
       rifle: enemyModel(r.id, r.skin),
       gunId: r.id,
       gunSkin: r.skin,
       weaponName: gunDisplayName(r.id, r.skin),
-      // 只影响点射节奏，不动伤害 —— 「AK 三枪死」那条数值不受影响
+      // 运输船的点射与伤害保持原样；守望之城改为单发狙击节奏和独立伤害。
       fireMul: (d && d.enemyFireMul) || 1,
+      sniperCadence: sniperOnlyMatch() ? d.stats.interval : 0,
+      engageFar: sniperOnlyMatch() ? 42 : undefined,
+      damage: sniperOnlyMatch() ? (r.id === "barrett" ? 42 : 34) : undefined,
     };
   };
   WEAPON_STATE = owned.ak.state;

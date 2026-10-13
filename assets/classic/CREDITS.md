@@ -1,6 +1,6 @@
 # 经典 CF 素材来源
 
-本目录用于用户要求的本地浏览器复刻。以下是商业游戏素材的社区移植，并非本项目原创，也不属于 CC0。没有在本次修改中发布、上传或申请任何新的授权。公开发布或商业使用前应按来源页面的条件另行取得许可；来源网站的“允许移植”说明不等于获得原权利人的完整授权。
+本目录记录浏览器游戏中使用的经典 CF 社区移植素材。它们并非本项目原创，也不属于 CC0；来源页面的“允许移植”说明不等于获得原权利人的完整再分发或商业授权。公开部署或商业使用时应逐项核对授权条件。
 
 ## 运输船
 
@@ -10,6 +10,14 @@
 - 本地转换：BSP v20 世界几何、材质、RGBExp32 烘焙光照、天空盒、凸体碰撞平面和双方出生点。排除 `func_buyzone` 的不可见编辑器体积。小道具的外部 MDL 未单独导入；玻璃动态子模型未实现；海面复用本项目的水材质。
 - 本地场景按用户要求沿 X 轴左右镜像，几何、碰撞、出生点和雷达同步变换；补回原 BSP 中被旧过滤器遗漏的 156 个地下凸体，保留楼梯、地道和出口木箱。
 - 产物：`transport/map.bin`、`map.json`、`lightmap.png` 和对应 PNG 贴图。
+
+## 守望之城（源素材 CF Prison）
+
+- 来源：[CF Prison](https://gamebanana.com/mods/119449)，下载文件 `cf_prison_fixed.rar`，GameBanana 文件编号 `288675`；下载包 MD5 `85a39a78351e992d760cf4e4585daf02`。
+- 本地使用包内 `maps/cf_prison.bsp` 的 Source BSP v20 世界几何、光照、实体出生点和凸体碰撞，以及包内 `materials/` 的贴图。转换器为 `tools/import_cf_prison.py`，输出 `prison/map.json`、`map.bin`、`lightmap.png` 和 PNG 贴图。
+- 该移植包依赖的少数 CS:S 基础材质并未随包提供；`fallback_*.png` 是本项目生成的中性色替代纹理。天空使用本项目程序生成的冷灰色云层。原地图比例按 Source 英寸换算到场景米，并将长轴对齐游戏的 Z 轴；出生点和碰撞同步转换。
+- 游戏加载时将 X/Z 水平方向放大 2 倍、Y 垂直方向放大 1.3 倍（`scripts/prison_scale.js`）；人物高度和重力不变。碰撞平面系数、雷达轮廓、出生点及地图边界同步变换，避免画面与可通行空间错位。`scripts/prison_uv.js` 按各轴实际伸展程度重算漫反射贴图坐标，避免砖块和地砖随非等比缩放变形；烘焙光照坐标不变。
+- 这是一份社区移植素材，不属于本项目原创或 CC0。来源页的移植或下载许可不等于原游戏权利人授予本项目再分发、商用或公开部署许可。
 
 ## SWAT
 
@@ -38,11 +46,20 @@
 - 默认 M4 皮肤显示为 `M4A1-C`，玩家、敌人和掉落物共用这把模型。转换脚本：`tools/import_cf_m4c.py`。
 - 原样复制四段 WAV：`sg552/sg552-1.WAV` → `audio/classic/m4c_fire.wav`；`m4a1/m4a1_clipout.WAV`、`m4a1_clipin.WAV`、`m4a1_boltpull.WAV` 分别 → `m4c_out.wav`、`m4c_in.wav`、`m4c_bolt.wav`。玩家和敌人的 M4 开火共用同一采样；不变调、不另叠合成爆音。
 
+## 沙漠之鹰
+
+- 来源：[CF Desert Eagle Pack](https://gamebanana.com/mods/207544)，下载文件 `cf_deagle_pack.rar`，GameBanana 文件编号 `217132`；下载包 MD5 `e065ff1c10834ac9039c2ad48caa876e`。
+- `tools/import_cf_deagle.py` 从 `Required/models/weapons/w_pist_deagle.{mdl,vvd,dx90.vtx}` 导入枪体世界模型，并使用 `Choose Texture/Original/` 的原版配色 VTF，转换为 `deagle/desert_eagle.glb`（674 三角面）。这份模型继续用于世界中的敌人持枪与掉落物；第一人称动画另见下节。
+- 4 号背包配备沙漠之鹰，其余三个背包保留 USP。四段 WAV 来源和映射见 `audio/CREDITS.txt`。
+- 包内模型、贴图及声音是社区移植的商业游戏素材，不属于 CC0；本站的移植说明不能替代原权利人的再分发或商用授权。
+
 ## 转换与边界
 
 - `tools/import_cf_source.py`：可重复转换地图/SWAT（Python + numpy + Pillow）。
 - `tools/import_cf_ak.py`：可重复转换 AK SMD/贴图并复制音效。
 - `tools/import_cf_m4c.py`：可重复转换 M4A1-C Source MDL/VVD/VTX 和 VTF，并复制四段 WAV。
+- `tools/import_cf_prison.py`：可重复转换守望之城源 BSP/VTF，并生成缺失基础材质的替代贴图。
+- `tools/import_cf_deagle.py`：可重复转换沙漠之鹰 Source 模型/VTF，并复制四段 WAV。
 - `tools/import_cf_view.py`：转换 AK 第一人称手臂、枪械与动画。
 - 格式依据：[Valve Source SDK](https://github.com/ValveSoftware/source-sdk-2013/tree/master/src/public) 的 `bspfile.h`、`studio.h`、`optimize.h`。
 - `manifest.json` 保存下载包及转换结果的 SHA-256，以区分实际使用的版本。
@@ -53,7 +70,14 @@
 
 - [Crossfire Wiki — Knife](https://crossfirefps.fandom.com/wiki/Knife)：横划后接前刺、翻腕下刺的行为描述；属于社区资料。
 - [Ult’s Melee Range Guide](https://forum.z8games.com/discussion/308868/ult-039-s-melee-range-guide)：2015 年玩家实测把基础小刀轻/重击归于同一距离档位；没有提供可直接移植的米数。
-- 因此本项目把轻/重刀有效长度统一标定为 1.4m；时长、伤害、扫掠角度和动作曲线均明确为近似实现，未声称取自官方客户端参数。当前刀模型与动作没有导入新的第三方素材。
+- 因此本项目把轻/重刀有效长度统一标定为 1.5m；时长、伤害、扫掠角度由本项目实现，未声称取自官方客户端参数。当前第一人称刀模型与动作来源见下节。
+
+## 第一人称手枪与军刀动作（2026-10-13）
+
+- 动作源：[Unity_CrossFire_base](https://github.com/Lem-c/Unity_CrossFire_base) 的 `All_Weapon_Prefab/knife.fbx` 与 `DesertEagle/Plain_DE/DesertEagle.fbx`。该项目说明这些模型是从 CF 素材移植到 Unity；仓库未提供可核验的公开再分发许可，不能据此推定商业使用或公开发布权。
+- 使用 [Godot 维护的 FBX2glTF v0.13.1](https://github.com/godotengine/FBX2glTF/releases/tag/v0.13.1) 转成 `motions/knife_view.glb`、`motions/deagle_view.glb`。刀贴图从 `PV-KNIFE.bmp` 转为 `motions/knife.png`，刀手套/袖子复用本项目已导入的 AK 经典贴图；沙鹰原 BMP 改为 PNG 嵌入 GLB，避免浏览器无法识别 BMP MIME。
+- 军刀保留源骨骼的待机、拔刀、两段连击和重击；轻/重击的伤害、有效范围与命中窗口仍由 `scripts/melee.js` 决定。沙鹰保留拔枪、待机、行走、三种开火、换弹骨骼片段，按本游戏射速/换弹时长重定时；第一人称枪身、套筒与弹匣由该视模驱动，世界模型不替换。
+- 源沙鹰视模的前臂在画面中间露出截面，因此只显示其动画枪身，用本项目统一的经典手套/袖子代替源手臂；右手跟随源腕骨、换弹时左手也跟随源腕骨，枪口火光跟随枪身骨骼。军刀源袖管同样在画面中间截断，保留原骨骼手套和军刀，袖管改由经典手臂延伸到画面外并跟随双腕。USP 仍使用现有模型与动作；这次导入的是沙鹰和军刀的动作资源，并不声称已经为 USP 找到兼容骨骼片段。
 
 ## 经典手雷 / 闪光弹 / 烟雾弹
 

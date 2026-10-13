@@ -280,3 +280,20 @@ impacts/kill_confirm.wav <- `005 - 无角色语音，仅击杀反馈音效 + 图
 爆头和连杀时降低增益，让专属音效与英文播报保持清楚。
 
 该视频由用户提供作听感参考；音轨原始权利和再分发授权未核实，因此这里不把它标为 CC0。
+
+
+------------------------------------------------------------
+十一、CF 沙漠之鹰移植包声音（非 CC0）
+------------------------------------------------------------
+来源：https://gamebanana.com/mods/207544 （CF Desert Eagle Pack）
+文件：cf_deagle_pack.rar，GameBanana 文件编号 217132，下载包 MD5：
+e065ff1c10834ac9039c2ad48caa876e。
+
+classic/deagle_fire.wav    <- Required/sound/weapons/deagle/deagle-1.WAV
+classic/deagle_clipout.wav <- Required/sound/weapons/deagle/de_clipout.WAV
+classic/deagle_clipin.wav  <- Required/sound/weapons/deagle/de_clipin.WAV
+classic/deagle_deploy.wav  <- Required/sound/weapons/deagle/de_deploy.WAV
+
+四段 WAV 原样复制、未转码。开火使用包内独立采样，换弹三阶段分别使用退匣、插匣与
+完成动作声音；不与 USP 共用枪声。它们是社区移植的商业游戏素材，来源页的移植说明
+不等于原权利人的独立再分发或商用授权。

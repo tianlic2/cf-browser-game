@@ -22,7 +22,7 @@ import { RIFLE_LEN } from "./enemy_model.js";
 import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js";
 
 // 会出现在世界里的枪。经典三把是敌人随机携带的池子；巴雷特可由玩家丢弃。
-const WORLD_GUN_IDS = ["ak", "m4", "awm", "barrett", "pistol"];
+const WORLD_GUN_IDS = ["ak", "m4", "awm", "barrett", "pistol", "deagle"];
 export const ENEMY_GUN_IDS = ["ak", "m4", "awm"];
 
 const cache = {}; // id → { world: {skinId: Object3D}, enemy: {skinId: Object3D} }
@@ -219,7 +219,7 @@ export function enemyModel(id, skinId) {
 
 // Classic battlefield palette, including enemy drops. Catalog entries for the
 // modern skins remain available, but do not enter the default match pool.
-export function randomGunRoll() {
-  const id = ENEMY_GUN_IDS[(Math.random() * ENEMY_GUN_IDS.length) | 0];
+export function randomGunRoll(allowedIds = ENEMY_GUN_IDS) {
+  const id = allowedIds[(Math.random() * allowedIds.length) | 0];
   return { id, skin: DEFAULT_SKIN[id] };
 }

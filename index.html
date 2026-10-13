@@ -27,7 +27,7 @@
         <div class="boot-main">
           <div class="boot-emblem" aria-hidden="true"><span class="boot-emblem-core">CF</span></div>
           <div class="boot-copy">
-            <p class="boot-kicker">TRANSPORT SHIP · TEAM DEATHMATCH</p>
+            <p class="boot-kicker">MULTI-ARENA · TEAM DEATHMATCH</p>
             <h1>战术<span>突击</span></h1>
             <p class="boot-subtitle">正在部署作战资源</p>
           </div>
@@ -42,7 +42,7 @@
         <div class="boot-steps" aria-hidden="true">
           <span data-boot-step="map">01 / 地图</span><span data-boot-step="actors">02 / 人物与武器</span><span data-boot-step="audio">03 / 音效</span><span data-boot-step="ready">04 / 就绪</span>
         </div>
-        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>双地图 · 团队竞技</span></div>
+        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>三地图 · 团队竞技</span></div>
       </div>
       <noscript>需要启用 JavaScript 才能加载游戏。</noscript>
     </div>
@@ -265,6 +265,7 @@
             <div class="room-map-select" id="mapSelect" aria-label="选择对战地图">
               <span class="room-map-caption">对战地图 <small>SELECT MAP</small></span>
               <button type="button" class="room-map-option active" data-map="transport" aria-pressed="true"><b>运输船</b><small>集装箱货轮 · 经典对抗</small></button>
+              <button type="button" class="room-map-option" data-map="prison" aria-pressed="false"><b>守望之城</b><small>双倍战场 · 狙击与近战</small></button>
               <button type="button" class="room-map-option" data-map="palace" aria-pressed="false"><b>王宫回廊</b><small>王座大厅 · 双层侧廊</small></button>
             </div>
             <div class="room-match-info"><span>地图 <b id="lobbyMapName">运输船</b></span><span>团队竞技</span><span><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
@@ -332,6 +333,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-    <script type="module" src="./scripts/main.js"></script>
+    <script type="module" src="./scripts/main.js?v=watch-city-tone-1"></script>
   </body>
 </html>

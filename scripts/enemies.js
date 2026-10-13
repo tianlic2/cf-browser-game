@@ -129,7 +129,7 @@ export class Enemy {
     this.clearHelmetDrop();
     this.health = ENEMY_HP;
     this.maxHealth = ENEMY_HP;
-    this.damage = ENEMY_DAMAGE * ENEMY_TUNING.dmg;
+    this.damage = (opts.damage ?? ENEMY_DAMAGE) * ENEMY_TUNING.dmg;
     this.name = opts.name || ENEMY_NAMES[0];
     // 枪型/皮肤每局随机（main.js 的 loadoutPicker 抽的），死亡时按这两个字段掉在地上。
     // 枪必须在这里换：敌人是对象池复用的，构造函数只跑一次。
@@ -138,6 +138,8 @@ export class Enemy {
     this.gunSkin = opts.gunSkin || null;
     this.weaponName = opts.weaponName || "步枪";
     this.fireMul = opts.fireMul || 1;
+    this.sniperCadence = opts.sniperCadence || 0;
+    this.engageFar = opts.engageFar || ENGAGE_FAR;
     this.dead = false;
     this.deathHeadshot = false;
     this.corpseT = 0;
@@ -227,7 +229,7 @@ export class Enemy {
     // 点射节奏：burstLeft 发子弹打完后停顿 burstPause
     this.burstLeft = 0;
     this.burstTimer = 0;
-    this.burstPause = pauseFor(0.6, 0.8, this.fireMul);
+    this.burstPause = this.sniperCadence ? 0.8 : pauseFor(0.6, 0.8, this.fireMul);
     this.wantShoot = false;
     if (!this.group.parent) this.scene.add(this.group);
   }
@@ -285,7 +287,7 @@ export class Enemy {
     // τ 按距离收：人越近跟得越稳。不收的话贴脸绕圈的稳态偏角 δ=ω·τ 会顶穿开火闸门
     // （4m、玩家 7.2m/s ⇒ ω=1.8、τ=0.26 ⇒ δ≈0.36 > AIM_TOL 0.35，高 τ 的敌人会停止开火）。
     const tau = (BASE_TAU / this.traits.reaction) *
-      Math.max(0.35, Math.min(1, dist / ENGAGE_FAR));
+      Math.max(0.35, Math.min(1, dist / this.engageFar));
     const ka = 1 - Math.exp(-dt / tau);
     this.aimX += (player.pos.x - this.aimX) * ka;
     this.aimZ += (player.pos.z - this.aimZ) * ka;
@@ -329,13 +331,12 @@ export class Enemy {
       // （ENEMY_TUNING 只由 main.js 的 DIFFICULTIES 灌入，最小 0.7）
       // 交战距离偏好：`engage` 是**小幅杀伤力旋钮**（它改敌人停在哪 ⇒ 改 dist ⇒ 改 hitProb
       // 里的 0.72-dist/46），所以范围故意压在 ±12%，并且要进验证第 3 条的中性测量。
-      // 后撤阈值与压上阈值一起缩放，中距离横移那条带（ENGAGE_FAR+3）保持全局不变 ——
-      // 它同时是分离力与 noProgT 监工的门（两带不相交的可证明性靠它）。
+      // 后撤阈值与压上阈值一起缩放；横移和绕行监工共用本局的交战距离。
       const near = (ENGAGE_NEAR * this.traits.engage) / ENEMY_TUNING.aggro;
-      const far = ENGAGE_FAR * this.traits.engage;
+      const far = this.engageFar * this.traits.engage;
       if (dist > far) { wx = dir.x; wz = dir.z; }                        // 压上
       else if (dist < near) { wx = -dir.x * 0.75; wz = -dir.z * 0.75; }  // 后撤
-      if (dist < ENGAGE_FAR + 3) {
+      if (dist < this.engageFar + 3) {
         // 中距离左右横移（一直在动，不站桩）。这里是 **ADAD 点按**，不是一条恒定正弦：
         // rest（站桩 0.3~0.8s）→ burst（连点 2~4 次急转，每次 0.1~0.3s）→ 回 rest。
         // 真人对枪走位是「探两下、停一下」，匀速钟摆一眼就是机器人。
@@ -390,10 +391,10 @@ export class Enemy {
     // ② 加在 route 覆写之前等于白写 —— 那两行是**替换**不是叠加，而
     //    GroundNavigation.steer 只在 dist < 8 && clear 时返回 null，即 dist ≥ 8m 时
     //    route 恒非空 ⇒ 敌人扑向你（正是叠坨的时候）的那一段分离力全被丢掉。
-    // 门控 dist < ENGAGE_FAR + 3 与 noProgT 监工的累积带 dist > ENGAGE_FAR + 3
+    // 门控 dist < engageFar + 3 与 noProgT 监工的累积带 dist > engageFar + 3
     // **不相交** ⇒ 分离力在结构上不可能造成「远离玩家」的假卡死翻转（可证明，非调参）。
     let sepX = 0, sepZ = 0;
-    if (peers && !blind && this.detourT <= 0 && dist < ENGAGE_FAR + 3) {
+    if (peers && !blind && this.detourT <= 0 && dist < this.engageFar + 3) {
       for (const o of peers) {
         if (o === this) continue;
         const ox = o.group.position.x, oz = o.group.position.z;
@@ -447,7 +448,7 @@ export class Enemy {
     // 贴着长墙横滑是合法推进、却是「远离玩家」的，两种判据在这类几何里各有盲区，而
     // 距离这条在真实地图与 ≤7m 的合成障碍上都是 8/8）。改这条之前先跑 /tmp/cfwall.mjs。
     if (this.lastDist < 0) this.lastDist = dist;
-    if (dist > ENGAGE_FAR + 3) {
+    if (dist > this.engageFar + 3) {
       if (dist < this.lastDist - 0.35) { this.lastDist = dist; this.noProgT = 0; }
       else {
         this.noProgT += dt;
@@ -473,7 +474,7 @@ export class Enemy {
     const wantPitch = Math.atan2((gp.y + 1.5) - (player.pos.y + 1.35), Math.max(dist, 1));
     this.aimPitch += (Math.max(-0.22, Math.min(0.22, wantPitch)) - this.aimPitch) * k(6);
     // 端枪程度：进入交战距离就据枪，退远了回到低姿
-    const wantAim = dist < ENGAGE_FAR + 6 ? 1 : 0;
+    const wantAim = dist < this.engageFar + 6 ? 1 : 0;
     this.aimLevel += (wantAim - this.aimLevel) * k(1.6);
     this.rig.animate(dt, {
       moved,                          // 本帧实际走过的路程 → 步频/步幅
@@ -486,7 +487,7 @@ export class Enemy {
       flinch: this.flinch,
       dead: false,
       // 头部张望：幅度在**这里**门控（不在 rig 里再乘一次 aimBlend）——
-      // aimLevel 在 dist < ENGAGE_FAR+6（22m）时为 1 ⇒ 交战距离内头回到瞄具上、
+      // aimLevel 在 dist < engageFar+6 时为 1 ⇒ 交战距离内头回到瞄具上、
       // 命中盒不乱动，只有 22m 外才东张西望。相位在 Enemy 上推进（性格在这边）。
       scan: blind ? 0 : (1 - this.aimLevel),
       scanPhase: this.scanPhase,
@@ -528,9 +529,15 @@ export class Enemy {
   recoil() { this.rig.recoil(this.gunId === 'awm' ? 1.35 : this.gunId === 'm4' ? 0.8 : 1); }
 
   updateBurst(dt, dist) {
-    if (dist > ENGAGE_FAR + 4) { this.burstLeft = 0; this.wantShoot = false; return; }
+    if (dist > this.engageFar + 4) { this.burstLeft = 0; this.wantShoot = false; return; }
     // 还没把枪口转过来就先不打（否则会一边转身一边朝侧面泼子弹）
     if ((this.aimErr || 0) > AIM_TOL) { this.wantShoot = false; return; }
+    if (this.sniperCadence) {
+      this.burstPause -= dt;
+      this.wantShoot = this.burstPause <= 0;
+      if (this.wantShoot) this.burstPause = this.sniperCadence * ENEMY_TUNING.pause;
+      return;
+    }
     if (this.burstLeft > 0) {
       this.burstTimer -= dt;
       if (this.burstTimer <= 0) {
@@ -589,7 +596,8 @@ export class Enemy {
     const colliders = this.colliders;
     if (!colliders) return null;
     for (const c of colliders) {
-      if (intersectsBrush(c,x,z,this.group.position.y,ENEMY_RADIUS,ENEMY_STEP_H,ENEMY_HEAD_ROOM)) return c;
+      if (intersectsBrush(c,x,z,this.group.position.y,ENEMY_RADIUS,
+        this.navigation?.climb ?? ENEMY_STEP_H,ENEMY_HEAD_ROOM)) return c;
     }
     return null;
   }

@@ -231,6 +231,9 @@ export const SKINS = {
   pistol: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
   ],
+  deagle: [
+    { id: STOCK, name: "原厂", slots: {}, accent: 0x9a9484 },
+  ],
 
   // 匕首只有原厂。旧「屠龙」「龙啸」皮肤按已废弃模型的材质名上色，
   // 与当前 M9 的 Knife/Handle 双材质不匹配，不能把它们误当作可选外观。
@@ -245,7 +248,8 @@ export const SKINS = {
 // `DEFAULT_SKIN[gunId] || STOCK`，一旦指向一个被删掉的 id，`findSkin` 会静静地回退成原厂，
 // 表现为「默认皮肤莫名其妙没了」。
 export const DEFAULT_SKIN = {
-  ak: "classic", m4: "classic", awm: "classic", barrett: STOCK, pistol: STOCK, knife: STOCK,
+  ak: "classic", m4: "classic", awm: "classic", barrett: STOCK,
+  pistol: STOCK, deagle: STOCK, knife: STOCK,
 };
 
 // 枪口焰没上皮肤时的原色（与 muzzleShot / muzzleLight 的构造值一致）

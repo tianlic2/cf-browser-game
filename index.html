@@ -14,7 +14,7 @@
     <!-- 路径一律用「相对当前文档」的写法：本地 http.server 与 GitHub Pages 的项目页
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
-    <link rel="stylesheet" href="./styles/game.css?v=match-result-2" />
+    <link rel="stylesheet" href="./styles/game.css?v=bio-no-power-1" />
     <link rel="stylesheet" href="./styles/boot.css" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
@@ -42,7 +42,7 @@
         <div class="boot-steps" aria-hidden="true">
           <span data-boot-step="map">01 / 地图</span><span data-boot-step="actors">02 / 人物与武器</span><span data-boot-step="audio">03 / 音效</span><span data-boot-step="ready">04 / 就绪</span>
         </div>
-        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>三地图 · 双模式</span></div>
+        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>四场景 · 双模式</span></div>
       </div>
       <noscript>需要启用 JavaScript 才能加载游戏。</noscript>
     </div>
@@ -82,12 +82,6 @@
         <span class="bio-countdown-label">距离感染爆发</span>
         <span class="bio-countdown-track"><i id="bioCountdownFill"></i></span>
         <small>寻找掩体 · 准备防守</small>
-      </div>
-      <div id="bioObjective" class="bio-objective hidden" aria-live="off">
-        <span class="bio-objective-kicker">EMERGENCY POWER // 生化禁区</span>
-        <strong id="bioObjectiveTitle">配电系统离线</strong>
-        <span id="bioObjectiveHint">前往中央配电箱</span>
-        <span class="bio-objective-track"><i id="bioObjectiveFill"></i></span>
       </div>
       <div id="bioHealthLayer" class="bio-health-layer" aria-hidden="true"></div>
 
@@ -312,7 +306,9 @@
               <span class="room-map-caption">对战地图 <small>SELECT MAP</small></span>
               <button type="button" class="room-map-option active" data-map="transport" aria-pressed="true"><b>运输船</b><small>集装箱货轮 · 经典对抗</small></button>
               <button type="button" class="room-map-option" data-map="prison" aria-pressed="false"><b>守望之城</b><small>双倍战场 · 狙击与近战</small></button>
-              <button type="button" class="room-map-option" data-map="bio" aria-pressed="false"><b>生化禁区</b><small>双端守点 · 经典感染</small></button>
+              <button type="button" class="room-map-option" data-map="survivor" aria-pressed="false"><b>雪地求生</b><small>极地基地 · 团队竞技</small></button>
+              <button type="button" class="room-map-option" data-map="blacktown" aria-pressed="false"><b>黑色城镇</b><small>巷战城区 · 团队竞技</small></button>
+              <button type="button" class="room-map-option" data-map="bio" aria-pressed="false"><b>黑色城镇（生化）</b><small>雨夜感染 · 废墟防守</small></button>
             </div>
             <div class="bio-mode-select" id="modeSelect" aria-label="选择游戏模式">
               <button type="button" class="active" data-mode="tdm" aria-pressed="true">团队竞技</button>
@@ -438,6 +434,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-    <script type="module" src="./scripts/main.js?v=remove-retired-maps-1"></script>
+    <script type="module" src="./scripts/main.js?v=github-publish-1"></script>
   </body>
 </html>

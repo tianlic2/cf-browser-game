@@ -22,6 +22,12 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   for (const team of Object.values(data.spawns)) for (const p of team) p[0] = -p[0];
   for (const face of data.topdown) face.x = -face.x;
   data.floorY = Math.min(0, ...data.colliders.map(c => c.h));
+  // The wooden crate at the end of the lower corridor is 1.397m above the
+  // tunnel floor. The shared 7.5m/s jump reaches only about 1.339m at 21m/s²,
+  // and semi-implicit frame stepping trims the sampled apex further. A small
+  // Transport-only height scale gives the route a stable margin even at 30fps;
+  // movement on every other map remains unchanged.
+  data.jumpHeightScale = 1.16;
   const binary = await fetch(BASE+'transport/map.bin').then(r => { if (!r.ok) throw new Error('地图网格缺失'); return r.arrayBuffer(); });
   onProgress(.28);
   const loader=new THREE.TextureLoader();

@@ -875,6 +875,17 @@ export class SFX {
     });
   }
 
+  // 炫金雷神右键枪托：只播用户源包内 `M4A1-S-Beast_knifeAttack.wav`。
+  // 源 MDL 的 knife-attack 序列在第 1/500 秒触发 5004 事件，因此保留这点延迟；
+  // 缺失时静音，不用斧头、通用挥风声或合成音替代。
+  ironbeastMelee(delay = 1 / 500) {
+    if (!this.ready()) return;
+    this._playMapped("ironbeastMelee", {
+      id: "ironbeast_knife_attack", delay: Math.max(0, delay),
+      kind: "ironbeast", vol: 1, rate: 1, rateJitter: 0, wet: 0,
+    });
+  }
+
   // 手雷抛出不再借用近战的合成挥风声；拉环与喊话各走自己的源素材。
   throwGrenade() {
     if (!this.ready()) return;

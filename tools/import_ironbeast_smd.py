@@ -1,6 +1,6 @@
 """Import Iron Beast's original GoldSrc SMD viewmodel and QC animation sources.
 
-Usage: python3 tools/import_ironbeast_smd.py /path/to/compile/v_ /path/to/v_ak47.mdl
+Usage: python3 tools/import_ironbeast_smd.py /path/to/compile/v_ /path/to/v_ak47.mdl [/path/to/attack-v_ak47.mdl]
 The output follows the same SMD-space/skinning convention as import_cf_view.py.
 """
 import json, math, re, struct, sys, zlib
@@ -8,6 +8,7 @@ from pathlib import Path
 
 src = Path(sys.argv[1])
 mdl = Path(sys.argv[2]) if len(sys.argv) > 2 else None
+attack_mdl = Path(sys.argv[3]) if len(sys.argv) > 3 else None
 out = Path(__file__).resolve().parents[1] / "assets/classic/m4_ironbeast"
 out.mkdir(parents=True, exist_ok=True)
 
@@ -40,6 +41,81 @@ def quat(v):
     cz, sz = math.cos(z), math.sin(z)
     return [sx*cy*cz-cx*sy*sz, cx*sy*cz+sx*cy*sz,
             cx*cy*sz-sx*sy*cz, cx*cy*cz+sx*sy*sz]
+
+def read_mdl_clip(path, clip_name, expected_nodes, current_idle):
+    """Read one missing GoldSrc animation without replacing the SMD model.
+
+    The complete QC/SMD pack used for the final gun appearance omits the
+    original package's seventh sequence (knife-attack). Both packages retain
+    the exact same 113-bone hierarchy, so the authored local poses can be
+    sampled onto the current gun/hands while its geometry and materials stay
+    untouched.
+    """
+    raw = path.read_bytes()
+    if raw[:4] != b"IDST" or struct.unpack_from("<i", raw, 4)[0] != 10:
+        raise ValueError(f"expected GoldSrc v10 MDL: {path}")
+    integer = lambda at: struct.unpack_from("<i", raw, at)[0]
+    string = lambda at: raw[at:].split(b"\0", 1)[0].decode("utf-8", "replace")
+    bone_count, bone_offset = integer(140), integer(144)
+    mdl_nodes = [(index, string(bone_offset + index * 112),
+                  integer(bone_offset + index * 112 + 32))
+                 for index in range(bone_count)]
+    if mdl_nodes != expected_nodes:
+        raise ValueError(f"bone hierarchy differs in {path}:{clip_name}")
+
+    def channel(record, offset, frame, default, step):
+        if not offset:
+            return default
+        at, cursor = record + offset, 0
+        while True:
+            valid, total = struct.unpack_from("<2B", raw, at)
+            at += 2
+            values = struct.unpack_from("<" + "h" * valid, raw, at)
+            at += valid * 2
+            if frame < cursor + total:
+                return default + values[min(frame - cursor, valid - 1)] * step
+            cursor += total
+
+    sequence_count, sequence_offset = integer(164), integer(168)
+    for sequence_index in range(sequence_count):
+        desc = sequence_offset + sequence_index * 176
+        if string(desc) != clip_name:
+            continue
+        fps = struct.unpack_from("<f", raw, desc + 32)[0]
+        frame_count = integer(desc + 56)
+        animation = integer(desc + 124)
+        values = []
+        for frame in range(frame_count):
+            for bone_index in range(bone_count):
+                # The earlier compiled package uses a different Scene Root
+                # axis convention, while its gun/hands bones 1..57 match the
+                # final QC/SMD rig exactly. Its 58+ helpers also belong to an
+                # older effect layout and would fling the current additive
+                # VFX cards across the screen. Keep those non-action bones in
+                # the current idle pose and transfer only the compatible
+                # authored gun-and-hands motion.
+                if bone_index == 0 or bone_index >= 58:
+                    pose = current_idle[bone_index]
+                else:
+                    record = animation + bone_index * 12
+                    offsets = struct.unpack_from("<6H", raw, record)
+                    source_bone = bone_offset + bone_index * 112
+                    defaults = struct.unpack_from("<6f", raw, source_bone + 64)
+                    steps = struct.unpack_from("<6f", raw, source_bone + 88)
+                    pose = [channel(record, offsets[k], frame, defaults[k], steps[k])
+                            for k in range(6)]
+                values.extend(pose[:3])
+                values.extend(quat(pose[3:]))
+        events = []
+        event_count, event_offset = struct.unpack_from("<2i", raw, desc + 48)
+        for event_index in range(event_count):
+            event = event_offset + event_index * 76
+            frame, code, event_type = struct.unpack_from("<3i", raw, event)
+            events.append({"name": string(event + 12), "code": code, "type": event_type,
+                           "frame": frame, "time": round(frame / fps, 6)})
+        return ({"times": [round(frame / fps, 6) for frame in range(frame_count)],
+                 "count": frame_count}, values, events)
+    raise ValueError(f"missing sequence {clip_name!r} in {path}")
 
 def read_smd(path):
     text = path.read_text(encoding="utf-8-sig").replace("\r", "")
@@ -175,6 +251,7 @@ qc = (src / "sequences.qc").read_text(encoding="utf-8-sig").replace("\r", "")
 fps_by_name = {m[1]: float(m[3]) for m in re.finditer(
     r'^\s*\$sequence\s+"([^"]+)"\s+"([^"]+)"\s+fps\s+([0-9.]+)', qc, re.M)}
 clips = {}
+events = {}
 for name in ("idle_0","reload","select","fire","prefire","postfire"):
     path = src / f"{name}.smd"
     if not path.is_file(): continue
@@ -192,8 +269,17 @@ for name in ("idle_0","reload","select","fire","prefire","postfire"):
                    "offset":len(blob),"count":len(anim_frames)}
     blob.extend(struct.pack("<"+"f"*len(values),*values))
 
+if attack_mdl is not None:
+    current_idle = read_smd(src / "idle_0.smd")[1][0]["bones"]
+    clip, values, clip_events = read_mdl_clip(
+        attack_mdl, "knife-attack", reference_nodes, current_idle)
+    clip["offset"] = len(blob)
+    clips["knife-attack"] = clip
+    events["knife-attack"] = clip_events
+    blob.extend(struct.pack("<" + "f" * len(values), *values))
+
 (out / "view.bin").write_bytes(blob)
-(out / "view.json").write_text(json.dumps({"bones":bones,"parts":parts,"clips":clips,
-    "source":"Iron Beast original QC/SMD bodygroups and compiled GoldSrc material flags"},separators=(",",":")))
+(out / "view.json").write_text(json.dumps({"bones":bones,"parts":parts,"clips":clips,"events":events,
+    "source":"Iron Beast original QC/SMD bodygroups, compiled GoldSrc material flags, and original MDL knife-attack"},separators=(",",":")))
 print(f"Imported {len(bones)} bones, {len(parts)} material parts and clips "
       f"{[(name,len(clip['times'])) for name,clip in clips.items()]} from original SMD/QC")

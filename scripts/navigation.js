@@ -1,10 +1,12 @@
-import { intersectsBrush, brushSupport } from './brush_collision.js';
+import { intersectsBrush, brushSupport, brushSupportIsExposed } from './brush_collision.js?v=goldsrc-visible-wall-1';
 
 // A shared flow field with separate nodes for stacked floors. A tunnel and the
 // deck above it must never become the same node merely because X/Z coincide.
 export class GroundNavigation {
   constructor(colliders,bounds,options={}) {
     this.colliders=colliders;
+    this.surfaceAt=options.surfaceAt||null;this.surfacesAt=options.surfacesAt||null;
+    this.blockerAt=options.blockerAt||null;
     this.groundBrushes=colliders.filter(c=>c.walkable!==false&&c.h<=(options.maxHeight??.5));
     this.floorY=Math.min(0,...this.groundBrushes.map(c=>c.h));
     this.step=options.step??.55;this.climb=options.climb??.5;this.hw=bounds.hw;this.hl=bounds.hl;
@@ -25,12 +27,17 @@ export class GroundNavigation {
       const px=this.xs[x],pz=z*this.step-this.hl,cell=z*this.w+x;
       const nearby=colliders.filter(c=>Math.abs(px-c.x)<=c.hx+.6&&Math.abs(pz-c.z)<=c.hz+.6);
       this.local[cell]=nearby;
-      const heights=nearby.filter(c=>c.walkable!==false).map(c=>brushSupport(c,px,pz))
-        .filter(y=>Number.isFinite(y)&&y>=this.floorY-.01&&y<=(options.maxHeight??.5)).sort((a,b)=>a-b);
+      const heights=this.surfacesAt?
+        this.surfacesAt(px,pz,options.maxHeight??.5).filter(y=>y>=this.floorY-.01):
+        nearby.filter(c=>c.walkable!==false).map(c=>[brushSupport(c,px,pz),c])
+          .filter(([y,c])=>Number.isFinite(y)&&y>=this.floorY-.01&&y<=(options.maxHeight??.5)&&
+            (!c.localStep||brushSupportIsExposed(nearby,c,px,pz,y)))
+          .map(([y])=>y).sort((a,b)=>a-b);
       let last=-Infinity;
       for(const y of heights) {
         if(y-last<.02)continue;last=y;
-        if(nearby.some(c=>intersectsBrush(c,px,pz,y,.46,this.climb)))continue;
+        if(nearby.some(c=>intersectsBrush(c,px,pz,y,.46,this.climb,1.78,nearby,
+          this.surfaceAt,this.blockerAt)))continue;
         const id=this.points.length;this.cells[cell].push(id);
         this.points.push({x:px,y,z:pz});this.nodeCells.push(cell);
       }
@@ -64,10 +71,16 @@ export class GroundNavigation {
     return iz<0||iz>=this.h||x<-this.hw||x>this.hw ? -1 : iz*this.w+ix;
   }
   heightAt(x,z,feet=0) {
+    if(this.surfaceAt) {
+      const surface=this.surfaceAt(x,z,feet+this.climb);
+      return Number.isFinite(surface)?Math.max(this.floorY,surface):this.floorY;
+    }
     let y=this.floorY;
-    for(const c of this.local[this.cell(x,z)]||[]) {
+    const nearby=this.local[this.cell(x,z)]||[];
+    for(const c of nearby) {
       const top=brushSupport(c,x,z);
-      if(top<=feet+this.climb)y=Math.max(y,top);
+      if(top<=feet+this.climb&&(!c.localStep||
+        brushSupportIsExposed(nearby,c,x,z,top)))y=Math.max(y,top);
     }
     return y;
   }
@@ -113,8 +126,11 @@ export class GroundNavigation {
     for(let i=0;i<=steps;i++) {
       const f=i/steps,x=a.x+(b.x-a.x)*f,z=a.z+(b.z-a.z)*f;
       const next=this.heightAt(x,z,y),nearby=this.local[this.cell(x,z)];
-      if(!nearby||!nearby.some(c=>c.walkable!==false&&Math.abs(brushSupport(c,x,z)-next)<.01)||
-         Math.abs(next-y)>this.climb||nearby.some(c=>intersectsBrush(c,x,z,next,.46,this.climb)))return false;
+      const supported=this.surfaceAt?Number.isFinite(this.surfaceAt(x,z,next+.02)):
+        nearby?.some(c=>c.walkable!==false&&Math.abs(brushSupport(c,x,z)-next)<.01);
+      if(!nearby||!supported||
+         Math.abs(next-y)>this.climb||nearby.some(c=>intersectsBrush(c,x,z,next,.46,
+           this.climb,1.78,nearby,this.surfaceAt,this.blockerAt)))return false;
       y=next;
     }
     return Math.abs(y-(b.y??0))<this.climb+.05;

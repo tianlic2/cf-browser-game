@@ -5,8 +5,8 @@
 ## M4A1-S 铁兽·帝皇金（用户提供素材）
 
 - 原始文件由用户从本地目录提供，包括 GoldSrc v10 `models/v_ak47.mdl`（用于世界/掉落枪模）与 `compile/v_` 下完整 SMD/QC、贴图及 `sound/weapons/*.wav`。
-- `tools/import_ironbeast_smd.py` 按 QC 导入 113 骨骼、手臂/手指/枪身、对应 Specular 高光层、12 个枪口/射击 VFX 材质，以及 idle、reload、select、fire、prefire、postfire 六段动作；VFX 调色板透明像素保留透明度，枪口火花/光环用加色混合、烟雾用常规透明混合。`tools/import_ironbeast_m4.py` 生成世界/掉落物使用的静态枪模。
-- 原始 6 个 WAV 原样放入 `audio/classic/ironbeast/`。QC 的 reload 事件帧 115/206 分别驱动帝皇金弹匣与 M4 卡入声；select 事件帧 135 驱动原始出枪音效，均按动画时间线排程。原 SMD 不含 walk 动作，走动沿用现有摆动系统；`knife-attack` 片段与声音保留，但当前 M4 没有独立刺刀攻击输入。
+- `tools/import_ironbeast_smd.py` 按 QC 导入 113 骨骼、手臂/手指/枪身、对应 Specular 高光层、12 个枪口/射击 VFX 材质，以及 idle、reload、select、fire、prefire、postfire 六段 SMD 动作；另从用户最初提供的 `models/v_ak47.mdl` 补回该版本独有的第七段 `knife-attack`。两份来源的 113 骨骼层级完全一致；旧包只有场景根骨和 VFX 辅助骨坐标约定不同，因此导入器只重定向枪身/双手动作，不替换当前模型、贴图或光效。`tools/import_ironbeast_m4.py` 生成世界/掉落物使用的静态枪模。
+- 原始 6 个 WAV 原样放入 `audio/classic/ironbeast/`。QC 的 reload 事件帧 115/206 分别驱动帝皇金弹匣与 M4 卡入声；select 事件帧 135 驱动原始出枪音效；`knife-attack` 的第 1/500 秒事件播放原 `M4A1-S-Beast_knifeAttack.wav`，均按源动画时间线排程且不变调。游戏中仅炫金雷神可用右键触发这段枪托攻击；普通 M4A1-C 不受影响。原 SMD 不含 walk 动作，走动沿用现有摆动系统。
 - 素材由用户提供；本地使用。未验证其公开再分发授权，勿将这些原始模型、贴图或音频单独打包公开发布。
 
 ## 运输船
@@ -25,6 +25,19 @@
 - 该移植包依赖的少数 CS:S 基础材质并未随包提供；`fallback_*.png` 是本项目生成的中性色替代纹理。天空使用本项目程序生成的冷灰色云层。原地图比例按 Source 英寸换算到场景米，并将长轴对齐游戏的 Z 轴；出生点和碰撞同步转换。
 - 游戏加载时将 X/Z 水平方向放大 2 倍、Y 垂直方向放大 1.3 倍（`scripts/prison_scale.js`）；人物高度和重力不变。碰撞平面系数、雷达轮廓、出生点及地图边界同步变换，避免画面与可通行空间错位。`scripts/prison_uv.js` 按各轴实际伸展程度重算漫反射贴图坐标，避免砖块和地砖随非等比缩放变形；烘焙光照坐标不变。
 - 这是一份社区移植素材，不属于本项目原创或 CC0。来源页的移植或下载许可不等于原游戏权利人授予本项目再分发、商用或公开部署许可。
+
+## 雪地求生（用户提供 GoldSrc `de_survivor` 包）
+
+- 原始文件由用户放入本地 `cstrike/` 目录，包含 `de_survivor_new.bsp` / `de_survivor_night.bsp`、双方 NAV、地图说明、`zeditor.wad`、两套天空盒、34 个 GoldSrc v10 场景模型、环境音和部分精灵。地图说明标注作者为 Michael Visser（3D_Mike），并注明为 Condition Zero 制作、由 Rotary_chicken 提供协助。
+- 正式游戏使用白天版 `de_survivor_new.bsp`。`tools/import_goldsrc_survivor.py` 直接读取 BSP v30 世界与静态子模型，转换 10 个 CT 与 10 个 T 出生点、内嵌调色板纹理、RGB 烘焙光照、凸体碰撞、天空盒及 230 个树木/山体/围栏等 MDL 实例；原 `func_bomb_target` 不进入团队竞技规则。
+- 源包实体引用了未随包提供的 `snow.spr`、`flare1.spr`、`3dmflared.spr` 和 `3dmflaora.spr`。游戏没有伪造这些原文件，而是用程序化雪花点和加色光晕实现等价天气/亮点效果。GoldSrc 的轨道车辆、可破坏物脚本、镜头触发器与爆破流程没有移植为互动逻辑；其静态可见场景仍随 BSP 几何导入。
+- 原始包没有附带可核验的再分发或商业授权说明。转换产物仅按用户要求用于本地项目，不据此推定公开发布或商用权。
+
+## 黑色城镇（用户提供 GoldSrc `de_blackwidow` 包）
+
+- 原始文件由用户放入本地 `黑色城镇/` 目录，包含 GoldSrc BSP v30、NAV、地图/overview 说明、overview 位图和 `btown` 六面 TGA 天空盒；BSP 内嵌 84 张调色板贴图与 RGB 烘焙光照，不依赖外置 WAD 或场景模型。
+- `tools/import_goldsrc_survivor.py 黑色城镇 blacktown` 读取原 BSP 世界与静态 brush 子模型，转换双方各 16 个出生点、29,874 个三角面、1,541 个凸体碰撞单元、雷达轮廓、原天空盒和光照。为匹配本项目人物胶囊，黑色城镇画面、碰撞、出生点与雷达三轴统一使用标准英寸换算的 1.2 倍；原 `func_bomb_target`、地图镜头与爆破流程不进入团队竞技规则。
+- 原始包没有附带可核验的作者署名、再分发或商业授权说明。转换产物仅按用户要求用于本地项目，不据此推定公开发布或商用权。
 
 ## SWAT
 
@@ -76,6 +89,7 @@
 - `tools/import_ironbeast_smd.py`：从用户提供的 Iron Beast SMD/QC 转换第一人称完整视模、Specular/VFX 层与原始动作（Python 标准库）。
 - `tools/import_ironbeast_m4.py`：从用户提供的 GoldSrc v10 MDL 转换铁兽-帝皇金静态枪模和内嵌贴图（Python 标准库）。
 - `tools/import_cf_prison.py`：可重复转换守望之城源 BSP/VTF，并生成缺失基础材质的替代贴图。
+- `tools/import_goldsrc_survivor.py`：从用户提供的 GoldSrc BSP v30、可选 MDL v10 与 TGA 天空盒重复生成雪地求生或黑色城镇地图资产；仅依赖 Python 标准库与 numpy。
 - `tools/import_cf_deagle.py`：可重复转换沙漠之鹰 Source 模型/VTF，并复制四段 WAV。
 - `tools/import_cf_view.py`：转换 AK 第一人称手臂、枪械与动画。
 - 格式依据：[Valve Source SDK](https://github.com/ValveSoftware/source-sdk-2013/tree/master/src/public) 的 `bspfile.h`、`studio.h`、`optimize.h`。

@@ -3,7 +3,7 @@
 import * as THREE from "three";
 import { ClassicSoldierRig as SoldierRig } from "./classic_soldier.js";
 import { makeBlobShadow } from "./blobshadow.js";
-import { intersectsBrush } from "./brush_collision.js";
+import { intersectsBrush } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";
 import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js";
 
@@ -655,7 +655,8 @@ export class Enemy {
     if (!colliders) return null;
     for (const c of colliders) {
       if (intersectsBrush(c,x,z,this.group.position.y,ENEMY_RADIUS,
-        this.navigation?.climb ?? ENEMY_STEP_H,ENEMY_HEAD_ROOM)) return c;
+        this.navigation?.climb ?? ENEMY_STEP_H,ENEMY_HEAD_ROOM,colliders,
+        this.navigation?.surfaceAt,this.navigation?.blockerAt)) return c;
     }
     return null;
   }
@@ -941,7 +942,9 @@ export class EnemyManager {
       const valid = (px, py, pz) => Math.abs(px) <= hw - ENEMY_RADIUS &&
         Math.abs(pz) <= hl - ENEMY_RADIUS &&
         !(this._colliders || []).some(c => intersectsBrush(c, px, pz, py,
-          ENEMY_RADIUS, this.navigation?.climb ?? ENEMY_STEP_H, ENEMY_HEAD_ROOM)) &&
+          ENEMY_RADIUS, this.navigation?.climb ?? ENEMY_STEP_H, ENEMY_HEAD_ROOM,
+          this._colliders || [], this.navigation?.surfaceAt,
+          this.navigation?.blockerAt)) &&
         Math.abs((this.navigation?.heightAt(px, pz, py) ?? py) - py) < .7;
       const spot = findActorSpawn(x, y, z,
         player ? [...this.enemies, player] : this.enemies, valid);

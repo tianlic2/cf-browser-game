@@ -17,6 +17,20 @@ __pycache__/
 counter-strike-in-browser-main/
 *.egg-info/
 
+# 用户放入的 GoldSrc 原始导入包及本地迭代记录不是站点运行资源。
+# 网页只需要 assets/classic/ 中已转换、压缩的版本。
+/cstrike/
+/黑色城镇/
+/artifacts/
+
+# GitHub 发布使用 600 KiB 分块；原始大文件留在本地供导入脚本复用，网页通过
+# 同目录的 *.partNN 文件逐字节拼回，避免改变地图/视模内容。
+/assets/classic/m4_ironbeast/view.bin
+/assets/classic/blacktown/map.bin
+/assets/classic/blacktown/map.json
+/assets/classic/survivor/map.bin
+/assets/classic/survivor/map.json
+
 # ---- 非站点资源（本地留档，不上传到 GitHub Pages）----
 # 站点是从仓库根目录发布的，凡是不被 `index.html` / `scripts/*.js` 引用的东西
 # 都会跟着上线，白白让访客多下几 MB。下面这些都已确认零引用（`grep` 过），

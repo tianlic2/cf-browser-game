@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { fetchJoinedAsset } from './chunked_asset.js?v=github-publish-1';
 
 // Original CF first-person AK: hands, fingers and gun share the authored rig.
 // The world/drop model stays separate; this rig only renders in the view scene.
@@ -6,12 +7,11 @@ export class ClassicView {
   static async load(asset='ak/view') {
     try {
       const base=new URL(`../assets/classic/${asset}/`,import.meta.url);
-      const version='m4c-source-view-1';
+      const version='github-publish-1';
       const assetUrl=name=>{const u=new URL(name,base);u.searchParams.set('v',version);return u;};
       const r=await fetch(assetUrl('view.json'));if(!r.ok)throw new Error('view.json');
-      const data=await r.json(), response=await fetch(assetUrl('view.bin'));
-      if(!response.ok)throw new Error('view.bin');
-      const bytes=await response.arrayBuffer();
+      const data=await r.json();
+      const bytes=await fetchJoinedAsset(data.binaryParts||['view.bin'],assetUrl,'视模');
       const textures=await Promise.all(data.parts.map(async p=>({
         map:await new THREE.TextureLoader().loadAsync(assetUrl(p.map).href),
       })));

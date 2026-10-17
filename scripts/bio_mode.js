@@ -2,11 +2,13 @@ import * as THREE from 'three';
 import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
 import { ClassicSoldierRig } from './classic_soldier.js';
-import { intersectsBrush } from './brush_collision.js';
+import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
 import { enemyModel } from './guncatalog.js';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';
 import { overlapsActors, sweepActorAxis, findActorSpawn } from './actor_collision.js';
 import { ZOMBIE_RESPAWN_SECONDS, refillTwoMagazines } from './bio_rules.js';
+import { chooseIntent, createDirector, directorProfile, humanRole, seededTraits,
+  updateDirector, zombieRole, zombieTargetScore } from './bio_ai.js';
 
 const ASSET = new URL('../assets/bio/zombie/', import.meta.url).href;
 const CLIPS = ['idle', 'run', 'attack', 'hit', 'death', 'scream'];
@@ -16,8 +18,6 @@ const HIT_RANGE = 1.58;
 const LEAP_UP = 8;
 const LEAP_GRAVITY = 18;
 const LEAP_HEIGHT = LEAP_UP * LEAP_UP / (2 * LEAP_GRAVITY);
-const POWER_REPAIR_TIME = 2.5;
-const POWER_DURATION = 45;
 const ZOMBIE_RUN_SPEED = HUMAN_RUN_SPEED * 1.05;
 const HIT_MOVE_SCALE = .52;
 const ZOMBIE_HEALTH = 5000;
@@ -31,16 +31,21 @@ const HUMAN_RUN_SPEED_AI = 5.6;
 const HUMAN_FLEE_SPEED = 6.0;
 const HUMAN_ROUTE_PERIOD = .36;
 const HIT_REACT_TIME = .42;
+const HUMAN_MEMORY_SECONDS = 4.2;
+const ZOMBIE_MEMORY_SECONDS = 5.5;
+const HUMAN_SIGHT_RANGE = 31;
+const ZOMBIE_SIGHT_RANGE = 34;
+const HUMAN_HEARING_RANGE = 18;
+const ZOMBIE_HEARING_RANGE = 24;
 
 export class BioMode {
-  constructor({ scene, sound, onPlayerInfected, onPlayerRespawn, onRoundEnd, onZombieKilled, onPowerRestored, onChange }) {
+  constructor({ scene, sound, onPlayerInfected, onPlayerRespawn, onRoundEnd, onZombieKilled, onChange }) {
     this.scene = scene;
     this.sound = sound;
     this.onPlayerInfected = onPlayerInfected;
     this.onPlayerRespawn = onPlayerRespawn;
     this.onRoundEnd = onRoundEnd;
     this.onZombieKilled = onZombieKilled;
-    this.onPowerRestored = onPowerRestored;
     this.onChange = onChange;
     this.phase = 'off';
     this.playerZombie = false;
@@ -53,9 +58,10 @@ export class BioMode {
     this._playerAttack = 0;
     this.playerMaxHealth = 100;
     this.playerRespawnT = 0;
-    this.power = 'off';
-    this.powerRepair = 0;
-    this.powerTime = 0;
+    this.aiTime = 0;
+    this.director = createDirector();
+    this.combatHeat = 0;
+    this.playerNoise = null;
   }
 
   async load() {
@@ -162,10 +168,10 @@ export class BioMode {
     this._playerAttack = 0;
     this.playerMaxHealth = 100;
     this.playerRespawnT = 0;
-    this.power = 'off';
-    this.powerRepair = 0;
-    this.powerTime = 0;
-    this.map?.setPower?.(false);
+    this.aiTime = 0;
+    this.director = createDirector();
+    this.combatHeat = 0;
+    this.playerNoise = null;
     this.onChange?.();
   }
 
@@ -176,7 +182,6 @@ export class BioMode {
     this.phase = 'prepare';
     this.timer = PREP;
     this.kills = this.infections = 0;
-    this.map.setPower?.(false);
     const spawns = map.bio?.humans || map.spawns.player;
     for (let i = 0; i < Math.min(5, spawns.length); i++) {
       const [x, y, z] = spawns[i];
@@ -194,7 +199,11 @@ export class BioMode {
         ammo: HUMAN_MAG_SIZE, reserve: HUMAN_INITIAL_RESERVE, reloadT: 0,
         routeT: 0, routeX: 0, routeZ: 0, moveX: 0, moveZ: 0,
         strafeSide: i % 2 ? 1 : -1, holdDecisionT: 2 + i * .35,
-        lastThreat: null, lastThreatT: 0, turnRate: 0 });
+        lastThreat: null, lastThreatT: 0, turnRate: 0,
+        traits: seededTraits(i, 'human'), role: 'anchor', intent: 'hold', intentT: 0,
+        decisionT: .12 + i * .035, acquireT: 0, burstLeft: 2 + i % 3,
+        shotNoiseT: 0, sharedThreat: null, sharedThreatT: 0,
+        searchSide: i % 2 ? 1 : -1, threatVisible: false });
     }
     this.onChange?.();
   }
@@ -225,7 +234,11 @@ export class BioMode {
       leapX: 0, leapZ: 0, stuckFor: 0,
       flashT: 0, deathT: 0, restY: model.position.y,
       respawnT: 0, rewarded: false,
-      pursuitKey: null,
+      pursuitKey: null, pursuitMemory: 0, lastKnown: null,
+      role: zombieRole(this.zombies.length, this.director.serial),
+      traits: seededTraits(this.zombies.length, 'zombie'),
+      decisionT: 0, commitT: 0, heardTarget: false, visibleTarget: false,
+      flankSide: this.zombies.length % 2 ? 1 : -1, searchAngle: 0,
       mixer: new THREE.AnimationMixer(model), active: null,
       actions: new Map() };
     for (const [key, clip] of (hazmat ? this.hazmatClips : this.clips))
@@ -329,7 +342,7 @@ export class BioMode {
     const b = this.map.bounds;
     if (Math.abs(x) > b.hw - radius || Math.abs(z) > b.hl - radius) return false;
     return !this.map.colliders.some(c => intersectsBrush(c, x, z, y, radius,
-      this.map.stepHeight ?? .5, 1.78)) &&
+      this.map.stepHeight ?? .5, 1.78, this.map.colliders)) &&
       (!checkActors || !overlapsActors(x, y, z, this._bodies(), self, radius));
   }
 
@@ -373,7 +386,8 @@ export class BioMode {
     const x = p.x + vx * .7, z = p.z + vz * .7;
     const obstacle = this.map.colliders.find(c =>
       c.h > p.y + (this.map.stepHeight ?? .5) && c.h <= p.y + LEAP_HEIGHT - .08 &&
-      intersectsBrush(c, x, z, p.y, .45, this.map.stepHeight ?? .5, 1.78));
+      intersectsBrush(c, x, z, p.y, .45, this.map.stepHeight ?? .5, 1.78,
+        this.map.colliders));
     if (!obstacle) return false;
     // A jump needs room to clear the far side; don't hop in place against a wall.
     const beyond = Math.max(1.7, Math.min(3.7, Math.abs(vx) * obstacle.hx * 2 + Math.abs(vz) * obstacle.hz * 2 + 1));
@@ -417,6 +431,8 @@ export class BioMode {
     const p = human.group.position;
     this.spawnZombie(p.x, p.y, p.z, false, human.name);
     this.infections++;
+    this.director.shock = 1;
+    this.combatHeat = 1;
     this.sound?.bio('infect', p.x, p.y, p.z);
     this.onChange?.();
   }
@@ -454,7 +470,10 @@ export class BioMode {
     z.airborne = false; z.jumpVelocity = z.jumpTime = z.jumpCooldown = 0;
     z.leapX = z.leapZ = 0;
     z.stuckFor = z.flashT = 0; z.runRate = 1;
-    z.pursuitKey = null;
+    z.pursuitKey = null; z.pursuitMemory = 0; z.lastKnown = null;
+    z.decisionT = z.commitT = 0;
+    z.heardTarget = z.visibleTarget = false;
+    z.role = zombieRole(this.zombies.indexOf(z), this.director.serial);
     for (const mesh of z.meshes) mesh.userData.enemy = z;
     this._play(z, 'idle');
     this.onChange?.();
@@ -486,6 +505,14 @@ export class BioMode {
     return true;
   }
 
+  onPlayerNoise(position, kind = 'shot') {
+    if (this.phase !== 'live' || this.playerZombie || this.playerOut || !position) return;
+    const duration = kind === 'shot' ? 1.25 : .45;
+    this.playerNoise = { x: position.x, y: position.y, z: position.z,
+      radius: kind === 'shot' ? ZOMBIE_HEARING_RANGE : 10, time: duration, kind };
+    this.combatHeat = Math.min(1, this.combatHeat + (kind === 'shot' ? .16 : .04));
+  }
+
   _chooseMother(player) {
     const options = this.humans.filter(h => h.alive);
     // Include the player in the draw, as in classic infection mode. There is
@@ -506,21 +533,7 @@ export class BioMode {
     }
     this.phase = 'live';
     this.timer = ROUND;
-    this.power = 'offline';
-    this.map?.setPower?.(false);
     this.onChange?.();
-  }
-
-  repairPower(player) {
-    if (this.phase !== 'live' || this.playerZombie || this.playerOut ||
-        this.power !== 'offline' || !this.map?.bio?.power) return false;
-    const q = this.map.bio.power;
-    if (Math.hypot(player.pos.x - q[0], player.pos.z - q[2]) > 2.5 ||
-        Math.abs(player.pos.y - q[1]) > 1.1) return false;
-    this.power = 'repairing';
-    this.powerRepair = 0;
-    this.onChange?.();
-    return true;
   }
 
   attackAsZombie(player) {
@@ -643,10 +656,65 @@ export class BioMode {
       turnRate: h.turnRate || 0 });
   }
 
+  _canSee(group, target, range, cone = -.18) {
+    const p = group.position || group.pos || group;
+    const dx = target.x - p.x, dz = target.z - p.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance > range || Math.abs((target.y || 0) - (p.y || 0)) > 3.2) return false;
+    if (distance > 4.2) {
+      const yaw = group.rotation?.y ?? group.yaw ?? 0;
+      const facing = (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / Math.max(.001, distance);
+      if (facing < cone) return false;
+    }
+    return this._lineClear(p, target);
+  }
+
+  _targetIsolation(target, targets) {
+    let neighbors = 0;
+    for (const other of targets) {
+      if (other === target) continue;
+      if (Math.hypot(other.pos.x - target.pos.x, other.pos.z - target.pos.z) < 7) neighbors++;
+    }
+    return neighbors === 0 ? 1 : neighbors === 1 ? .35 : 0;
+  }
+
+  _targetMotion(target, player) {
+    if (target.human) return { x: target.human.moveX || 0, z: target.human.moveZ || 0 };
+    return { x: player.vel?.x || 0, z: player.vel?.z || 0 };
+  }
+
+  _patrolPoint(z) {
+    const points = this.map.bio?.holdPoints || this.map.spawns.player || [];
+    if (!points.length) return [z.group.position.x, z.group.position.y, z.group.position.z];
+    if (!Number.isInteger(z.patrolIndex))
+      z.patrolIndex = (this.zombies.indexOf(z) * 3 + this.director.serial) % points.length;
+    const point = points[z.patrolIndex % points.length];
+    if (Math.hypot(point[0] - z.group.position.x, point[2] - z.group.position.z) < 2.2)
+      z.patrolIndex = (z.patrolIndex + 1 + (z.role === 'flanker' ? 1 : 0)) % points.length;
+    return points[z.patrolIndex % points.length];
+  }
+
+  _humanSupportGoal(h, humans) {
+    const mate = humans.filter(o => o !== h && o.alive)
+      .sort((a, b) => ((b.reloadT > 0) - (a.reloadT > 0)) ||
+        (Math.hypot(a.group.position.x-h.group.position.x,a.group.position.z-h.group.position.z) -
+         Math.hypot(b.group.position.x-h.group.position.x,b.group.position.z-h.group.position.z)))[0];
+    if (!mate) return this._holdPoint(h);
+    const q = mate.group.position, hold = this._holdPoint(h);
+    const dx = hold[0] - q.x, dz = hold[2] - q.z, len = Math.hypot(dx, dz) || 1;
+    return [q.x + dx / len * 3.2, q.y, q.z + dz / len * 3.2];
+  }
+
   update(dt, player, elapsed = dt) {
     if (this.phase === 'off' || this.phase === 'ended') return;
     const countdownDt = Number.isFinite(elapsed) && elapsed > 0 ? elapsed : dt;
     this.playerRef = player;
+    this.aiTime += dt;
+    this.combatHeat = Math.max(0, this.combatHeat - dt * .075);
+    if (this.playerNoise) {
+      this.playerNoise.time = Math.max(0, this.playerNoise.time - dt);
+      if (this.playerNoise.time === 0) this.playerNoise = null;
+    }
     this.timer = Math.max(0, this.timer - dt);
     this._playerAttack = Math.max(0, this._playerAttack - dt);
     if (this.phase === 'prepare') {
@@ -665,37 +733,57 @@ export class BioMode {
       else this.onChange?.();
       return;
     }
-    if (this.power === 'repairing') {
-      const q = this.map.bio.power;
-      if (this.playerZombie || this.playerOut ||
-          Math.hypot(player.pos.x - q[0], player.pos.z - q[2]) > 2.6 ||
-          Math.abs(player.pos.y - q[1]) > 1.1) {
-        this.power = 'offline';
-        this.powerRepair = 0;
-      } else {
-        this.powerRepair = Math.min(POWER_REPAIR_TIME, this.powerRepair + dt);
-        if (this.powerRepair >= POWER_REPAIR_TIME) {
-          this.power = 'online';
-          this.powerTime = POWER_DURATION;
-          this.map.setPower?.(true);
-          this.sound?.ui('switch');
-          this.onPowerRestored?.();
-        }
-      }
-    } else if (this.power === 'online') {
-      this.powerTime = Math.max(0, this.powerTime - dt);
-      if (this.powerTime <= 0) {
-        this.power = 'spent';
-        this.map.setPower?.(false);
-      }
-    }
     if (this.playerZombie && this.playerOut) {
       this.playerRespawnT = Math.max(0, this.playerRespawnT - countdownDt);
       if (this.playerRespawnT === 0) this._respawnPlayerZombie(player);
     }
     const aliveHumans = this.humans.filter(h => h.alive);
-    const targets = [...aliveHumans.map(h => ({ human: h, pos: h.group.position }))];
-    if (!this.playerZombie && !this.playerOut) targets.push({ human: null, pos: player.pos });
+    aliveHumans.forEach((h, i) => { h.role = humanRole(i, aliveHumans.length); });
+    const targets = aliveHumans.map(h => ({ human: h, isPlayer: false,
+      key: h, pos: h.group.position }));
+    if (!this.playerZombie && !this.playerOut)
+      targets.push({ human: null, isPlayer: true, key: player, pos: player.pos });
+    let nearestThreat = Infinity;
+    for (const z of this.zombies) {
+      if (z.dead) continue;
+      for (const target of targets) nearestThreat = Math.min(nearestThreat,
+        Math.hypot(z.group.position.x-target.pos.x,z.group.position.z-target.pos.z));
+    }
+    const phaseChanged = updateDirector(this.director, {
+      nearestThreat, humansAlive: targets.length,
+      humansTotal: this.humans.length + (!this.playerZombie ? 1 : 0),
+      combatHeat: this.combatHeat,
+    }, dt);
+    if (phaseChanged) {
+      this.zombies.forEach((z, i) => {
+        z.role = zombieRole(i, this.director.serial);
+        z.commitT = this.director.phase === 'assault' ? i * .24 : 0;
+        z.decisionT = 0;
+      });
+    }
+    const profile = directorProfile(this.director);
+    const zombieSenses = new Map();
+    const packSightings = [];
+    for (const z of this.zombies) {
+      if (z.dead) continue;
+      const sensed = new Map();
+      for (const target of targets) {
+        const d = Math.hypot(target.pos.x-z.group.position.x,target.pos.z-z.group.position.z);
+        const visible = this._canSee(z.group, target.pos,
+          ZOMBIE_SIGHT_RANGE * z.traits.awareness, -.26);
+        const noise = target.human ? target.human.shotNoiseT > 0 :
+          !!this.playerNoise && this.playerNoise.time > 0;
+        const radius = target.human ? ZOMBIE_HEARING_RANGE : (this.playerNoise?.radius || 0);
+        const heard = noise && d < radius && Math.abs(target.pos.y-z.group.position.y) < 5;
+        if (visible || heard) {
+          const perceived = visible ? target.pos : target.human ? target.pos : this.playerNoise;
+          const pos = { x:perceived.x,y:perceived.y,z:perceived.z };
+          sensed.set(target.key, { visible, heard, distance: d, pos });
+          packSightings.push({ target, pos, source: z.group.position, visible, heard });
+        }
+      }
+      zombieSenses.set(z, sensed);
+    }
     const targetLoads = new Map();
     for (const z of this.zombies) {
       if (z.hitT > 0) {
@@ -730,20 +818,56 @@ export class BioMode {
           (1 - Math.exp(-dt * 16));
       }
       const p = z.group.position;
+      z.commitT = Math.max(0, z.commitT - dt);
+      z.pursuitMemory = Math.max(0, z.pursuitMemory - dt);
       let chosen = null, best = Infinity, lane = 0;
+      const sensed = zombieSenses.get(z) || new Map();
       for (const t of targets) {
-        const d = Math.hypot(t.pos.x - p.x, t.pos.z - p.z);
-        const key = t.human || player;
-        const load = targetLoads.get(key) || 0;
-        const score = d + load * 2.7 - (z.pursuitKey === key ? 1.4 : 0);
-        if (score < best) { best = score; chosen = t; lane = load; }
+        const direct = sensed.get(t.key);
+        const shared = !direct && packSightings.find(s => s.target.key === t.key &&
+          Math.hypot(s.source.x-p.x,s.source.z-p.z) < 21);
+        const remembered = z.pursuitKey === t.key && z.pursuitMemory > 0;
+        if (!direct && !shared && !remembered) continue;
+        const navPos = direct?.pos || shared?.pos || z.lastKnown;
+        if (!navPos) continue;
+        const d = Math.hypot(navPos.x - p.x, navPos.z - p.z);
+        const load = targetLoads.get(t.key) || 0;
+        const memory = remembered ? z.pursuitMemory / ZOMBIE_MEMORY_SECONDS : shared ? .62 : 0;
+        const score = zombieTargetScore({ distance: d,
+          visible: !!direct?.visible, heard: !!direct?.heard || !!shared?.heard,
+          memory, load, persistent: z.pursuitKey === t.key ? 1 : 0,
+          isolated: this._targetIsolation(t, targets),
+          reloading: t.human?.reloadT > 0 ? 1 : 0, role: z.role });
+        if (score < best) { best = score; chosen = { ...t, navPos, direct, shared }; lane = load; }
       }
-      if (!chosen) continue;
-      z.pursuitKey = chosen.human || player;
-      targetLoads.set(z.pursuitKey, (targetLoads.get(z.pursuitKey) || 0) + 1);
-      const q = chosen.pos;
+      if (chosen) {
+        z.pursuitKey = chosen.key;
+        targetLoads.set(chosen.key, (targetLoads.get(chosen.key) || 0) + 1);
+        if (chosen.direct || chosen.shared) {
+          z.lastKnown = { x:chosen.navPos.x,y:chosen.navPos.y,z:chosen.navPos.z };
+          z.pursuitMemory = chosen.direct?.visible ? ZOMBIE_MEMORY_SECONDS : 3.2;
+        }
+        z.visibleTarget = !!chosen.direct?.visible;
+        z.heardTarget = !!chosen.direct?.heard || !!chosen.shared?.heard;
+      } else {
+        const patrol = this._patrolPoint(z);
+        chosen = { human: null, isPlayer: false, patrol: true,
+          key: null, pos: { x: patrol[0], y: patrol[1], z: patrol[2] },
+          navPos: { x: patrol[0], y: patrol[1], z: patrol[2] } };
+        z.pursuitKey = null;
+        z.lastKnown = null;
+        z.visibleTarget = z.heardTarget = false;
+      }
+      let q = chosen.navPos;
+      const targetMotion = chosen.patrol ? { x: 0, z: 0 } : this._targetMotion(chosen, player);
+      if (!chosen.patrol && z.role === 'cutoff') {
+        const leadTime = Math.min(.72,.28+Math.hypot(targetMotion.x,targetMotion.z)*.045);
+        q = { x:q.x + targetMotion.x*leadTime, y:q.y, z:q.z + targetMotion.z*leadTime };
+      }
       const dx = q.x - p.x, dz = q.z - p.z;
       best = Math.hypot(dx,dz);
+      const attackDistance = chosen.patrol ? Infinity :
+        Math.hypot(chosen.pos.x-p.x,chosen.pos.z-p.z);
       const desiredYaw = Math.atan2(dx, dz);
       const yawError = Math.atan2(Math.sin(desiredYaw - z.group.rotation.y),
         Math.cos(desiredYaw - z.group.rotation.y));
@@ -755,7 +879,7 @@ export class BioMode {
         z.attackT = Math.max(0, z.attackT - dt);
         const target = z.attackTarget;
         if (!z.attackLanded && z.attackT <= (z.hazmat ? .45 : 0) && target &&
-            (target.human ? target.human.alive : !this.playerZombie && !this.playerOut) &&
+            (target.human ? target.human.alive : target.isPlayer && !this.playerZombie && !this.playerOut) &&
             Math.hypot(target.pos.x - p.x, target.pos.z - p.z) < HIT_RANGE &&
             Math.abs(target.pos.y - p.y) < 1.1 && this._lineClear(p, target.pos)) {
           z.attackLanded = true;
@@ -764,12 +888,15 @@ export class BioMode {
             this.playerZombie = true;
             this.playerMaxHealth = player.hp = ZOMBIE_HEALTH;
             this.infections++;
+            this.director.shock = 1;
+            this.combatHeat = 1;
             this.onPlayerInfected?.(false);
             this.sound?.bio('infect', p.x, p.y, p.z);
           }
         }
         if (z.attackT <= 0) z.attackTarget = null;
-      } else if (best < HIT_RANGE + .18 && z.attackCd <= 0) {
+      } else if (!chosen.patrol && attackDistance < HIT_RANGE + .18 && z.attackCd <= 0 &&
+          z.commitT <= 0 && (z.visibleTarget || z.heardTarget)) {
         z.moveX *= .3; z.moveZ *= .3;
         z.attackT = z.hazmat ? 1.05 : .42;
         z.attackCd = z.hazmat ? 1.4 : 1.25;
@@ -779,14 +906,28 @@ export class BioMode {
         this.sound?.bio('attack', p.x, p.y, p.z);
       } else if (best > 1.15) {
         let vx = dx / best, vz = dz / best;
-        // The second and third pursuer take a side lane before closing in;
-        // only the last metres converge on the actual attack target.
-        if (best > 5 && lane > 0) {
-          const side = lane % 2 ? 1 : -1;
-          const offset = Math.min(2.5,lane * 1.25);
+        // Assigned flankers and overloaded pursuers take visibly different
+        // lanes. They converge only in the final metres instead of forming a
+        // single-file queue behind the pressure zombie.
+        if (!chosen.patrol && best > 5 && (lane > 0 || z.role === 'flanker')) {
+          const side = z.role === 'flanker' ? z.flankSide : lane % 2 ? 1 : -1;
+          const offset = Math.min(5.5, 1.4 + lane * 1.15 + profile.flank * 2.4);
           const tx = q.x - vz * side * offset, tz = q.z + vx * side * offset;
           const length = Math.hypot(tx-p.x,tz-p.z) || 1;
           vx = (tx-p.x)/length; vz = (tz-p.z)/length;
+        }
+        const actorIndex = Math.max(0, this.zombies.indexOf(z));
+        const temperament = ((actorIndex * 37 + this.director.serial * 17) % 100) / 100;
+        const committed = z.commitT <= 0 &&
+          (best < 3.2 || profile.commit * z.traits.aggression > .38 + temperament * .42);
+        if (!chosen.patrol && !committed && best < 11) {
+          // During probe/recovery, uncommitted zombies circle outside the
+          // firing line. This telegraphs pressure and preserves a short breath
+          // before the synchronized assault.
+          const awayX = -dx / Math.max(best,.001), awayZ = -dz / Math.max(best,.001);
+          const side = z.flankSide;
+          vx = awayX * .62 - awayZ * side * .78;
+          vz = awayZ * .62 + awayX * side * .78;
         }
         const directX = vx, directZ = vz;
         // Elevated defense decks can be reached directly with a leap. When a
@@ -798,9 +939,8 @@ export class BioMode {
           const steer = this.map.navigation.steer(p, q);
           if (steer) { vx = steer.x; vz = steer.z; }
         }
-        const lit = this.power === 'online' && Math.abs(p.z) > 9 && Math.abs(p.x) < 12;
-        const speed = ZOMBIE_RUN_SPEED * (lit ? .78 : 1) *
-          (z.stagger > 0 ? HIT_MOVE_SCALE : 1);
+        const phasePace = chosen.patrol ? .76 : .86 + profile.aggression * .14;
+        const speed = ZOMBIE_RUN_SPEED * phasePace * (z.stagger > 0 ? HIT_MOVE_SCALE : 1);
         // Turn first, then accelerate. The old controller translated directly
         // toward the target while the mesh was still facing elsewhere.
         const headingError = Math.atan2(Math.sin(desiredYaw - z.group.rotation.y),
@@ -840,86 +980,151 @@ export class BioMode {
       z.pushX *= drag;
       z.pushZ *= drag;
     }
+    const humanSenses = new Map();
+    const squadSightings = [];
     for (const h of aliveHumans) {
-      const p = h.group.position;
-      if (h.reloadT > 0) {
-        h.reloadT = Math.max(0, h.reloadT - dt);
-        if (h.reloadT === 0) {
-          const loaded = Math.min(HUMAN_MAG_SIZE, h.reserve);
-          h.ammo += loaded;
-          h.reserve -= loaded;
-        }
-      } else if (h.ammo === 0 && h.reserve > 0) h.reloadT = 2.5;
-      const threatPositions = [];
-      let nearest = null, dist = Infinity, targetPlayer = false;
+      const sensed = [];
       for (const z of this.zombies) {
         if (z.dead) continue;
-        const q = z.group.position, d = Math.hypot(q.x - p.x, q.z - p.z);
-        if (d < 30 && Math.abs(q.y-p.y) < 2.5 && this._lineClear(p,q)) {
-          threatPositions.push(q);
-          if (d < dist) { nearest = z; dist = d; targetPlayer = false; }
+        const q = z.group.position;
+        const d = Math.hypot(q.x-h.group.position.x,q.z-h.group.position.z);
+        const visible = this._canSee(h.group,q,HUMAN_SIGHT_RANGE,-.22);
+        const noisy = z.attackT > 0 || Math.hypot(z.moveX,z.moveZ) > 2.4 || z.hitT > 0;
+        const heard = noisy && d < (z.attackT > 0 ? HUMAN_HEARING_RANGE : 11.5);
+        if (visible || heard) {
+          const entry = { actor:z,pos:q,visible,heard,isPlayer:false,distance:d };
+          sensed.push(entry);
+          if (visible) squadSightings.push({ source:h.group.position,entry });
         }
       }
       if (this.playerZombie && !this.playerOut) {
-        const d = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
-        if (d < 30 && Math.abs(player.pos.y-p.y) < 2.5 && this._lineClear(p,player.pos)) {
-          threatPositions.push(player.pos);
-          if (d < dist) { nearest = null; dist = d; targetPlayer = true; }
+        const q = player.pos;
+        const d = Math.hypot(q.x-h.group.position.x,q.z-h.group.position.z);
+        const visible = this._canSee(h.group,q,HUMAN_SIGHT_RANGE,-.22);
+        const noisy = this._playerAttack > 0 || Math.hypot(player.vel?.x || 0,player.vel?.z || 0) > 3.2;
+        const heard = noisy && d < (this._playerAttack > 0 ? HUMAN_HEARING_RANGE : 10);
+        if (visible || heard) {
+          const entry = { actor:null,pos:q,visible,heard,isPlayer:true,distance:d };
+          sensed.push(entry);
+          if (visible) squadSightings.push({ source:h.group.position,entry });
         }
       }
-      h.shotCd = Math.max(0, h.shotCd - dt);
-      const visible = !!(nearest || targetPlayer);
-      if (visible) {
-        const seen = targetPlayer ? player.pos : nearest.group.position;
-        h.lastThreat = { x: seen.x, y: seen.y, z: seen.z };
-        h.lastThreatT = 2.3;
+      humanSenses.set(h,sensed);
+    }
+    for (const h of aliveHumans) {
+      const p = h.group.position;
+      h.shotNoiseT = Math.max(0,h.shotNoiseT-dt);
+      h.shotCd = Math.max(0,h.shotCd-dt);
+      h.intentT = Math.max(0,h.intentT-dt);
+      h.decisionT = Math.max(0,h.decisionT-dt);
+      h.acquireT = Math.max(0,h.acquireT-dt);
+      if (h.reloadT > 0) {
+        h.reloadT = Math.max(0,h.reloadT-dt);
+        if (h.reloadT === 0) {
+          const loaded = Math.min(HUMAN_MAG_SIZE-h.ammo,h.reserve);
+          h.ammo += loaded;
+          h.reserve -= loaded;
+        }
+      }
+      const sensed = humanSenses.get(h) || [];
+      const direct = sensed.sort((a,b) => Number(b.visible)-Number(a.visible) ||
+        a.distance-b.distance)[0] || null;
+      const shared = !direct ? squadSightings
+        .filter(s => Math.hypot(s.source.x-p.x,s.source.z-p.z) < 19)
+        .sort((a,b) => Math.hypot(a.entry.pos.x-p.x,a.entry.pos.z-p.z) -
+          Math.hypot(b.entry.pos.x-p.x,b.entry.pos.z-p.z))[0]?.entry : null;
+      const observed = direct || shared;
+      const visible = !!direct?.visible;
+      if (observed) {
+        if (visible && !h.threatVisible) h.acquireT = h.traits.reaction;
+        h.lastThreat = { x:observed.pos.x,y:observed.pos.y,z:observed.pos.z };
+        h.lastThreatT = direct?.visible ? HUMAN_MEMORY_SECONDS : 2.4;
       } else h.lastThreatT = Math.max(0,h.lastThreatT-dt);
-      const q = visible ? (targetPlayer ? player.pos : nearest.group.position) :
-        h.lastThreatT > 0 ? h.lastThreat : null;
-      if (!visible && q) dist = Math.hypot(q.x-p.x,q.z-p.z);
-      if (!visible && q) threatPositions.push(q);
-      this._reconsiderHold(h, threatPositions, dt);
-      const threatened = !!q;
-      let vx = 0, vz = 0, speed = HUMAN_RUN_SPEED_AI;
-      if (q && dist < 9.5) {
-        // Sample legal escape directions and prefer the one that opens the
-        // most distance from the entire pack, not merely the nearest ghost.
-        [vx,vz] = this._escapeDirection(h,q,threatPositions.length ? threatPositions : [q]);
-        speed = HUMAN_FLEE_SPEED;
-      } else {
-        [vx, vz] = this._humanRoute(h, this._holdPoint(h), dt);
+      h.threatVisible = visible;
+      const q = observed ? observed.pos : h.lastThreatT > 0 ? h.lastThreat : null;
+      const dist = q ? Math.hypot(q.x-p.x,q.z-p.z) : Infinity;
+      const threatPositions = sensed.map(s=>s.pos);
+      if (q && !threatPositions.length) threatPositions.push(q);
+      this._reconsiderHold(h,threatPositions,dt);
+
+      const reloaders = aliveHumans.filter(o=>o!==h && o.reloadT>0).length;
+      if (h.reloadT === 0 && h.reserve > 0 && (h.ammo === 0 ||
+          (h.ammo <= 7 && dist > 11 && reloaders < Math.max(1,Math.floor(aliveHumans.length/2))))) {
+        h.reloadT = 2.5;
+        h.intentT = 0;
       }
-      const motion = this._moveHuman(h, vx, vz, dt, speed);
+      const closestMate = aliveHumans.filter(o=>o!==h).sort((a,b) =>
+        Math.hypot(a.group.position.x-p.x,a.group.position.z-p.z)-
+        Math.hypot(b.group.position.x-p.x,b.group.position.z-p.z))[0];
+      const mateNeedsHelp = !!closestMate && (closestMate.reloadT>0 || closestMate.intent==='evade');
+      if (h.decisionT <= 0) {
+        const closeness = q ? Math.max(0,(11-dist)/9) : 0;
+        const scores = {
+          hold:.36+(h.role==='anchor'?.28:0),
+          engage:visible ? .68+h.traits.courage*.25-closeness*.22 : 0,
+          evade:q ? closeness*.92+(h.reloadT>0?.35:0)+(1-h.traits.courage)*.18 : 0,
+          support:mateNeedsHelp ? .48+h.traits.teamwork*.36+(h.role==='support'?.2:0) : 0,
+          investigate:!visible&&q ? .46+h.traits.courage*.2 : 0,
+          rotate:q&&threatPositions.length>1 ? .38+profile.aggression*.16 : 0,
+        };
+        const next = chooseIntent(h.intent,h.intentT,scores);
+        if (next !== h.intent) { h.intent=next;h.intentT=.7+h.traits.teamwork*.35;h.routeT=0; }
+        h.decisionT=.18+h.traits.reaction*.45;
+      }
+
+      let vx=0,vz=0,speed=HUMAN_RUN_SPEED_AI;
+      if (h.intent==='evade'&&q) {
+        [vx,vz]=this._escapeDirection(h,q,threatPositions.length?threatPositions:[q]);
+        speed=HUMAN_FLEE_SPEED;
+      } else if (h.intent==='support') {
+        [vx,vz]=this._humanRoute(h,this._humanSupportGoal(h,aliveHumans),dt);
+      } else if (h.intent==='investigate'&&q) {
+        const dx=q.x-p.x,dz=q.z-p.z,len=Math.hypot(dx,dz)||1;
+        const goal=[q.x-dz/len*h.searchSide*3.6,q.y,q.z+dx/len*h.searchSide*3.6];
+        [vx,vz]=this._humanRoute(h,goal,dt);
+        speed=HUMAN_RUN_SPEED_AI*.82;
+      } else if (h.intent==='engage'&&q&&visible) {
+        if (dist<8.2) {
+          [vx,vz]=this._escapeDirection(h,q,threatPositions.length?threatPositions:[q]);
+          speed=HUMAN_FLEE_SPEED;
+        } else if (dist<22&&h.role!=='anchor') {
+          const dx=q.x-p.x,dz=q.z-p.z,len=Math.hypot(dx,dz)||1;
+          vx=-dz/len*h.strafeSide;vz=dx/len*h.strafeSide;
+          if (!this._canMove(p.x+vx*1.1,p.z+vz*1.1,p.y,.45,h)) h.strafeSide*=-1;
+          speed=HUMAN_RUN_SPEED_AI*.42;
+        } else [vx,vz]=this._humanRoute(h,this._holdPoint(h),dt);
+      } else [vx,vz]=this._humanRoute(h,this._holdPoint(h),dt);
+
+      const motion=this._moveHuman(h,vx,vz,dt,speed);
       if (q) {
-        const wanted = Math.atan2(q.x - p.x, q.z - p.z);
-        const error = Math.atan2(Math.sin(wanted - h.group.rotation.y),
-          Math.cos(wanted - h.group.rotation.y));
-        const turn = THREE.MathUtils.clamp(error, -5.6 * dt, 5.6 * dt);
-        h.group.rotation.y += turn;
-        h.turnRate = turn / Math.max(dt,.001);
-        if (h.shotCd <= 0 && h.reloadT === 0 && h.ammo > 0 &&
-            visible && dist < 27 && Math.abs(error) < .48) {
-          h.shotCd = .43 + Math.random() * .18;
-          h.ammo--;
-          if (targetPlayer) {
-            player.hp = Math.max(0, player.hp - 9);
-            if (player.hp === 0) this.killPlayerZombie(player);
-          } else nearest.takeDamage(12, false,
-            { x: q.x - p.x, z: q.z - p.z });
+        const wanted=Math.atan2(q.x-p.x,q.z-p.z);
+        const error=Math.atan2(Math.sin(wanted-h.group.rotation.y),Math.cos(wanted-h.group.rotation.y));
+        const turn=THREE.MathUtils.clamp(error,-5.6*dt,5.6*dt);
+        h.group.rotation.y+=turn;h.turnRate=turn/Math.max(dt,.001);
+        if (h.shotCd<=0&&h.reloadT===0&&h.ammo>0&&visible&&h.acquireT<=0&&
+            dist<27&&Math.abs(error)<.48) {
+          h.ammo--;h.shotNoiseT=1.1;this.combatHeat=Math.min(1,this.combatHeat+.035);
+          h.burstLeft--;
+          if (h.burstLeft<=0) { h.burstLeft=2+Math.floor(Math.random()*3);h.shotCd=.62+Math.random()*.34; }
+          else h.shotCd=.25+Math.random()*.13;
+          const hitChance=Math.max(.5,h.traits.accuracy-Math.max(0,dist-8)*.012-
+            Math.min(.12,motion.speed*.018)-(h.intent==='evade'?.12:0));
+          if (Math.random()<hitChance) {
+            if (direct.isPlayer) {
+              player.hp=Math.max(0,player.hp-9);
+              if (player.hp===0)this.killPlayerZombie(player);
+            } else direct.actor.takeDamage(12,false,{x:q.x-p.x,z:q.z-p.z});
+          }
           h.rig.recoil(.7);
-          this.sound?.enemyShoot(p.x, p.y + 1.3, p.z, 'm4');
+          this.sound?.enemyShoot(p.x,p.y+1.3,p.z,'m4');
         }
-      } else if (motion.moved > .001) {
-        const wanted = Math.atan2(motion.x, motion.z);
-        const error = Math.atan2(Math.sin(wanted-h.group.rotation.y),
-          Math.cos(wanted-h.group.rotation.y));
-        const turn = THREE.MathUtils.clamp(error,-5.6*dt,5.6*dt);
-        h.group.rotation.y += turn;
-        h.turnRate = turn / Math.max(dt,.001);
-      } else {
-        h.turnRate *= Math.exp(-dt*9);
-      }
-      this._animateHuman(h, dt, motion, threatened && visible);
+      } else if (motion.moved>.001) {
+        const wanted=Math.atan2(motion.x,motion.z);
+        const error=Math.atan2(Math.sin(wanted-h.group.rotation.y),Math.cos(wanted-h.group.rotation.y));
+        const turn=THREE.MathUtils.clamp(error,-5.6*dt,5.6*dt);
+        h.group.rotation.y+=turn;h.turnRate=turn/Math.max(dt,.001);
+      } else h.turnRate*=Math.exp(-dt*9);
+      this._animateHuman(h,dt,motion,!!q&&visible);
     }
     if (this.timer <= 0) this._end('human');
     else if (this.humans.every(h => !h.alive) && (this.playerZombie || this.playerOut)) this._end('zombie');
@@ -950,7 +1155,6 @@ export class BioMode {
       zombies: this.zombies.length + (this.playerZombie ? 1 : 0),
       playerZombie: this.playerZombie, kills: this.kills, infections: this.infections,
       playerRespawnT: this.playerRespawnT,
-      power: this.power, powerRepair: this.powerRepair / POWER_REPAIR_TIME,
-      powerTime: this.powerTime };
+      directorPhase: this.director.phase, directorIntensity: this.director.intensity };
   }
 }

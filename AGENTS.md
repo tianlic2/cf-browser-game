@@ -1,5 +1,80 @@
 # AGENTS.md
 
+## 2026-10-17 运输船地下走廊尽头木箱恢复可跳
+- 目标是镜像后约 `x=-12.83,z=13.61` 的裸木箱；其顶面比地下地面高 `1.397m`，而通用 `7.5m/s` 起跳在 `21m/s²` 重力下理论高度仅约 `1.339m`，且帧进积分会让实际顶点更低，因此会卡在箱沿。
+- `scripts/classic_map.js` 只给运输船设置 `jumpHeightScale=1.16`，复用 `jumpVelocityForHeightScale()` 按平方根放大起跳速度。30fps 离散仿真顶点约 `1.422m`，对目标箱留约 `2.5cm` 余量；60fps 下仍不能直接跳上约 `1.52m` 的更高地下箱。其他地图的跳跃、爬阶阈值和箱体防穿透逻辑不变。
+- `tools/test_classic_map.mjs` 锁定该箱并用与主循环一致的半隐式离散积分校验 30fps 可达、60fps 高箱负控制；`tools/test_transport_box_collision.mjs` 继续覆盖空中不钻箱与正常落到箱顶。
+
+## 2026-10-17 生化 NPC：感知、团队角色与轻量导演
+- `scripts/bio_ai.js` 是不依赖 Three.js 的决策层：佣兵角色为 anchor/support/scout/rear_guard，幽灵角色为 pressure/flanker/cutoff/opportunist；个体特质由索引稳定生成，避免每帧随机导致行为抖动。`chooseIntent()` 带滞回，除紧急撤退外不能频繁改主意。
+- 幽灵不再直接读取全图存活目标：只有视野、枪声、21m 内同伴共享线索或尚未衰减的 5.5s 最后位置记忆能进入目标评分；完全无感知时按黑色城镇的守点候选巡逻。玩家开枪由 `main.js -> bioMode.onPlayerNoise()` 提供听觉事件，不能把当前玩家坐标持续当作声音来源。幽灵按队伍负载、孤立程度、换弹状态和角色选目标，并在侧翼/截断位置上寻路。
+- 佣兵有 4.2s 视觉记忆、听觉、队友共享目击、首次看见目标的反应延迟，以及 hold/engage/evade/support/investigate/rotate 六种意图。射击有短点射和距离/移动/撤退误差；低弹量只在相对安全且队友没有集中换弹时提前换弹。部分换弹必须只装 `magSize-ammo`，不能把当前余弹再叠一整个弹匣。
+- 轻量导演只改变战术积极度、侧翼幅度与提交进攻的比例，不生成敌人、不加血、不传递目标坐标。阶段为 probe -> build -> assault -> recover；进入 assault 时按 `.24s` 错开幽灵提交时间，避免所有 NPC 同帧冲锋。感染事件只提高短期强度并促使高潮提前回落。
+- `window.__tactical.bioAI()` 暴露导演阶段、佣兵角色/意图/反应与幽灵角色/感知/记忆，供行为验收。`tools/test_bio_tactical_ai.mjs` 覆盖角色分配、个性稳定性、意图滞回、无感知不可选目标、收割目标偏好、导演完整循环及主程序接线。
+
+## 2026-10-17 取消生化模式配电系统玩法
+- 黑色城镇生化模式不再提供配电箱修复交互：`E` 键入口、2.5 秒修复状态、45 秒应急照明、区域幽灵减速、提示 Toast 与左侧目标 HUD 均已删除。`BioMode.status()` 也不再暴露任何电力状态，配电系统不会影响胜负、AI 或人物属性。
+- `power_box.glb` 仍按原位置作为普通场景道具保留，并继续使用与模型一致的碰撞；其专属状态灯、防守区灯光和 `setPower()` 控制器已移除。配置字段改名为 `powerBox`，明确该坐标只用于摆放道具。
+- `tools/test_bio_blacktown_map.mjs` 现在同时守住“配电箱模型仍存在”和“主循环、生化规则、地图均没有电力玩法入口或照明减速效果”。
+
+## 2026-10-17 四类枪械爆头改为固定均值的 ±10% 随机伤害
+- AK、M4（含炫金雷神）、巴雷特、沙漠之鹰的直接爆头平均伤害分别为 `140 / 104 / 750 / 120`；每次命中在平均值的 `90%～110%` 间均匀随机并四舍五入为整数，因此直接命中范围分别为 `126～154 / 94～114 / 675～825 / 108～132`。
+- 爆头不再使用普通模式的“至少等于目标满血”或生化模式的 `2.2×` 身体伤害，也不吃身体伤害的距离衰减。身体命中仍沿用 `damageAt()`；子弹穿木箱后仍在随机爆头伤害上乘枪械原有穿透倍率，所以穿箱爆头可以低于上述直接命中区间。
+- 唯一数值表和随机函数在 `scripts/headshot_damage.js`；`tools/test_headshot_damage.mjs` 覆盖四把枪的下限、中点、上限、均值、全区间采样，以及主射击链路和穿箱衰减顺序。
+
+## 2026-10-17 经典生化改为黑色城镇雨夜版本
+- 生化模式不再构建旧的原创工业场景；`scripts/bio_map.js` 现在调用 `buildBlacktownMap()` 创建第二份独立的黑色城镇实例，内部地图 ID 仍是 `bio`。团队竞技 `mapCatalog.blacktown` 保持独立，生化雨夜、道具、雾和灯光不会串到团队竞技。大厅显示「黑色城镇（生化）」；旧生化逻辑继续读取 `map.bio.humans/mutants/holdPoints/power`，规则和僵尸资源未删除。
+- 生化实例叠加 520 条屋顶截断的动态雨线、地面积水、3 辆废弃汽车和 1 个可修复配电箱；雨滴用黑色城镇的 `surfaceAt(x,z,Infinity)` 在最上层可见表面终止，室内不会出现穿屋顶的雨。汽车和配电箱按模型真实包围盒生成旋转凸体碰撞，不使用放大的世界 AABB。场景坐标集中在 `scripts/bio_blacktown_config.js`。
+- 道具不能只验证“脚下有地面”：首轮把汽车/配电箱放进了狭窄通道，虽可寻路但会实质堵路。最终位置先按可见地面、约 5～6m 周边净空筛选，再验证所有人类出生点到 8 个守点均可达，并在浏览器逐个查看配电箱、废车、雨夜及 TDM 原版。`tools/test_bio_blacktown_map.mjs` 守住源地图复用、可见地面对齐、守点可达和雨/废车资源接入；`debugMap=bio&debugAutoStart=1&debugPlayer=x,y,z,yaw,pitch` 可直接进入指定机位复查。
+
+## 2026-10-17 GoldSrc 水平空气墙必须由可见墙面确认
+- 仅把人物脚底对齐 `surfaceAt()` 仍会留下水平空气墙：`intersectsBrush()` 最后仍可能因 BSP 实心叶的隐藏碰撞帽或不可见 brush 返回阻挡。`goldsrc_surface.js` 现在同时索引坡度过陡的可见 BSP 三角面，并提供 `blockerAt(x,z,feet,radius,step,height)`；GoldSrc 凸叶命中只有在人物胶囊附近、有效身体高度范围内确有可见墙面/箱侧/洞壁时才成为水平阻挡。水平三角面继续只负责落脚，透明表面与无碰撞 MDL 装饰仍排除。
+- 玩家 `blockedBy()` / `canMoveThroughBrushes()`、NPC `blockedAt()` / 出生净空与 `GroundNavigation` 全部传递同一个 `blockerAt`。通用审计在雪地求生 1.2m 网格中移除 217 个“旧判定阻挡、附近无可见墙面”的幽灵 blocker，同时保留 758/8,600 个可见墙体采样；15,044 个旧导航节点变为 18,065 个可见且连通的节点。黑色城镇同法移除 638 个幽灵 blocker、保留 629/7,114 个可见墙体采样，导航保持跨图连通。
+- `tools/audit_goldsrc_collision.mjs` 现在同时报告内部顶面、碰撞帽/画面不一致、移除的水平幽灵 blocker 与保留的可见墙采样。未来地图若只通过落脚高度测试、没有非零的墙体保留覆盖，不能宣称空气墙验收完成。
+
+## GoldSrc 新地图导入的强制碰撞规范（长期规则）
+- 以后通过 `tools/import_goldsrc_survivor.py` 新增任何 GoldSrc BSP 地图时，必须沿用 `collisionSurfaceMode="visible-mesh-v1"` 与所有凸叶 `localStep=true`；不得把凸叶全局 `c.h` 或未过滤的 `brushSupport()` 直接当作人物落脚面。地图加载器必须调用 `prepareGoldsrcCollision(data,binary)`，并把其 `surfaceAt/surfacesAt/blockerAt` 同时交给玩家移动、NPC 移动和 `GroundNavigation`。
+- 原因与验收流程固定记录在 `docs/goldsrc-map-import.md`。每次导入后先运行 `tools/audit_goldsrc_collision.mjs <asset-id> <navigation-max-height> 1.2`，再写地图专项测试，至少覆盖：出生点贴合可见地面、全部导航节点贴合可见三角面、双方跨图连通、斜坡可走、实体侧墙仍阻挡。禁止用提高 `stepHeight`、缩小人物胶囊、删大块碰撞或保留所有隐藏 `clip` 的方式掩盖空气墙。
+- 浏览器画面验收必须检查出生区、洞口、连续楼梯、斜坡、箱体堆、屋顶边缘与上下层重叠区域，并检查控制台。只有“地图能加载”不能视为碰撞验收通过。
+
+## 2026-10-17 雪地求生 BSP 空气墙与悬浮层修复
+- 雪地求生与黑色城镇同属 GoldSrc BSP 导入图，也存在“凸实心叶内部切面被当作地面”的问题，而且更严重：真实 `de_survivor_new` 以 `1.2m` 网格抽样发现 16,711 个候选顶面仍位于另一实心叶内部。转换器现在给 `survivor` 与 `blacktown` 两种 profile 都写入 `localStep=true`；运行时仍补标旧产物，避免已有地图缓存缺字段。
+- 原黑色城镇专用的可见地面索引已通用化为 `scripts/goldsrc_surface.js`。雪地求生从自己 `map.bin` 的不透明 BSP 三角面构建 `surfaceAt/surfacesAt`，排除透明水面与 230 个无碰撞的外部 MDL 装饰模型；玩家、NPC、爬阶判定和导航只使用画面中真实存在的雪地、洞穴地面、坡面及建筑面，BSP 凸体继续只承担墙体、箱体侧面和顶棚阻挡。
+- `tools/test_survivor_map.mjs` 现在校验 20 个出生点与可见地面误差小于 `.03m`、16,711 个隐藏顶面确实被识别，以及 15,044 个导航节点逐点贴合渲染三角面；双方出生点仍跨图连通。黑色城镇、运输船箱体、经典地图与五地图注册回归均通过。内置浏览器以 `debugMap=survivor` 重新进入雪地求生，洞穴、坡面、雪景、武器与 HUD 正常，控制台无警告或错误。本条覆盖下方 16,688 个旧碰撞顶面导航节点的历史记录。
+
+## 2026-10-17 黑色城镇人物落脚面与可见地面对齐
+- 前一版只把 `brushTop(c,x,z)` 用于局部爬坡，但 GoldSrc BSP 的 1,541 个凸实心叶彼此相邻：叶与叶之间的内部切面也会返回一个有限顶面，`supportAt()` 因而可能把人物抬到比画面地面高 `0.24384m` 或 `0.48768m` 的隐藏层。`brush_collision.js` 现在用 `brushContainsPoint()` / `brushSupportIsExposed()` 检查候选面上方是否仍落在另一实心叶内；内部切面不能再作为玩家或 NPC 支撑，也不能作为可跨越台阶。真实地图扫描排除了 6,137 个此类隐藏顶面。
+- 仅做 BSP 并集外露检查仍不足：屋顶边缘、墙顶等外露碰撞帽可能没有对应的水平渲染面。`goldsrc_surface.js` 直接从 `map.bin` 的不透明可见三角形构建 2m X/Z 索引，提供 `surfaceAt/surfacesAt`；黑色城镇的玩家落脚、爬阶放行、NPC 落脚和分层导航都以该可见面为权威高度，BSP 凸体只继续承担墙体、箱体侧面和顶棚阻挡。透明水面不进入支撑索引。
+- `tools/test_blacktown_map.mjs` 校验 32 个出生点脚底与渲染面误差小于 `.03m`、14,017 个导航节点逐点落在可见三角形上，双方出生点仍跨图连通；`tools/test_blacktown_collision.mjs` 守住内部叶面过滤、斜坡放行与实体侧墙阻挡。运输船箱体、经典地图、雪地求生和地图注册回归均通过。内置浏览器用最终缓存版本重新进入黑色城镇，地图/武器/HUD 正常，控制台无警告或错误。本条覆盖下方“局部顶面均可站立”及 22,489 个导航节点的旧记录。
+
+## 2026-10-17 黑色城镇下坡贴地与可跳箱体
+- 黑色城镇三轴整体放大到源换算的 `1.2` 倍后，移动能力此前没有同步：48-unit 箱体从 `1.2192m` 变为 `1.46304m`，而全局 `7.5m/s` 起跳在重力 `21m/s²` 下最高只能升 `1.33929m`，所以原来能跳上的箱子变成不可达。`blacktown_map.js` 现在声明 `jumpHeightScale=1.2`，`main.js` 令起跳速度乘 `sqrt(1.2)`，故最高点同步为 `1.60714m`；64-unit / `1.95072m` 高箱仍不能从地面直跳，仍须借矮箱。其他地图起跳速度不变。
+- 下楼梯顿挫的根因是水平移动后脚下台面降低时，旧逻辑立即把 `onGround` 置为 false，人物会在每一级台阶经历一次短暂自由落体。黑色城镇现在以 `groundSnap=.56m` 做 step-down：仅当上一帧在地面、竖直速度不向上且落差不超过阈值时贴到新支撑面；真正走出高台、正在跳跃或大落差仍正常下落。`stepHeight` 同步为 `.56m`，覆盖放大后的 18-unit / `.54864m` 原生爬阶口径。
+- `stepLift` 现在支持正负两侧归零；黑色城镇下台阶时先加等量正偏移保持相机连续，再以 `5.2m/s` 收敛（上行仍为 `2.6m/s`），避免连续台阶把偏移累积到上限后再跳变。向上台阶的既有负偏移保留，其他地图未开启下行平滑。`tools/test_blacktown_collision.mjs` 数值校验 48/64-unit 箱体边界、贴地/高台/空中三种 step-down 判定及 8-unit 台阶相机补偿；黑色城镇 22,489 个导航节点、运输船箱体防穿入、经典图与雪地求生回归均通过。内置浏览器重新加载黑色城镇，运行画面正常且控制台无警告/错误。
+
+## 2026-10-17 炫金雷神右键枪托攻击
+- 用户最初提供的 `/Users/chen/Downloads/m4a1-s_iron_beast_imperial_gold/models/v_ak47.mdl` 确实含第 7 段 `knife-attack`：267 帧、500fps、完整时长 `.532s`，第 1 帧（`.002s`）有 5004 事件 `weapons/m4a1-s-beast_knifeattack.wav`；同包 `sound/weapons/M4A1-S-Beast_knifeAttack.wav` 已原样位于 `audio/classic/ironbeast/knife_attack.wav`。后续用于最终外观/光效的 SMD/QC 包只有六段普通动作，所以此前漏掉了这项功能。
+- 两份来源的 113 根骨骼名称、次序和父子关系逐项一致。`tools/import_ironbeast_smd.py` 现在接受第三个旧 MDL 参数，只把 `knife-attack` 追加到现有 SMD 视模，不替换已经验收的枪身、双手、材质和光效。旧 MDL 的 `Scene Root` 与 58 号后的 VFX 辅助骨使用不同坐标约定：根骨固定为当前 `idle_0`，58+ 辅助骨保持当前待机姿态，只转移 1～57 号枪械/双手动作；攻击播放期间隐藏射击专用 additive 卡片，避免光效与挥枪动作脱离。
+- 仅当当前武器为 `m4` 且皮肤是 `ironbeastgold` 时，真右键触发枪托攻击；普通 M4A1-C 和其他武器逻辑不变。动作期间封锁开火与换弹，切枪/死亡会取消动作。命中窗口按源动作明显前挥段设为 `70～145/500s`，有效距离 `1.5m`；源文件不含伤害数值，按用户最终口径身体与头部伤害均为 100。射线优先最近障碍，不能隔墙命中，直接命中敌人才触发准心反馈。
+- `scripts/audio.js` 只播放源 `knife_attack.wav`（原速、无变调、无混响、无合成兜底），从动作事件 `.002s` 对齐。`tools/test_ironbeast_integration.mjs` 校验源 MDL 第七序列、267 个采样、事件、WAV、根骨/VFX 重定向、枪身动作幅度、右键皮肤门槛、动作渲染优先级与原声入口。内置浏览器以调试触发方式逐帧目视：枪托与双手完整挥入画面、射击 VFX 不再漂浮，结束后回到原待机姿势。
+
+## 2026-10-17 黑色城镇斜坡/楼梯空气墙修复
+- 根因是 GoldSrc BSP 的一个凸实心叶可同时覆盖斜坡最低点与最高点；旧 `intersectsBrush()` 只用整个凸体的全局最高点 `c.h` 判断能否迈过。人物站在低端时，局部表面就在脚下，但远端坡顶较高，胶囊遂与同一凸体发生水平碰撞，形成看不见的墙。
+- 黑色城镇转换出的碰撞体现在带 `localStep=true`。`intersectsBrush()` 只对这类碰撞先用 `brushTop(c,x,z)` 检查人物中心正下方的局部顶面：若在当前脚底加爬阶高度内，则交给 `supportAt()` 抬升脚底，不当作水平墙；人物中心尚未进入真实墙体时 `brushTop()` 为 `-Infinity`，仍走原半径外扩平面判定，因此墙边、箱侧和栏杆不会失去碰撞。其他地图没有该标记，旧碰撞语义不变。
+- 转换器同时拒绝把 `faceCount=0` 的实体 brush 当作团队竞技碰撞，避免无任何可见表面的专用阻挡体变成空气墙。`tools/test_blacktown_collision.mjs` 用合成斜坡守住“坡面放行、实体侧墙仍阻挡”，并扫描放大后的真实黑色城镇：复现并消除旧算法的 813 个空气墙采样，24,764 个多高度局部表面采样均不再被自身误挡。黑色城镇导航节点由 22,233 增至 22,448；32 个出生点和双方跨图可达仍通过。经典运输船箱体侧入/脱困、经典地图楼梯/地道、雪地求生与地图注册回归均通过；守望之城未启用此标记。
+
+## 2026-10-17 GoldSrc `de_blackwidow` 作为「黑色城镇」团队竞技地图
+- 用户放入本地 `黑色城镇/` 的素材包是 GoldSrc BSP v30，正式大厅 ID 为 `blacktown`、显示名「黑色城镇」，只属于团队竞技。原 16 个 `info_player_start` 与 16 个 `info_player_deathmatch` 分别作为保卫者/潜伏者出生点；原爆破目标、镜头与爆破规则不接入。
+- 通用化后的 `tools/import_goldsrc_survivor.py 黑色城镇 blacktown` 导入 BSP 世界及静态 brush 子模型、84 张内嵌调色板贴图、RGB 烘焙光照、`btown` 六面天空盒与 BSP 凸体碰撞。产物在 `assets/classic/blacktown/`，共 84 个材质批次、29,874 个三角面、1,541 个凸体碰撞单元；为匹配本项目人物胶囊，画面、碰撞、出生点、雷达及边界三轴统一使用标准换算的 1.2 倍，即 1 unit = .03048m，以 overview 的 `(4,815)` 为水平中心、CT 基地高度 `-301` 为垂直零点。
+- `spawnYaws` 保存原实体朝向，`gameStart()` 与 `respawnPlayer()` 会在存在该字段时使用对应出生点朝向，避免黑色城镇出生后面朝近墙；旧地图没有字段时仍回退到 yaw=0。`scripts/blacktown_map.js` 只加载原网格、贴图、光照与天空，不添加臆造的音效或特效。
+- `scripts/main.js` 注册第五张地图并重新分配加载进度，`index.html`、README 与素材说明同步。`tools/test_blacktown_map.mjs` 校验 1.2 倍边界、32 个出生点、资源完整性、碰撞有限性及 22,233 个导航节点的跨图可达；`tools/test_map_removal.mjs` 更新为五张现役地图。浏览器已从大厅选择并进入放大后的黑色城镇，核对原 B 点拱门、建筑、箱体、天空盒、雷达与出生朝向；本次加载没有新增控制台错误。
+
+## 2026-10-17 GoldSrc `de_survivor` 作为「雪地求生」团队竞技地图
+- 用户放入本地 `cstrike/` 的素材包同时含 `de_survivor_new.bsp` 与 `de_survivor_night.bsp`；正式地图采用白天版 `de_survivor_new`，大厅 ID 为 `survivor`、显示名「雪地求生」，只属于团队竞技。原 `func_bomb_target` 爆破目标不接入规则；10 个 `info_player_start` 与 10 个 `info_player_deathmatch` 分别作为保卫者/潜伏者出生点。
+- `tools/import_goldsrc_survivor.py` 新增 GoldSrc BSP v30 / Studio MDL v10 转换链：导入世界和静态 brush 子模型、内嵌调色板贴图、RGB 烘焙光照、`snowlake_` 六面天空盒、230 个树木/山体/围栏场景模型实例及 BSP 凸体碰撞。产物在 `assets/classic/survivor/`，共 130 个材质批次、60,571 个三角面、1,199 个凸体碰撞单元；坐标按 1 unit = .0254m 转换，以原 overview 的 `(832,880)` 为水平中心。
+- 源包实体引用的 `snow.spr`、`flare1.spr`、`3dmflared.spr`、`3dmflaora.spr` 并未随包提供；`scripts/survivor_map.js` 用程序化飘雪与加色光晕做等价效果，不伪造缺失原文件。原全局 `ambience/arcticwind4.wav` 原样复制并只在这张地图激活时播放。GoldSrc 的爆破流程、轨道车辆、镜头触发器和可破坏物脚本不迁入团队竞技逻辑；其静态可见 brush 几何仍保留。
+- `scripts/main.js` 注册第四张地图、分配加载进度、切图时隔离地图音频，并提供仅查询参数触发的 `debugMap` / `debugAutoStart` 本地验收入口；`index.html`、README 与经典素材说明同步。`tools/test_survivor_map.mjs` 检查网格/贴图/光照/天空盒、20 个有支撑且不重叠的出生点、碰撞有限性与 16,688 个导航节点的跨图可达；`tools/test_map_removal.mjs` 更新为四张现役地图。浏览器实测能从大厅选择并自动进入雪地求生，画面显示原洞穴/雪地/树木/山体，控制台无错误。
+
 ## 2026-10-17 删除王宫回廊与樱港运输船
 - 当前正式地图只保留运输船、守望之城和生化禁区；大厅入口、地图注册、加载进度、专属光照/后处理与樱港界面皮肤已同步移除。下方所有提及王宫回廊或樱港运输船的段落均为历史记录，不再代表当前运行状态。
 - 王宫回廊的 `scripts/palace_map.js`、`scripts/palace_textures.js` 与 `assets/palace/` 已删除；樱港运输船的 `scripts/anime_ship.js`、`scripts/anime_post.js` 与 `artifacts/anime_ship/` 已删除。运输船共用的 `assets/classic/` 未动。

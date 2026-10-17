@@ -83,6 +83,17 @@ export const SKINS = {
       model: { file: "./assets/classic/m4c/m4a1_custom.glb", rotY: Math.PI, targetLen: 0.82, anchorKey: "m4_custom" },
     },
     {
+      // 用户提供的 Iron Beast Imperial Gold：保留原贴图；完整骨骼/手臂视模与音效单独接入，
+      // GLB 是同一枪的世界/掉落物模型。
+      id: "ironbeastgold", name: "炫金雷神", displayName: "炫金雷神", slots: {
+        Primary: { color: 0xd5a83c, metalness: 0.66, roughness: 0.34 },
+        Secondary: { color: 0x6f5429, metalness: 0.54, roughness: 0.46 },
+        Highlight: { color: 0xf2d47b, metalness: 0.74, roughness: 0.27 },
+      },
+      accent: 0xd5a83c, muzzle: 0xffd078,
+      model: { file: "./assets/classic/m4_ironbeast/ironbeast.glb", rotY: 0, targetLen: 0.82, anchorKey: "m4_ironbeast" },
+    },
+    {
       id: "thor", name: "雷神", slots: {
         Primary: { color: 0x8894a3, metalness: 0.45, roughness: 0.36 },
         Secondary: { color: 0x152a55, metalness: 0.5, roughness: 0.44 },
@@ -235,8 +246,8 @@ export const SKINS = {
     { id: STOCK, name: "原厂", slots: {}, accent: 0x9a9484 },
   ],
 
-  // 匕首只有原厂。旧「屠龙」「龙啸」皮肤按已废弃模型的材质名上色，
-  // 与当前 M9 的 Knife/Handle 双材质不匹配，不能把它们误当作可选外观。
+  // 近战槽使用 Festa CFS 2019 凤凰斧的完整视模。旧「屠龙」「龙啸」皮肤
+  // 按已废弃匕首模型的材质名上色，不能误用到这把斧上。
   knife: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
   ],

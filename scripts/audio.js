@@ -1,19 +1,22 @@
 // ===== 音效系统：采样 + 合成混合（Web Audio API）=====
 //
 // 架构（两句话）：
-//   ① **现实里存在的声音**（枪声 / 脚步 / 换弹 / 命中 / 近战 / 爆炸 / 倒地 / 拉栓 /
-//      **切枪收出 / 空枪干击 / 开镜退镜 / 按钮与页签 / 面板开合**）走 `audio/`
+//   ① **现实里存在的声音**（枪声 / 脚步 / 命中 / 爆炸 / 倒地 / 拉栓 /
+//      **空枪干击 / 开镜退镜 / 按钮与页签 / 面板开合**）走 `audio/`
 //      里的 CC0 真实录音（逐文件署名见 `audio/CREDITS.txt`）；
-//   ② 回合结束 / 命中标记保持合成；每杀确认音使用短金属采样，连杀使用 CF 经典英文男声采样。
+//   ② 命中标记保持合成；每杀确认音使用短金属采样，连杀使用 CF 经典英文男声采样。
 //      连杀是明确例外：固定的人声演绎才是还原目标，不使用系统 TTS 或电子音阶。
 //      announcer/ 的游戏语音不是 CC0，来源与归属单列在 audio/CREDITS.txt。
+//   ③ 切枪、换弹、近战攻击只播放对应武器素材包中的原声；没有原声就静音，绝不以
+//      振荡器、噪声、通用枪械录音或点击声补齐。
 //
 // 叙事内采样入口采用「采样优先、合成兜底」，兜底函数是 _playMapped() 的第三个参数：
 //
 //     this._playMapped("shoot", { id: "ak47_fire" }, () => this._shootSynth(kind));
 //
 // 把兜底做成**参数**而不是 `if (this.has(x))` 分支，是为了让「加了采样就忘了回退」在结构上
-// 不可能发生。连杀人声独立处理：缺失时静默降级，避免退回用户明确不想要的合成播报。
+// 不可能发生。动作原声与连杀人声是明确例外：缺失时静默降级，避免退回用户明确不要的
+// 合成或通用替代声。
 //
 // ---------------------------------------------------------------------------
 // 三条纪律，改动本文件前先读：
@@ -39,15 +42,27 @@
 //    换弹声不能接着响）。
 //
 // 已知局限（如实记录，不要当成做完了）：
-//   · 手枪 / AWM 的换弹仍共用 AK 换弹录音切出的三段，音色与枪不符；M4 已有独立三段。
-//   · 三段之间是独立的 foley，不再是连续点击声 —— 这是一次真实的听感行为变化。
-//   · 手枪没有独立录音，仍用 AK 变调（rate 1.22）派生。
+//   · USP / AWM 当前没有自己的换弹原声，因此换弹保持静音；不会借用 AK 或合成点击声。
 //   · 脚步录音是**混凝土/石材**，而地图是钢甲板 —— 用叠加合成金属环来补偿，不是真钢面脚步。
 // =============================================================================
 
 // ---- 素材表：槽位 id → 一组 stem（每个 stem 展开成 .ogg + .m4a 两个候选 URL）----
 // 变体数 > 1 的槽位在每次播放时轮换（见 _pick），这是「同一段录音听不出在重复」的前提。
 const SAMPLES = {
+  axe_festa_attack_1: ["classic/axe_festa/attack_1.wav"],
+  axe_festa_attack_2: ["classic/axe_festa/attack_2.wav"],
+  axe_festa_attack_3: ["classic/axe_festa/attack_3.wav"],
+  axe_festa_put_up: ["classic/axe_festa/put_up.wav"],
+  ironbeast_fire: ["classic/ironbeast/fire_1.wav", "classic/ironbeast/fire_2.wav"],
+  ironbeast_reload: ["classic/ironbeast/reload.wav"],
+  ironbeast_clipin_gold: ["classic/ironbeast/clipin_gold.wav"],
+  ironbeast_clipin: ["classic/ironbeast/clipin.wav"],
+  ironbeast_knife_attack: ["classic/ironbeast/knife_attack.wav"],
+  bio_attack: ["bio/attack.wav"],
+  bio_infect: ["bio/infect.wav"],
+  bio_mother: ["bio/mother.wav"],
+  bio_death: ["bio/death.wav"],
+  bio_countdown: ["bio/countdown.ogg"],
   cf_ak_fire: ["classic/ak47_fire.wav"],
   cf_ak_out: ["classic/ak47_out.wav"],
   cf_ak_in: ["classic/ak47_in.wav"],
@@ -56,10 +71,12 @@ const SAMPLES = {
   cf_m4c_out: ["classic/m4c_out.wav"],
   cf_m4c_in: ["classic/m4c_in.wav"],
   cf_m4c_bolt: ["classic/m4c_bolt.wav"],
-  cf_deagle_fire: ["classic/deagle_fire.wav"],
-  cf_deagle_out: ["classic/deagle_clipout.wav"],
-  cf_deagle_in: ["classic/deagle_clipin.wav"],
-  cf_deagle_deploy: ["classic/deagle_deploy.wav"],
+  deagle_festa_fire: ["classic/deagle_festa/fire_1.wav", "classic/deagle_festa/fire_2.wav"],
+  deagle_festa_select: ["classic/deagle_festa/select.wav"],
+  deagle_festa_blowback: ["classic/deagle_festa/blowback.wav"],
+  deagle_festa_clipout: ["classic/deagle_festa/clipout.wav"],
+  deagle_festa_clipin: ["classic/deagle_festa/clipin.wav"],
+  deagle_festa_del_blowback: ["classic/deagle_festa/del_blowback.wav"],
   cf_grenade_pin: ["classic/grenade_pin.wav"],
   cf_grenade_explode: ["classic/grenade_explode.wav"],
   cf_grenade_flash: ["classic/grenade_flash.wav"],
@@ -78,10 +95,10 @@ const SAMPLES = {
   // CF M82A1 原枪声与拉栓声：见 audio/CREDITS.txt 第九节。
   barrett_fire: ["classic/barrett_fire.wav"],
   barrett_bolt: ["classic/barrett_bolt.wav"],
+  barrett_draw: ["classic/barrett_draw.wav"],
+  barrett_clipout: ["classic/barrett_clipout.wav"],
+  barrett_clipin: ["classic/barrett_clipin.wav"],
   awp_bolt:     ["weapons/awp_bolt_1", "weapons/awp_bolt_2"],
-  reload_1:     ["weapons/ak47_reload_1"],   // 弹匣出 / 弹匣入 / 拉栓上膛 —— 三段各自一个固定槽位，
-  reload_2:     ["weapons/ak47_reload_2"],   // **绝不合成一个多元素槽位**（变体轮换会把三段顺序打乱）
-  reload_3:     ["weapons/ak47_reload_3"],
   step:         ["footsteps/step_concrete_1", "footsteps/step_concrete_2", "footsteps/step_concrete_3",
                  "footsteps/step_concrete_4", "footsteps/step_concrete_5", "footsteps/step_concrete_6"],
   impact_wall:  ["impacts/impact_concrete_1", "impacts/impact_concrete_2", "impacts/impact_concrete_3",
@@ -102,7 +119,6 @@ const SAMPLES = {
   whiz:         ["impacts/whiz"],
   bodyfall:     ["foley/bodyfall"],
   explosion:    ["foley/c4_explode"],
-  knife_swing:  ["melee/knife_swing"],
   knife_wall:   ["melee/knife_wall"],
   knife_flesh:  ["melee/knife_flesh_1", "melee/knife_flesh_2", "melee/knife_flesh_3"],
   // ---- 页面交互声：真实金属键（Kenney 合成 blip 已下线，见下）----
@@ -110,28 +126,13 @@ const SAMPLES = {
   ui_switch:    ["ui/ui_switch"],
   ui_open:      ["ui/ui_panel_open"],
   ui_close:     ["ui/ui_panel_close"],
-  // ---- 手上动作：同样是真实录音 ----
-  // 这一批是「切枪是卡通音效」那次返工的落点：原来 `holster` / `deploy` /
-  // `switchWeapon` / `empty` / `scopeIn` / `scopeOut` 全是 Web Audio 振荡器扫频（锯齿 +
-  // 方波 + 正弦顿音），`ui` 是 Kenney 的 35~68ms 合成 click —— 都是「现实里不存在的声音」，
-  // 听感就是卡通。现在全部换成 CC0 真实录音（枪械摆弄 / 金属按键），合成版降级成
-  // `_…Synth` 兜底。逐条曲目见 `audio/CREDITS.txt`。
+  // ---- 手上动作 ----
+  // 通用切枪、收枪和换弹替代声已经下线：动作只使用武器素材包自己的原声。
   //
   // ⚠️ 这里曾经还有一个 `match_start`（船笛），由 `roundStart()` 在开局那一下播放。
   // **已整个删除**（槽位 / 录音 / `roundStart()` / `_hornSynth()` 全没了）。照「现实里
   // 存不存在」那条分界线它本来是对的，但那是一段 0.97s、基频 ≈150Hz 的持续低鸣 ——
   // 用户实际听成「水牛的叫声」。**别再把它（或任何开局长鸣）加回来。**
-  sw_deploy:         ["sw/deploy"],
-  sw_holster:        ["sw/holster"],
-  sw_deploy_pistol:  ["sw/deploy_pistol"],
-  sw_holster_pistol: ["sw/holster_pistol"],
-  // 刀（近战）**必须有自己的两条**：`type` 是 "melee"，在下面 `holster()` / `deploy()` 的
-  // `pistol = type === "pistol"` 判据里既不等于 "pistol" 也不等于 "sniper"，于是原来
-  // 落到**长枪那两条**上 —— 而它们的素材本来就是「M16 换弹全程」/「步枪摆弄」，听感是
-  // 「子弹上膛」（用户报的正是这条）。这两条取的是金属入鞘/出鞘的脆响，与长枪/手枪同族
-  // 但更亮（谱心 7.2k / 4.9k），素材出处与选片理由见 `audio/CREDITS.txt`。
-  sw_deploy_knife:   ["sw/deploy_knife"],
-  sw_holster_knife:  ["sw/holster_knife"],
   sw_dryfire:        ["sw/dryfire"],
   sw_scope_in:       ["sw/scope_in_click.wav"],
   sw_scope_out:      ["sw/scope_out_click.wav"],
@@ -153,8 +154,6 @@ const SAMPLES = {
 // （否则每个 stem 白挨一次 404，`failed[]` 也会被污染 —— 那是「零加载失败」断言的污染）。
 const M4A_ONLY = new Set([
   "ui/ui_click", "ui/ui_switch", "ui/ui_panel_open", "ui/ui_panel_close", "ui/lobby_theme",
-  "sw/deploy", "sw/holster", "sw/deploy_pistol", "sw/holster_pistol",
-  "sw/deploy_knife", "sw/holster_knife",
   "sw/dryfire",
 ]);
 
@@ -166,11 +165,12 @@ const GUN = {
   awm:    { sample: "awp_fire",  rate: 1.00, window: 0,    vol: 1.00, crack: 0 },
   barrett:{ sample: "barrett_fire", rate: 1.00, window: 0, vol: 1.00, crack: 0 },
   pistol: { sample: "ak47_fire", rate: 1.22, window: 0.22, vol: 0.78, crack: 0.25 },
-  deagle: { sample: "cf_deagle_fire", rate: 1.00, window: 0, vol: 0.95, crack: 0 },
+  deagle: { sample: "deagle_festa_fire", rate: 1.00, window: 0, vol: 0.95, crack: 0 },
 };
 const GUN_BY_TYPE = { rifle: "ak", sniper: "awm", pistol: "pistol" };
 
-const MAX_VOICES = 24;      // 声部上限（超了直接丢，不排队）—— 与参考项目同量级
+const MAX_VOICES = 64;      // 普通音效并发上限；留出足够余量避免战斗声互相挤掉
+const KILL_VOICE_RESERVE = 16; // 击杀反馈专用余量，不被普通枪声/环境音占满
 const MUSIC_VOL = 0.5;      // 大厅 BGM 的干声电平（master 还有 0.6，所以实际约 0.3）
 const RATE_JITTER = 0.015;  // 默认 ±1.5% 变调；脚步 / 命中另给更大的抖动
 
@@ -184,6 +184,14 @@ function decode(dec, ab) {
 }
 
 export class SFX {
+  bio(kind, x, y, z) {
+    const id = 'bio_' + kind;
+    const opts = { id, vol: kind === 'mother' ? .72 : kind === 'countdown' ? .7 : .53,
+      rateJitter: kind === 'countdown' ? 0 : .08, wet: kind === 'countdown' ? 0 : .3,
+      hudBus: kind === 'countdown' };
+    if (Number.isFinite(x)) Object.assign(opts, { x, y, z });
+    return this._playMapped('bio', opts, () => {});
+  }
   constructor() {
     this.ctx = null;
     this.master = null;
@@ -317,7 +325,7 @@ export class SFX {
     // `classic/*.wav` 是 CF 原始 wav，`impacts/headshot_kill.mp3` 与 `vo/fireinthehole.wav`
     // 是用户提供的原始素材（**不做转码**：mp3 / wav 三家浏览器都原生解，转一道只是白挨一次
     // 有损转码；何况 wav 转出来的只能是没有 ogg 的 m4a，白白多一份 404）。
-    const cands = /\.(wav|mp3)$/i.test(stem) ? [""] : M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
+    const cands = /\.(wav|mp3|ogg)$/i.test(stem) ? [""] : M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
     let last = "./audio/" + stem + cands[0];
     let err = null;
     for (const ext of cands) {
@@ -455,14 +463,20 @@ export class SFX {
     return h;
   }
 
-  // 单个入口：采样优先、合成兜底。**兜底函数是参数**，结构上不可能忘记。
+  // 单个入口：采样优先；只有显式传入 synthFn 的音效才允许合成兜底。
+  // 切枪、换弹、拉栓与近战动作不传 synthFn，素材缺失时保持静音。
   _playMapped(method, o, synthFn) {
     o = o || {};
-    if (this._voices >= this.maxVoices) { this._note(method, o, "capped", 0); return false; }
+    const voiceLimit = this.maxVoices + (method === "kill" ? KILL_VOICE_RESERVE : 0);
+    if (this._voices >= voiceLimit) { this._note(method, o, "capped", 0); return false; }
     const h = this._sample(o.sample || o.id, o);
     if (h) { this._note(method, o, "sample", h.dur); return true; }
-    synthFn();
-    this._note(method, o, "synth", 0);
+    if (typeof synthFn === "function") {
+      synthFn();
+      this._note(method, o, "synth", 0);
+    } else {
+      this._note(method, o, "missing", 0);
+    }
     return false;
   }
 
@@ -596,17 +610,19 @@ export class SFX {
 
   // 枪声。`id` 是**武器 id**（ak/m4/awm/barrett/pistol）—— 只有它能区分 AK 与 M4，两者的
   // `def.type` 都是 "rifle"。省略时按 type 兜底。
-  shoot(kind, id) {
+  shoot(kind, id, skin) {
     if (!this.ready()) return;
     const key = GUN[id] ? id : (GUN_BY_TYPE[kind] || "ak");
     const g = GUN[key];
+    const exactM4C = id === "m4" && skin === "classic";
     this._playMapped("shoot", {
       id: id || kind || "rifle",   // 记录的是**武器 id**，读口靠它区分 AK / M4
-      sample: g.sample,
+      sample: id === "m4" && skin === "ironbeastgold" ? "ironbeast_fire" : g.sample,
       kind: kind || "rifle",
       rate: g.rate, window: g.window, vol: g.vol,
-      rateJitter: (key==='ak' || key==='barrett')?0:0.012,
-      wet: (key==='ak' || key==='barrett')?0:1,
+      volJitter: exactM4C ? 0 : undefined,
+      rateJitter: (key==='ak' || key==='barrett' || exactM4C)?0:0.012,
+      wet: (key==='ak' || key==='barrett' || exactM4C)?0:1,
     }, () => this._shootSynth(kind));
     // 手枪仍由 AK 变调派生；M4A1-C 自带完整开火瞬态，无需合成爆音。
     if (g.crack > 0) this._crackLayer(g.crack);
@@ -617,16 +633,17 @@ export class SFX {
   }
 
   // 拉栓：按武器选自己的采样。巴雷特的原声前 0.8s 很响，因此让拉栓
-  // 在 0.55s 后进入；AWM 保持原来的 0.20s。两段声都不变速。
+  // 在原射击 SMD 的第 50/35 秒帧进入；AWM 保持原来的 0.20s。两段声都不变速。
   // AWM 的两个 take 是独立录音、随机选一个；巴雷特只有原枪专用的一段。
-  bolt(id = "awm") {
+  bolt(id = "awm", options = {}) {
     if (!this.ready()) return;
     const sample = id === "barrett" ? "barrett_bolt" : "awp_bolt";
-    const delay = id === "barrett" ? 0.55 : 0.2;
+    const sourceDelay = id === "barrett" ? 50 / 35 : 0.2;
+    const delay = Number.isFinite(options.delay) ? options.delay : sourceDelay;
     this._playMapped("bolt", {
       id: sample, delay, vol: 1.0, wet: id === "barrett" ? 0 : 0.4,
       rateJitter: id === "barrett" ? 0 : 0.03, schedule: "bolt",
-    }, () => this._boltSynth(delay));
+    });
   }
 
   // 换弹。三段**按 reloadDur 的比例**排程（p = 0.16 / 0.58 / 0.80），
@@ -636,21 +653,63 @@ export class SFX {
     if (!this.ready()) return;
     const dur = (o && o.dur) || 2.43;
     const wid = (o && o.id) || "reload";
+    if (wid === "barrett") {
+      // Original Barrett QC: clip out frame 10, clip in frame 35, bolt frame 70
+      // of the 90-frame reload. Keep each source recording at its original rate.
+      const frames=[10,35,70],ids=["barrett_clipout","barrett_clipin","barrett_bolt"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/90*dur,
+        vol:i===2?0.95:0.9,wet:0.25,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:frames},hits.some(Boolean)?"sample":"missing",frames[2]/90*dur);
+      return;
+    }
+    if (wid === "deagle") {
+      // Exact MDL events from the supplied Festa CFS 2019 rig. The source
+      // reload has 270 samples (frames 0..269 at 125 fps); gameplay stretches
+      // the animation to reloadDur, so preserve each event's normalized phase.
+      const frames=[1,29,124,193];
+      const ids=["deagle_festa_blowback","deagle_festa_clipout",
+        "deagle_festa_clipin","deagle_festa_del_blowback"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/269*dur,
+        vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:frames},hits.some(Boolean)?"sample":"missing",
+        frames.at(-1)/269*dur);
+      return;
+    }
     // AK's authored reload events are frames 39 / 102 / 202 of 299.
     const ps = wid==='ak' ? [39/299,102/299,202/299] : [0.16, 0.58, 0.80];
+    const ironbeast = wid==='m4' && o?.skin === 'ironbeastgold';
+    if (ironbeast) {
+      // Exact QC events from reload.smd: gold insert at frame 115, then the
+      // M4 magazine seat at frame 206. Both 300-frame clips map across reloadDur.
+      const frames=[115,206],ids=["ironbeast_clipin_gold","ironbeast_clipin"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/299*dur,
+        vol:0.9,wet:0.5,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:frames},hits.some(Boolean)?"sample":"missing",frames[1]/299*dur);
+      return;
+    }
+    if (wid === "m4" && o?.skin === "classic") {
+      // Source v44 sequence events from the supplied M4A1-C view model:
+      // clipout frame 10, clipin frame 38 and bolt frame 69 of frames 0..93.
+      // Gameplay maps the complete authored reload clip across reloadDur.
+      const frames=[10,38,69],ids=["cf_m4c_out","cf_m4c_in","cf_m4c_bolt"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/93*dur,
+        vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:"m4c",events:frames},hits.some(Boolean)?"sample":"missing",frames[2]/93*dur);
+      return;
+    }
     const ids = wid==='ak' ? ["cf_ak_out", "cf_ak_in", "cf_ak_bolt"]
       : wid==='m4' ? ["cf_m4c_out", "cf_m4c_in", "cf_m4c_bolt"]
-      : wid==='deagle' ? ["cf_deagle_out", "cf_deagle_in", "cf_deagle_deploy"]
-      : ["reload_1", "reload_2", "reload_3"];
-    const fs = [900, 650, 700];
-    const times = ps.map((p) => this.ctx.currentTime + p * dur);
+      : null;
+    if (!ids) {
+      this._note("reload", { id: wid, kind: wid }, "missing", 0);
+      return;
+    }
     const hits = [];
     for (let i = 0; i < 3; i++) {
       const h = this._sample(ids[i], { delay: ps[i] * dur, vol: 0.9, wet: 0.5, schedule: "reload" });
       hits.push(!!h);
-      if (!h) this._click(times[i], fs[i], 0.2);   // 采样缺一段就补一段合成点击
     }
-    this._note("reload", { id: wid, kind: wid }, hits.some(Boolean) ? "sample" : "synth", ps[2] * dur);
+    this._note("reload", { id: wid, kind: wid }, hits.some(Boolean) ? "sample" : "missing", ps[2] * dur);
   }
 
   // 空枪：真枪干击（`sw/dryfire` = 725402 那一下，后面全是静音，所以窗口够干净）。
@@ -670,15 +729,14 @@ export class SFX {
     this._hitSynth();
   }
 
-  // 每次击杀都播放参考视频里的确认音。新采样约 1.2s，连续击杀时收掉上一声的尾巴，
-  // 否则手雷多杀会把相同长音叠成一团；爆头和连杀时压低一点让专属音/人声清楚。
+  // 每次击杀都播放参考视频里的确认音，不依赖连杀状态。击杀之间不互相取消，
+  // 也不加入可被阵亡/连杀播报逻辑取消的排程组；爆头和连杀时压低一点让专属音/人声清楚。
   kill(headshot = false, streak = false) {
     if (!this.ready()) return;
-    this.cancelScheduled("kill", 0.02);
     this._playMapped("kill", {
       id: "kill_confirm", kind: headshot ? "head" : streak ? "streak" : "normal",
       vol: headshot ? 0.65 : streak ? 0.73 : 1.05,
-      volJitter: 0, rateJitter: 0, wet: 0, schedule: "kill",
+      volJitter: 0, rateJitter: 0, wet: 0,
     }, () => this._killSynth());
   }
 
@@ -803,21 +861,24 @@ export class SFX {
     }, () => this._bodyfallSynth(x, z));
   }
 
-  // 近战挥砍。`heavy` 只影响**合成回退**与音量 —— 采样是同一段挥风声
-  // （砍中人体 / 砍中钢板由调用方另外调 impact("knife_flesh" / "knife_wall")）。
-  melee(heavy) {
+  // 近战挥砍只播放斧头素材包对应的三段原声；缺失时静音。
+  // 砍中人体 / 砍中钢板由调用方另外调 impact("knife_flesh" / "knife_wall")。
+  melee(kindOrHeavy) {
     if (!this.ready()) return;
+    const kind = typeof kindOrHeavy === "string" ? kindOrHeavy : kindOrHeavy ? "heavy" : "light";
+    const heavy = kind === "heavy";
+    const sample = kind === "thrust" ? "axe_festa_attack_2"
+      : heavy ? "axe_festa_attack_3" : "axe_festa_attack_1";
     this._playMapped("melee", {
-      id: "knife_swing", kind: heavy ? "heavy" : "light",
-      vol: heavy ? 1.0 : 0.85, rate: heavy ? 0.9 : 1.0, rateJitter: 0.05, wet: 0.4,
-    }, () => this._meleeSynth(heavy));
+      id: sample, kind,
+      vol: heavy ? 1.0 : 0.9, rate: 1, rateJitter: 0, wet: 0.4,
+    });
   }
 
-  // 手雷拉环与抛出
+  // 手雷抛出不再借用近战的合成挥风声；拉环与喊话各走自己的源素材。
   throwGrenade() {
     if (!this.ready()) return;
-    this._note("throwGrenade", null, "synth", 0);
-    this._meleeSynth(false);
+    this._note("throwGrenade", null, "silent", 0);
   }
 
   // 「Fire in the hole!」—— **出手那一帧**喊的那一声（调用点在 main.js 的 `throwGrenade()` 里，
@@ -954,26 +1015,6 @@ export class SFX {
   // 低鸣，用户听成「水牛的叫声」。**别再写回来。**
   // 这条与「现实里存不存在」那条分界线不冲突：删它是因为**听感不对**，不是因为判据变了。
 
-  roundEnd(win) {
-    if (!this.ready()) return;
-    this._note("roundEnd", { kind: win ? "win" : "lose" }, "synth", 0);
-    const ctx = this.ctx, t = ctx.currentTime;
-    const seq = win ? [523, 659, 784, 1046] : [523, 440, 349, 262];
-    seq.forEach((f, i) => {
-      const o = ctx.createOscillator();
-      o.type = "triangle";
-      o.frequency.value = f;
-      const at = t + i * 0.18;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, at);
-      g.gain.exponentialRampToValueAtTime(0.22, at + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.42);
-      o.connect(g).connect(this.hf);
-      o.start(at);
-      o.stop(at + 0.45);
-    });
-  }
-
   // 波次开始
   wave() {
     if (!this.ready()) return;
@@ -993,49 +1034,54 @@ export class SFX {
     });
   }
 
-  // 收枪（武器下沉出画）。时间线是「收 → 出」两段，所以这里是**两个独立的声音**，
-  // 一个声音落在中间就没有「先收后出」的听感了。
-  // 现在是 `sw/holster`（步枪摆弄录音里一下够闷的磕碰）—— 收枪本来就该是闷响、不是脆响。
-  // **刀另走 `sw_holster_knife`**：长枪那两条录音是「M16 换弹全程」/「步枪摆弄」，收刀听成
-  // 「子弹上膛」正是用户报的问题。判据不能只写 `pistol`（刀的 `type` 是 `"melee"`，
-  // 既不等于 `"pistol"` 也不等于 `"sniper"`，会静默落回长枪那一条）。
-  // **注意别加同名的实例字段** —— `this.holster = ...` 会盖掉这个方法（见文件头纪律 ①）。
+  // 收枪没有武器素材包对应的独立事件，因此保持静音。
   holster(type) {
     if (!this.ready()) return;
-    const pistol = type === "pistol";
-    const melee = type === "melee";
-    this._playMapped("holster", {
-      id: melee ? "sw_holster_knife" : pistol ? "sw_holster_pistol" : "sw_holster",
-      kind: type || null,
-      // 下沉 = 音高往下走一点（rate < 1），与三把枪的收枪动画同向
-      vol: pistol || melee ? 0.62 : 0.72, rate: pistol ? 0.95 : melee ? 0.95 : 0.93,
-      rateJitter: 0.04, wet: 0.2,
-    }, () => (melee ? this._knifeHolsterSynth() : this._holsterSynth()));
+    this._note("holster", { kind: type || null }, "silent", 0);
   }
 
-  // 出枪（武器升起入画）。现在是 `sw/deploy`（枪从背上抬起来那一下的机械录音）。
-  // 刀走 `sw_deploy_knife`（金属出鞘的一记「叮」，谱心 7.2k，是全场最亮的一条）。
-  // 狙击多两声拉栓刮擦（`type === "sniper"`）—— 与动画里那个 sin 单峰位移同源：
-  // 采样在飞时**叠一段现成的 `awp_bolt` 录音**（延迟 0.16s），采样缺了则由
-  // `_deploySynth(type)` 用合成方波出那两声。这条子层**不进 `lastAttempt`**（直接走
-  // `_sample`，不经 `_playMapped`）—— 否则打完一枪再切枪，读口会报成 "bolt" 而不是 "deploy"。
-  deploy(type) {
+  // 出枪只播放武器素材包自身的事件：AK、炫金雷神、巴雷特、凤凰斧、沙鹰和 AWM。
+  // 其余武器没有对应源原声时静音，不再叠通用摆弄录音或合成扫频。
+  deploy(type, options = {}) {
     if (!this.ready()) return;
-    const pistol = type === "pistol";
-    const melee = type === "melee";
-    const ok = this._playMapped("deploy", {
-      id: melee ? "sw_deploy_knife" : pistol ? "sw_deploy_pistol" : "sw_deploy",
-      kind: type || null,
-      // 升起 = 音高往上走一点（rate > 1）
-      vol: melee ? 0.72 : pistol ? 0.70 : 0.85,
-      rate: pistol ? 1.02 : melee ? 1.02 : 1.04, rateJitter: 0.035, wet: 0.2,
-    }, () => (melee ? this._knifeDeploySynth() : this._deploySynth(type)));
-    if (ok && type === "sniper") {
-      // 拉栓录音没加载出来就退回合成刮擦（`_boltSynth` 与 `bolt()` 的兜底同源）
-      if (!this._sample("awp_bolt", { delay: 0.16, vol: 0.85, wet: 0.4, rateJitter: 0.03 })) {
-        this._boltSynth(0.16);
-      }
+    const ironbeast = options.skin === "ironbeastgold";
+    const barrett = options.weaponId === "barrett";
+    const axe = options.weaponId === "knife";
+    const deagle = options.weaponId === "deagle";
+    const ak = options.weaponId === "ak";
+    const m4c = options.weaponId === "m4" && options.m4c;
+    const awm = options.weaponId === "awm";
+    const selectEventDelay = ironbeast ? (options.selectDur || 0) * 135 / 319
+      : barrett ? (Number.isFinite(options.selectBoltAt) ? options.selectBoltAt : 30 / 35)
+      : axe ? (Number.isFinite(options.axeSelectAt) ? options.axeSelectAt : .01)
+      : deagle ? (Number.isFinite(options.deagleSelectAt) ? options.deagleSelectAt : .01)
+      : ak ? (Number.isFinite(options.akSelectAt) ? options.akSelectAt : 77 / 375)
+      : m4c ? (Number.isFinite(options.m4cSelectAt) ? options.m4cSelectAt : 1 / 3)
+      : awm ? .16 : 0;
+    const sample = ironbeast ? "ironbeast_reload"
+      : barrett ? "barrett_bolt"
+      : axe ? "axe_festa_put_up"
+      : deagle ? "deagle_festa_select"
+      : ak ? "cf_ak_bolt"
+      : m4c ? "cf_m4c_bolt"
+      : awm ? "awp_bolt"
+      : null;
+    if (!sample) {
+      this._note("deploy", { kind: type || null, id: options.weaponId || null }, "missing", 0);
+      return;
     }
+    this._playMapped("deploy", {
+      // Supplied Barrett QC: draw frame 30 fires Weapon_AWP.Bolt. It does not
+      // fire Weapon_AWP.Draw, even though awp_draw.wav also exists in the pack.
+      id: sample,
+      delay: selectEventDelay,
+      kind: type || null,
+      vol: barrett ? 1.0 : ironbeast ? 0.9 : 1.0,
+      volJitter: deagle || ak || m4c ? 0 : undefined,
+      rate: 1.0, rateJitter: awm ? 0.03 : 0,
+      wet: barrett || deagle || ak || m4c ? 0 : ironbeast ? 0.5 : axe ? 0.35 : 0.2,
+      schedule: barrett || ak || m4c ? "bolt" : undefined,
+    });
   }
 
   // 两把狙击枪共用短促的机械镜筒卡榫声；巴雷特略低沉，二级倍率略轻。
@@ -1191,33 +1237,6 @@ export class SFX {
     m.start(at); m.stop(at + 0.05);
   }
 
-  // 换弹回退：4 声（扣弹匣→抽出→插入→上膛）。`times` = 三段采样本该落下的绝对时刻。
-  _reloadSynth(times) {
-    const t0 = times[0], t1 = times[1], t2 = times[2];
-    this._click(t0, 900, 0.2);
-    this._click(t0 + 0.16, 650, 0.2);
-    this._click(t1, 850, 0.2);
-    this._click(t2, 700, 0.2);
-  }
-
-  // 拉栓回退：两声刮擦
-  _boltSynth(delay) {
-    const ctx = this.ctx, t = ctx.currentTime + (delay || 0);
-    for (let i = 0; i < 2; i++) {
-      const b = ctx.createOscillator();
-      b.type = "square";
-      b.frequency.value = i ? 620 : 420;
-      const bg = ctx.createGain();
-      const t0 = t + i * 0.09;
-      bg.gain.setValueAtTime(0.0001, t0);
-      bg.gain.exponentialRampToValueAtTime(0.13, t0 + 0.012);
-      bg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.07);
-      b.connect(bg).connect(this.master);
-      b.start(t0);
-      b.stop(t0 + 0.08);
-    }
-  }
-
   // 空枪
   _emptySynth() {
     const ctx = this.ctx, t = ctx.currentTime;
@@ -1231,119 +1250,6 @@ export class SFX {
     osc.connect(g).connect(this.master);
     osc.start(t);
     osc.stop(t + 0.07);
-  }
-
-  // 收枪回退：一段向下滑的机械摩擦 + 收到底那声闷响（磕到装备带）。
-  // 混响量刻意与 `sw_holster` 那条采样取同一个数（0.2），不然采样一挂听感会「空间变小」。
-  _holsterSynth() {
-    const ctx = this.ctx, t = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(200, t);
-    osc.frequency.exponentialRampToValueAtTime(120, t + 0.16);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.15, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
-    const f = ctx.createBiquadFilter();
-    f.type = "lowpass";
-    f.frequency.value = 1100;
-    osc.connect(f).connect(g);
-    this.send(g, 0.2);
-    osc.start(t);
-    osc.stop(t + 0.18);
-    const thud = ctx.createOscillator();
-    thud.type = "sine";
-    thud.frequency.setValueAtTime(140, t + 0.14);
-    thud.frequency.exponentialRampToValueAtTime(80, t + 0.22);
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, t + 0.14);
-    g2.gain.exponentialRampToValueAtTime(0.22, t + 0.152);
-    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
-    thud.connect(g2);
-    this.send(g2, 0.2);
-    thud.start(t + 0.14);
-    thud.stop(t + 0.25);
-  }
-
-  // 出枪回退：一段向上滑的机械声 + 清脆的入位卡扣；狙击多两声拉栓刮擦。
-  // 那两声与采样路径的 `awp_bolt` 子层同源（`type === "sniper"`）。
-  _deploySynth(type) {
-    const ctx = this.ctx, t = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(150, t);
-    osc.frequency.exponentialRampToValueAtTime(300, t + 0.14);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.17, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
-    const f = ctx.createBiquadFilter();
-    f.type = "lowpass";
-    f.frequency.value = 1500;
-    osc.connect(f).connect(g);
-    this.send(g, 0.2);
-    osc.start(t);
-    osc.stop(t + 0.16);
-    const tick = ctx.createOscillator();
-    tick.type = "square";
-    tick.frequency.value = 1050;
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, t + 0.13);
-    g2.gain.exponentialRampToValueAtTime(0.19, t + 0.136);
-    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.19);
-    tick.connect(g2);
-    this.send(g2, 0.2);
-    tick.start(t + 0.13);
-    tick.stop(t + 0.2);
-    if (type === "sniper") this._boltSynth(0.16);
-  }
-
-  // 刀那两条回退走的是**金属**，不是长枪/手枪那两条低通扫频的机械摩擦 —— 这条分界线
-  // 就是用户报的那个问题（收出刀听着像子弹上膛）。`_clink` 把几个**非整数比**的分音
-  // 一起衰减，那才是「叮」的来历；写成整数倍会听成一根有音高的柱子，不像金属。
-  // 分音越低的那条给得越响（`/(1+i*0.7)`），否则高频那几条听起来像电子表报时。
-  _clink(freqs, t0, vol, dur) {
-    const ctx = this.ctx;
-    freqs.forEach((f, i) => {
-      const osc = ctx.createOscillator();
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(f, t0);
-      osc.frequency.exponentialRampToValueAtTime(f * 0.82, t0 + dur);
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(vol / (1 + i * 0.7), t0 + 0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-      osc.connect(g);
-      this.send(g, 0.2);
-      osc.start(t0);
-      osc.stop(t0 + dur + 0.01);
-    });
-  }
-
-  // 收刀回退：金属入鞘的一记脆响 + 底下很短的一层闷碰（鞘口/装备带撞到）。
-  // 混响量刻意与采样那条取同一个数（0.2），不然采样一挂听感会「空间变小」。
-  _knifeHolsterSynth() {
-    const ctx = this.ctx, t = ctx.currentTime;
-    this._clink([2900, 4100, 5600], t, 0.16, 0.13);
-    const thud = ctx.createOscillator();
-    thud.type = "sine";
-    thud.frequency.setValueAtTime(150, t);
-    thud.frequency.exponentialRampToValueAtTime(85, t + 0.08);
-    const g2 = ctx.createGain();
-    g2.gain.setValueAtTime(0.0001, t);
-    g2.gain.exponentialRampToValueAtTime(0.14, t + 0.012);
-    g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
-    thud.connect(g2);
-    this.send(g2, 0.2);
-    thud.start(t);
-    thud.stop(t + 0.11);
-  }
-
-  // 出刀回退：比收刀**更亮、更长**的一记金属「叮」（分音多一条高的、衰减 0.13→0.20）。
-  // 「出亮收钝」这条与采样那对（7.2k / 4.9k）同向 —— 别把两条写成一个音色。
-  _knifeDeploySynth() {
-    this._clink([3400, 4900, 6800, 9200], this.ctx.currentTime, 0.17, 0.20);
   }
 
   // 开镜 / 退镜回退：镜筒贴脸的短促「咔」+ 一层很轻的金属共鸣
@@ -1690,31 +1596,6 @@ export class SFX {
     o.start(t); o.stop(t + 0.24);
   }
 
-  // 近战挥砍（风声）。`heavy` = 重击（CS 的轻/重两档，见 WEAPON_DEFS.knife）：
-  // 更长、更低、更响一声。
-  _meleeSynth(heavy) {
-    const ctx = this.ctx, t = ctx.currentTime;
-    const len = heavy ? 0.34 : 0.18;
-    const buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) {
-      const p = i / data.length;
-      data[i] = (Math.random() * 2 - 1) * (1 - p) * (0.4 + 0.6 * Math.abs(Math.sin(p * (heavy ? 11 : 20))));
-    }
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const f = ctx.createBiquadFilter();
-    f.type = "bandpass";
-    f.frequency.setValueAtTime(heavy ? 260 : 600, t);
-    f.frequency.exponentialRampToValueAtTime(heavy ? 900 : 2000, t + len);
-    f.Q.value = 2;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(heavy ? 0.72 : 0.5, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + len);
-    src.connect(f).connect(g).connect(this.master);
-    src.start(t);
-  }
-
   // 手雷拉环与抛出
   _throwGrenadeSynth() {
     const ctx = this.ctx, t = ctx.currentTime;
@@ -1819,6 +1700,7 @@ export class SFX {
       preloadDone: !!this._preloadDone,
       voices: this._voices,
       maxVoices: this.maxVoices,
+      killVoiceLimit: this.maxVoices + KILL_VOICE_RESERVE,
       lastAttempt: this._last ? { ...this._last } : null,
       scheduled,
       music: { on: !!this._musicOn, playing: !!this._music, gain: this._music ? this._music.gain.gain.value : 0 },

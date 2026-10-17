@@ -14,7 +14,7 @@
     <!-- 路径一律用「相对当前文档」的写法：本地 http.server 与 GitHub Pages 的项目页
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
-    <link rel="stylesheet" href="./styles/game.css" />
+    <link rel="stylesheet" href="./styles/game.css?v=match-result-2" />
     <link rel="stylesheet" href="./styles/boot.css" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
@@ -27,7 +27,7 @@
         <div class="boot-main">
           <div class="boot-emblem" aria-hidden="true"><span class="boot-emblem-core">CF</span></div>
           <div class="boot-copy">
-            <p class="boot-kicker">MULTI-ARENA · TEAM DEATHMATCH</p>
+            <p class="boot-kicker">MULTI-ARENA · TACTICAL / INFECTION</p>
             <h1>战术<span>突击</span></h1>
             <p class="boot-subtitle">正在部署作战资源</p>
           </div>
@@ -42,7 +42,7 @@
         <div class="boot-steps" aria-hidden="true">
           <span data-boot-step="map">01 / 地图</span><span data-boot-step="actors">02 / 人物与武器</span><span data-boot-step="audio">03 / 音效</span><span data-boot-step="ready">04 / 就绪</span>
         </div>
-        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>三地图 · 团队竞技</span></div>
+        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>三地图 · 双模式</span></div>
       </div>
       <noscript>需要启用 JavaScript 才能加载游戏。</noscript>
     </div>
@@ -57,7 +57,7 @@
       <div class="killburst" id="killBurst"></div>
     </div>
 
-    <!-- 狙击镜（AWM 右键开镜；再按一次升到二级变倍） -->
+    <!-- 狙击镜（巴雷特右键开镜；再按一次升到二级变倍） -->
     <div id="scope" class="scope hidden">
       <div class="sc-tube">
         <div class="sc-vig"></div>
@@ -76,6 +76,20 @@
         <span class="x x-right"></span>
         <span class="x x-dot"></span>
       </div>
+      <div id="bioCountdown" class="bio-countdown hidden" aria-live="off">
+        <span class="bio-countdown-kicker">BIOHAZARD WARNING</span>
+        <strong id="bioCountdownNumber">15</strong>
+        <span class="bio-countdown-label">距离感染爆发</span>
+        <span class="bio-countdown-track"><i id="bioCountdownFill"></i></span>
+        <small>寻找掩体 · 准备防守</small>
+      </div>
+      <div id="bioObjective" class="bio-objective hidden" aria-live="off">
+        <span class="bio-objective-kicker">EMERGENCY POWER // 生化禁区</span>
+        <strong id="bioObjectiveTitle">配电系统离线</strong>
+        <span id="bioObjectiveHint">前往中央配电箱</span>
+        <span class="bio-objective-track"><i id="bioObjectiveFill"></i></span>
+      </div>
+      <div id="bioHealthLayer" class="bio-health-layer" aria-hidden="true"></div>
 
       <!-- 顶部：团队竞技比分 + 回合倒计时（时间到按比分判胜负） -->
       <div class="hud-top">
@@ -164,7 +178,7 @@
         <div class="hud-match-details" aria-hidden="true"><div id="ammoFill"></div></div>
       </div>
 
-      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1/2/3/4 确认并收起） -->
+      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1/2/3/4/5 确认并收起） -->
       <div id="backpack" class="backpack hidden">
         <div class="bp-heading"><span class="bp-heading-icon" aria-hidden="true">▰</span><span>更换背包</span><span class="bp-title">选择背包</span></div>
         <div id="bpList" class="bp-list" role="group" aria-label="选择背包编号"></div>
@@ -234,13 +248,45 @@
       <section class="game-menu-panel">
         <header><span>TACTICAL ASSAULT</span><h2 id="gameMenuTitle">游戏菜单</h2></header>
         <p id="gameMenuStatus" role="status">对局进行中</p>
+        <div id="gameMenuHome">
         <div class="game-menu-actions">
           <button id="gameMenuResume" type="button">返回游戏</button>
+          <button id="gameMenuSettingsOpen" type="button">设置<span>更换准心样式</span></button>
           <button id="gameMenuPause" type="button">暂停游戏</button>
           <button id="gameMenuReset" type="button">刷新位置<span>返回复活点</span></button>
           <button id="gameMenuEnd" class="game-menu-end" type="button">结束游戏<span>返回主界面</span></button>
         </div>
         <p class="game-menu-tip">Esc 返回游戏 · 暂停后可继续当前对局</p>
+        </div>
+        <div id="gameMenuSettings" class="game-menu-settings hidden" aria-label="准心设置">
+          <h3>准心样式</h3>
+          <p>选择你偏好的战场准心。狙击枪持枪时准心会自动隐藏。</p>
+          <div class="crosshair-choices" role="group" aria-label="选择准心样式">
+            <button type="button" class="crosshair-choice" data-crosshair-style="classic" aria-pressed="true">
+              <span class="crosshair-choice-preview style-classic" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>经典</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="compact" aria-pressed="false">
+              <span class="crosshair-choice-preview style-compact" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>紧凑</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="wide" aria-pressed="false">
+              <span class="crosshair-choice-preview style-wide" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>扩展</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="dot" aria-pressed="false">
+              <span class="crosshair-choice-preview style-dot" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>点式</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="ring" aria-pressed="false">
+              <span class="crosshair-choice-preview style-ring" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>圆环</span>
+            </button>
+          </div>
+          <div class="game-menu-settings-actions">
+            <button id="gameMenuSettingsBack" type="button">返回菜单</button>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -266,9 +312,13 @@
               <span class="room-map-caption">对战地图 <small>SELECT MAP</small></span>
               <button type="button" class="room-map-option active" data-map="transport" aria-pressed="true"><b>运输船</b><small>集装箱货轮 · 经典对抗</small></button>
               <button type="button" class="room-map-option" data-map="prison" aria-pressed="false"><b>守望之城</b><small>双倍战场 · 狙击与近战</small></button>
-              <button type="button" class="room-map-option" data-map="palace" aria-pressed="false"><b>王宫回廊</b><small>王座大厅 · 双层侧廊</small></button>
+              <button type="button" class="room-map-option" data-map="bio" aria-pressed="false"><b>生化禁区</b><small>双端守点 · 经典感染</small></button>
             </div>
-            <div class="room-match-info"><span>地图 <b id="lobbyMapName">运输船</b></span><span>团队竞技</span><span><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
+            <div class="bio-mode-select" id="modeSelect" aria-label="选择游戏模式">
+              <button type="button" class="active" data-mode="tdm" aria-pressed="true">团队竞技</button>
+              <button type="button" data-mode="bio" aria-pressed="false">经典生化</button>
+            </div>
+            <div class="room-match-info"><span>地图 <b id="lobbyMapName">运输船</b></span><span id="lobbyMode">团队竞技</span><span id="lobbyGoal"><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
             <div class="room-actions">
               <div class="menu-setup">
                 <div class="ml-row"><span class="ml-label">电脑人数</span><div class="ml-stepper"><button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button><span class="ml-step-val" id="enemyCountVal">8</span><button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button></div></div>
@@ -300,16 +350,71 @@
     </div>
 
     <!-- 结算画面 -->
-    <div id="gameover" class="menu hidden">
-      <div class="menu-panel">
-        <h1 class="menu-title" id="goTitle">胜利</h1>
-        <p class="menu-sub" id="goSub">TEAM VICTORY</p>
-        <div class="gameover-stats">
-          <div><span>我方击杀</span><b id="goMine">0</b></div>
-          <div><span>敌方击杀</span><b id="goEnemy">0</b></div>
-          <div><span>目标</span><b id="goLimit">40</b></div>
-        </div>
-        <button class="menu-btn" id="restartBtn">再来一局</button>
+    <div id="gameover" class="menu gameover-screen hidden" data-result="win">
+      <div class="go-shell" role="dialog" aria-modal="true" aria-labelledby="goTitle">
+        <main class="go-board">
+          <header class="go-result-banner">
+            <img class="go-team-mark" src="./assets/ui/room-gr.svg" alt="" />
+            <div class="go-result-copy">
+              <span id="goFaction">保卫者</span>
+              <h1 id="goTitle">WIN</h1>
+              <p id="goSub">TEAM VICTORY</p>
+            </div>
+            <div class="go-final-score" aria-label="最终比分">
+              <b id="goMine">0</b><i>:</i><b id="goEnemy">0</b>
+            </div>
+          </header>
+
+          <div class="go-match-strip">
+            <span><small>地图</small><b id="goMap">运输船</b></span>
+            <span><small>模式</small><b id="goMode">团队竞技</b></span>
+            <span><small>用时</small><b id="goDuration">00:00</b></span>
+            <span><small>目标</small><b id="goLimit">40</b></span>
+          </div>
+
+          <section class="go-team go-team-blue" aria-label="保卫者战绩">
+            <div class="go-team-head">
+              <span class="go-team-name"><b id="goBlueName">保卫者</b><small id="goBlueCode">GLOBAL RISK</small></span>
+              <span class="go-team-result" id="goBlueResult">WIN</span>
+            </div>
+            <div class="go-table-head"><span>顺位</span><span>昵称</span><span>击杀 / 死亡</span><span>战绩分</span><span>评价</span></div>
+            <div class="go-rows" id="goBlueRows"></div>
+          </section>
+
+          <section class="go-team go-team-red" aria-label="潜伏者战绩">
+            <div class="go-team-head">
+              <span class="go-team-name"><b id="goRedName">潜伏者</b><small id="goRedCode">BLACK LIST</small></span>
+              <span class="go-team-result" id="goRedResult">LOSE</span>
+            </div>
+            <div class="go-table-head"><span>顺位</span><span>昵称</span><span>击杀 / 死亡</span><span>战绩分</span><span>评价</span></div>
+            <div class="go-rows" id="goRedRows"></div>
+          </section>
+        </main>
+
+        <aside class="go-profile">
+          <div class="go-profile-mode"><span id="goProfileMode">团队竞技</span><small id="goProfileMap">运输船</small></div>
+          <div class="go-operative" aria-hidden="true">
+            <span class="go-operative-scan"></span>
+            <span class="go-operative-head"></span>
+            <span class="go-operative-body"></span>
+            <span class="go-operative-arm arm-left"></span>
+            <span class="go-operative-arm arm-right"></span>
+            <span class="go-operative-weapon" id="goWeaponIcon"></span>
+          </div>
+          <div class="go-player-card">
+            <span class="go-rank-badge">ACE</span>
+            <div><small>本局玩家</small><strong>你</strong></div>
+          </div>
+          <dl class="go-profile-stats">
+            <div><dt>击杀 / 死亡</dt><dd id="goPlayerKD">0 / 0</dd></div>
+            <div><dt>战绩分</dt><dd id="goPlayerScore">0</dd></div>
+            <div><dt>当前武器</dt><dd id="goWeaponName">—</dd></div>
+          </dl>
+          <div class="go-actions">
+            <button class="go-btn go-btn-secondary" id="goLobbyBtn" type="button">返回房间</button>
+            <button class="go-btn go-btn-primary" id="restartBtn" type="button">再来一局</button>
+          </div>
+        </aside>
       </div>
     </div>
 
@@ -333,6 +438,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-    <script type="module" src="./scripts/main.js?v=watch-city-tone-1"></script>
+    <script type="module" src="./scripts/main.js?v=remove-retired-maps-1"></script>
   </body>
 </html>

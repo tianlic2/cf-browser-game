@@ -4,6 +4,8 @@ import * as THREE from "three";
 import { ClassicSoldierRig as SoldierRig } from "./classic_soldier.js";
 import { makeBlobShadow } from "./blobshadow.js";
 import { intersectsBrush } from "./brush_collision.js";
+import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";
+import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js";
 
 // 敌人血量恒定：HP 必须固定，否则「AK 3 枪死」的数值不成立 —— 所以难度**不碰血量**，
 // 只缩放下面这份 ENEMY_TUNING 里的乘数。
@@ -139,6 +141,10 @@ export class Enemy {
     this.weaponName = opts.weaponName || "步枪";
     this.fireMul = opts.fireMul || 1;
     this.sniperCadence = opts.sniperCadence || 0;
+    this.magSize = opts.magSize ?? (this.sniperCadence ? (this.gunId === 'barrett' ? 10 : 5) : 30);
+    this.mag = this.magSize;
+    this.reloadT = 0;
+    this.reloadDuration = this.sniperCadence ? 2.8 : 2.25;
     this.engageFar = opts.engageFar || ENGAGE_FAR;
     this.dead = false;
     this.deathHeadshot = false;
@@ -155,6 +161,12 @@ export class Enemy {
     this.flashAmt = 0;
     this._lastFlash = -1; // 强制复用后重算一次 emissive
     this.seed = Math.random() * Math.PI * 2;
+    this.awareness = makeAwareness(x, 0, z, this.seed);
+    this.coverT = 0;
+    this.coverGoal = null;
+    this.flankGoal = null;
+    this.flankGoalT = 0;
+    this.tacticRole = Math.floor(this.seed * 3) % 3 - 1;
 
     // ---- 每敌性格：全部从 seed **哈希派生** ----
     // 纯函数 ⇒ 同一个 seed 必得同一组性格（可断言；不是再掷一次骰子）。
@@ -243,16 +255,32 @@ export class Enemy {
     this.vel.set(0, 0, 0);
     this.turnVel = 0;
     this.aimSeeded = false;
+    this.awareness.memory = 0;
+    this.awareness.visible = false;
+    this.awareness.mode = 'patrol';
+    this.coverT = 0;
+    this.coverGoal = null;
+    this.flankGoal = null;
+    this.flankGoalT = 0;
   }
 
   // peers = EnemyManager 本帧的活体数组（分离力用）。可缺省 —— 缺省时分离力整段跳过，
   // 所以 `e.update(dt, player)` 这种老写法仍然工作（/tmp 那批寻路用例不受影响）。
-  update(dt, player, peers = null, targetAlive = true) {
+  update(dt, player, peers = null, targetAlive = true, canSee = true, moveGoal = null) {
     if (this.dead) { this.updateCorpse(dt); return; }
 
     this.animT += dt * 8;
     if (this.blindT > 0) this.blindT -= dt;
     if (this.flinch > 0) this.flinch = Math.max(0, this.flinch - dt * 4);
+    if (this.reloadT > 0) {
+      this.reloadT = Math.max(0, this.reloadT - dt);
+      if (this.reloadT === 0) this.mag = this.magSize;
+    } else if (this.mag <= 0) {
+      // Reload begins after the last shot even if the target leaves sight.
+      this.reloadT = this.reloadDuration;
+      this.burstLeft = 0;
+      this.wantShoot = false;
+    }
 
     if (!targetAlive) {
       this.loseTarget();
@@ -262,6 +290,7 @@ export class Enemy {
       this.rig.animate(dt, {
         moved: 0, speed: 0, aim: this.aimLevel, aimPitch: this.aimPitch,
         blind: this.blindT > 0 ? 1 : 0, flinch: this.flinch, dead: false,
+        reload: this.reloadT > 0 ? 1 - this.reloadT / this.reloadDuration : 0,
         scan: 1 - this.aimLevel, scanPhase: this.scanPhase,
       });
       this.applyFlash(dt);
@@ -269,6 +298,7 @@ export class Enemy {
     }
 
     const gp = this.group.position;
+    const walkingTo = moveGoal || player.pos;
     const dx = player.pos.x - gp.x;
     const dz = player.pos.z - gp.z;
     const dist = Math.hypot(dx, dz) || 1e-3;
@@ -375,8 +405,15 @@ export class Enemy {
       } else {
         this.strafeBlend += (0 - this.strafeBlend) * k(K_STRAFE_REST);   // 远距离只压上，不横着飘
       }
+      if (moveGoal) {
+        const gx = walkingTo.x - gp.x, gz = walkingTo.z - gp.z;
+        const gd = Math.hypot(gx, gz);
+        wx = gd > .75 ? gx / gd : 0;
+        wz = gd > .75 ? gz / gd : 0;
+      }
     }
-    const route=!blind&&this.navigation?.steer(gp,player.pos);
+    const route=!blind&&Math.hypot(walkingTo.x-gp.x,walkingTo.z-gp.z)>.75&&
+      this.navigation?.steer(gp,walkingTo);
     if(route) { wx=route.x;wz=route.z;this.detourT=0; }
     const wl = Math.hypot(wx, wz);
     const sp = this.speed * (blind ? 0.4 : 1);
@@ -474,7 +511,8 @@ export class Enemy {
     const wantPitch = Math.atan2((gp.y + 1.5) - (player.pos.y + 1.35), Math.max(dist, 1));
     this.aimPitch += (Math.max(-0.22, Math.min(0.22, wantPitch)) - this.aimPitch) * k(6);
     // 端枪程度：进入交战距离就据枪，退远了回到低姿
-    const wantAim = dist < this.engageFar + 6 ? 1 : 0;
+    const wantAim = (canSee || this.awareness.memory > 0) &&
+      dist < this.engageFar + 6 ? 1 : 0;
     this.aimLevel += (wantAim - this.aimLevel) * k(1.6);
     this.rig.animate(dt, {
       moved,                          // 本帧实际走过的路程 → 步频/步幅
@@ -485,6 +523,8 @@ export class Enemy {
       aimPitch: this.aimPitch,
       blind: blind ? 1 : 0,
       flinch: this.flinch,
+      reload: this.reloadT > 0 ? 1 - this.reloadT / this.reloadDuration : 0,
+      turnRate: this.turnRate,
       dead: false,
       // 头部张望：幅度在**这里**门控（不在 rig 里再乘一次 aimBlend）——
       // aimLevel 在 dist < engageFar+6 时为 1 ⇒ 交战距离内头回到瞄具上、
@@ -502,7 +542,9 @@ export class Enemy {
     // ---- 点射：3~5 连发 + 停顿，替代原来的「2 秒一发」----
     // 致盲时不推进点射：updateBurst 结尾会把 wantShoot 置回 true，
     // 而旧写法在致盲分支直接 return，根本走不到这里（main.js 的 enemiesShoot 也有 blindT 守卫，是双保险）
-    if (!blind) this.updateBurst(dt, dist);
+    if (!blind && canSee && this.awareness.reaction <= 0 && this.coverT <= 0 && this.reloadT <= 0)
+      this.updateBurst(dt, dist);
+    else this.wantShoot = false;
 
     this.eyeline.copy(gp).add(new THREE.Vector3(0, 1.68, 0));
     this.applyFlash(dt);
@@ -528,7 +570,19 @@ export class Enemy {
   // 每开一枪：骨架来一下后坐（枪往肩里推 + 枪口上跳），由 main.js 的 enemiesShoot 调
   recoil() { this.rig.recoil(this.gunId === 'awm' ? 1.35 : this.gunId === 'm4' ? 0.8 : 1); }
 
+  onShot() {
+    if (this.reloadT > 0 || this.mag <= 0) return false;
+    this.mag--;
+    return true;
+  }
+
   updateBurst(dt, dist) {
+    if (this.mag <= 0) {
+      this.reloadT = this.reloadDuration;
+      this.burstLeft = 0;
+      this.wantShoot = false;
+      return;
+    }
     if (dist > this.engageFar + 4) { this.burstLeft = 0; this.wantShoot = false; return; }
     // 还没把枪口转过来就先不打（否则会一边转身一边朝侧面泼子弹）
     if ((this.aimErr || 0) > AIM_TOL) { this.wantShoot = false; return; }
@@ -566,16 +620,20 @@ export class Enemy {
   avoid(sx, sz) {
     if (!Number.isFinite(sx) || !Number.isFinite(sz)) return [0, 0];
     const colliders = this.colliders;
-    if (!colliders || !colliders.length) return [sx, sz];
+    if ((!colliders || !colliders.length) && !this.actorBodies?.length) return [sx, sz];
     const gp = this.group.position;
-    if (!this.blockedAt(gp.x + sx, gp.z + sz)) { this.detourT = 0; return [sx, sz]; }
+    if (!this.blockedAt(gp.x + sx, gp.z + sz) &&
+        !this.actorBlockedAt(gp.x + sx, gp.z + sz)) {
+      this.detourT = 0; return [sx, sz];
+    }
     const len = Math.hypot(sx, sz) || 1;
     const ux = sx / len, uz = sz / len;
     // 绕行方向**承诺一段时间**（不是每帧重算）。一段绕行开始时两边各探 1.1m，
     // 挑真的空的那边。两侧都不空就置 0 —— 交给 moveBy 的分轴解算自己沿轴滑，
     // 比硬转 90° 撞进墙里强（那是原地不动）。
     if (this.detourT <= 0) {
-      const free = (s) => !this.blockedAt(gp.x + -uz * s * 1.1, gp.z + ux * s * 1.1);
+      const free = (s) => !this.blockedAt(gp.x + -uz * s * 1.1, gp.z + ux * s * 1.1) &&
+        !this.actorBlockedAt(gp.x + -uz * s * 1.1, gp.z + ux * s * 1.1);
       const fl = free(1), fr = free(-1);
       if (fl !== fr) this.detourSide = fl ? 1 : -1;
       // 两侧一样（都空或都堵）：**沿用已经承诺的那一侧**，不要每帧按 seed 重掷 ——
@@ -602,6 +660,11 @@ export class Enemy {
     return null;
   }
 
+  actorBlockedAt(x, z) {
+    return !this.dead && this.actorBodies &&
+      overlapsActors(x, this.group.position.y, z, this.actorBodies, this);
+  }
+
   // 真正的碰撞解算：分轴 + 边界夹紧，与玩家完全同一套（main.js movePlayer 的水平段）。
   // **这是「敌人穿墙」的修复点** —— 旧版这里只是 `position.x += x`，一个检查都没有，
   // 于是 avoid() 的转向一旦没打中（斜向走位、贴着箱角、90° 绕行那头也是墙）就直接走进去。
@@ -615,10 +678,18 @@ export class Enemy {
     // 否则会被永久钉死。逐轴判定保证了「不卡住」时**永远进不了**外扩矩形，
     // 所以这条只在出场那一刻可能成立，不会变成一条常态的穿墙通道。
     const stuck = this.blockedAt(gp.x, gp.z);
-    const nx = gp.x + x;
-    if (stuck || !this.blockedAt(nx, gp.z)) gp.x = nx;
-    const nz = gp.z + z;
-    if (stuck || !this.blockedAt(gp.x, nz)) gp.z = nz;
+    const actorX = this.dead ? x : sweepActorAxis(gp.x, x, gp.z, gp.y,
+      this.actorBodies || [], this, 'x');
+    const nx = gp.x + actorX;
+    const floorX = this.navigation?.heightAt(nx, gp.z, gp.y) ?? gp.y;
+    if ((stuck || !this.blockedAt(nx, gp.z)) &&
+        (this.dead || !overlapsActors(nx, floorX, gp.z, this.actorBodies || [], this))) gp.x = nx;
+    const actorZ = this.dead ? z : sweepActorAxis(gp.z, z, gp.x, gp.y,
+      this.actorBodies || [], this, 'z');
+    const nz = gp.z + actorZ;
+    const floorZ = this.navigation?.heightAt(gp.x, nz, gp.y) ?? gp.y;
+    if ((stuck || !this.blockedAt(gp.x, nz)) &&
+        (this.dead || !overlapsActors(gp.x, floorZ, nz, this.actorBodies || [], this))) gp.z = nz;
     // 甲板边界：与玩家同一道夹紧（bounds 由 EnemyManager 每帧灌进来），
     // 免得被绕行逻辑推出舷外。
     // **必须先验数**：`Math.min(undefined, x)` 是 NaN，而 NaN 一进 position 就永不恢复
@@ -658,6 +729,10 @@ export class Enemy {
     if (this.dead) return false;
     this.health -= amount;
     this.setFlash();
+    if (!headshot && this.health > 0 && this.health < 75) {
+      this.coverT = Math.max(this.coverT, 1.6 + this.traits.engage * .6);
+      this.coverGoal = null;
+    }
     if (this.health <= 0) {
       this.dead = true;
       // 地上的掉落枪由 onEnemyDeath 单独生成；尸体不再保留胸前的持枪模型。
@@ -819,6 +894,10 @@ export class EnemyManager {
     this.frozen = false;
     this.onFootstep = opts.onFootstep || null;
     this._nameSeq = 0;
+    this.senseClock = 0;
+    this.lastNoise = null;
+    this.callout = null;
+    this.nextCallout = 0;
     // 每次刷出抽一份「枪型 + 皮肤」，由 main.js 注入（它才有 WEAPON_DEFS 与 guncatalog）。
     // 返回 { rifle, gunId, gunSkin, weaponName, fireMul }；没注入就退回裸 AK 的旧行为。
     this.loadoutPicker = opts.loadoutPicker || null;
@@ -849,15 +928,33 @@ export class EnemyManager {
   }
 
   // 团队竞技：从敌方基地（-z 端）补充到指定存活数量
-  spawnGroup(count, bounds) {
+  spawnGroup(count, bounds, player = null, colliders = this._colliders) {
     this.wave++;
+    this._colliders = colliders || null;
     const hw = bounds ? bounds.hw : 26;
     const hl = bounds ? bounds.hl : 68;
     for (let i = 0; i < count; i++) {
       const point=this.spawnPoints?.[Math.floor(Math.random()*this.spawnPoints.length)];
       const x = point ? point[0] : (Math.random() - 0.5) * (hw * 2 - 6);
       const z = point ? point[2] : -(hl - 4 - Math.random() * 6);
-      this.enemies.push(this.acquire(x, z));
+      const y = point ? point[1] : (this.navigation?.heightAt(x, z, 0) ?? 0);
+      const valid = (px, py, pz) => Math.abs(px) <= hw - ENEMY_RADIUS &&
+        Math.abs(pz) <= hl - ENEMY_RADIUS &&
+        !(this._colliders || []).some(c => intersectsBrush(c, px, pz, py,
+          ENEMY_RADIUS, this.navigation?.climb ?? ENEMY_STEP_H, ENEMY_HEAD_ROOM)) &&
+        Math.abs((this.navigation?.heightAt(px, pz, py) ?? py) - py) < .7;
+      const spot = findActorSpawn(x, y, z,
+        player ? [...this.enemies, player] : this.enemies, valid);
+      if (!spot) continue;
+      const e = this.acquire(spot[0], spot[2]);
+      e.group.position.y = spot[1];
+      // Patrol toward a broad central lane rather than orbiting the spawn or
+      // receiving the player's live position through the whole map.
+      e.awareness.homeX = Math.max(-hw + 2, Math.min(hw - 2,
+        spot[0] * .2 + e.tacticRole * 3.5));
+      e.awareness.homeZ = spot[2] * .2;
+      e.awareness.homeY = spot[1];
+      this.enemies.push(e);
     }
     return this.enemies.length;
   }
@@ -867,12 +964,19 @@ export class EnemyManager {
     this.free.push(e);
   }
 
+  hearPlayer(position, radius = 34) {
+    this.lastNoise = { x: position.x, y: position.y, z: position.z,
+      radius, at: this.senseClock };
+  }
+
   // colliders / bounds 每帧现灌：地图边界与碰撞体只在 init 时定，但敌人是对象池里的，
   // 复用出来的实例也要拿到当前这份（否则新实例的 this.bounds 是 undefined、边界夹紧静默失效）。
-  update(dt, player, colliders, bounds, targetAlive = true) {
+  update(dt, player, colliders, bounds, targetAlive = true, senseTarget = null) {
     this._colliders = colliders || null;
     this._bounds = bounds || this._bounds || null;
-    if (targetAlive) this.navigation?.update(player.pos);
+    const arena = this._bounds || { hw: Infinity, hl: Infinity };
+    const actorBodies = targetAlive ? [...this.enemies, player] : this.enemies;
+    this.senseClock += dt;
 
     // 先推进尸身。本帧刚死的下一帧才开始倒地，避免同一帧被推进两次
     for (let i = this.corpses.length - 1; i >= 0; i--) {
@@ -885,11 +989,62 @@ export class EnemyManager {
     }
 
     if (!this.frozen) {
+      const sight = new Map();
       for (const e of this.enemies) {
         e.colliders = this._colliders;
         e.bounds = this._bounds;
         e.navigation = this.navigation;
-        e.update(dt, player, this.enemies, targetAlive);
+        e.actorBodies = actorBodies;
+        const visible = targetAlive && (senseTarget ? senseTarget(e, player) : true);
+        sight.set(e, visible);
+        if (visible && this.senseClock >= this.nextCallout) {
+          // Teammates receive a delayed, intermittent position callout. They
+          // never inherit the live player transform through a wall.
+          this.callout = { x: player.pos.x, y: player.pos.y, z: player.pos.z,
+            deliverAt: this.senseClock + .55 };
+          this.nextCallout = this.senseClock + 1.45;
+        }
+      }
+      for (const e of this.enemies) {
+        if (!targetAlive) { e.update(dt, player, this.enemies, false); continue; }
+        const p = e.group.position, visible = sight.get(e);
+        const noise = this.lastNoise && this.senseClock - this.lastNoise.at < .25 &&
+          Math.hypot(p.x - this.lastNoise.x, p.z - this.lastNoise.z) < this.lastNoise.radius
+          ? this.lastNoise : null;
+        const radio = this.callout && this.senseClock >= this.callout.deliverAt &&
+          this.senseClock - this.callout.deliverAt < .25 ? this.callout : null;
+        updateAwareness(e.awareness, dt, visible ? player.pos : null, noise || radio);
+        e.awareness.homeY = p.y;
+        const remembered = awarenessGoal(e.awareness, p);
+        let moveGoal = null;
+        if (visible) {
+          const dist = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
+          if (e.coverT > 0) {
+            e.coverT = Math.max(0, e.coverT - dt);
+            if (!e.coverGoal) e.coverGoal = chooseCover(colliders, p, player.pos,
+              (x,z) => !e.blockedAt(x,z) && Math.abs(x) < arena.hw - ENEMY_RADIUS &&
+                Math.abs(z) < arena.hl - ENEMY_RADIUS);
+            if (e.coverGoal) moveGoal = e.coverGoal;
+            else e.coverT = 0;
+          } else e.coverGoal = null;
+          if (!moveGoal && e.tacticRole && !e.sniperCadence && dist > 8 && dist < 28) {
+            e.flankGoalT -= dt;
+            if (e.flankGoalT <= 0) {
+              const nx = (p.x - player.pos.x) / dist, nz = (p.z - player.pos.z) / dist;
+              const flank = { x: player.pos.x - nz * e.tacticRole * 3.5 + nx * 10,
+                y: player.pos.y, z: player.pos.z + nx * e.tacticRole * 3.5 + nz * 10 };
+              e.flankGoal = !e.blockedAt(flank.x, flank.z) &&
+                Math.abs(flank.x) < arena.hw - ENEMY_RADIUS &&
+                Math.abs(flank.z) < arena.hl - ENEMY_RADIUS ? flank : null;
+              e.flankGoalT = .45;
+            }
+            if (e.flankGoal) moveGoal = e.flankGoal;
+          }
+        } else { e.coverT = 0; e.coverGoal = null; e.flankGoal = null; e.flankGoalT = 0; }
+        const goal = moveGoal || remembered;
+        this.navigation?.update(goal);
+        e.update(dt, { pos: visible ? player.pos : remembered },
+          this.enemies, true, visible, moveGoal || (!visible ? remembered : null));
         if(this.navigation) e.group.position.y=this.navigation.heightAt(e.group.position.x,e.group.position.z,e.group.position.y);
       }
     }

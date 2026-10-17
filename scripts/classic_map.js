@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import { waterMaps } from './map.js';
 
 const BASE = new URL('../assets/classic/', import.meta.url).href;
+// Imported Transport Ship uses these materials on the actual wooden crate faces.
+// Other crate-sized props use corrugated metal/canvas and must remain bulletproof.
+const WOOD_BULLET_MATERIALS = new Set([
+  'transportship/texture_234',
+  'transportship/texture_80',
+]);
 export async function buildClassicMap(scene, onProgress = () => {}) {
   const response = await fetch(BASE+'transport/map.json');
   if (!response.ok) throw new Error('经典地图资源缺失');
@@ -48,7 +54,9 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
       color:textures[i]?0xffffff:0x6d7a7d,side:THREE.DoubleSide,alphaTest:p.material.alphaTest||0,
       toneMapped:false});
     mat.name=p.material.name; mat.lightMap.channel=1;
-    const mesh=new THREE.Mesh(g,mat);mesh.name=p.material.name;group.add(mesh);
+    const mesh=new THREE.Mesh(g,mat);mesh.name=p.material.name;
+    if(WOOD_BULLET_MATERIALS.has(p.material.name))mesh.userData.bulletMaterial='wood';
+    group.add(mesh);
     obstacles.push(mesh);
   });
   // The source sky is already the classic ship's sea horizon. No procedural

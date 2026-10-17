@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { expandPrisonLayout, PRISON_HORIZONTAL_SCALE, PRISON_VERTICAL_SCALE } from './prison_scale.js?v=watch-city-1';
+import { expandPrisonLayout, PRISON_HORIZONTAL_SCALE, PRISON_VERTICAL_SCALE } from './prison_scale.js?v=prison-scale-80-1';
 import { preservePrisonTexelScale } from './prison_uv.js?v=watch-city-tone-1';
 
 const BASE = new URL('../assets/classic/prison/', import.meta.url).href;

@@ -1,0 +1,499 @@
+{
+  "asset": {
+    "generator": "Khronos glTF Blender I/O v5.1.20",
+    "version": "2.0"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "Scene",
+      "nodes": [
+        0,
+        1,
+        2
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "mesh": 0,
+      "name": "overhead_crane_rails",
+      "translation": [
+        0,
+        -0.4038698971271515,
+        -0.9552342891693115
+      ]
+    },
+    {
+      "mesh": 1,
+      "name": "overhead_crane_winch",
+      "translation": [
+        -0.06628131866455078,
+        -0.565877377986908,
+        0.029091954231262207
+      ]
+    },
+    {
+      "mesh": 2,
+      "name": "overhead_crane"
+    }
+  ],
+  "materials": [
+    {
+      "doubleSided": true,
+      "name": "overhead_crane_trim",
+      "normalTexture": {
+        "index": 0
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 1
+        },
+        "metallicRoughnessTexture": {
+          "index": 2
+        }
+      }
+    },
+    {
+      "doubleSided": true,
+      "name": "overhead_crane",
+      "normalTexture": {
+        "index": 3
+      },
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 4
+        },
+        "metallicRoughnessTexture": {
+          "index": 5
+        }
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "Cube.009",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1,
+            "TEXCOORD_0": 2
+          },
+          "indices": 3,
+          "material": 0
+        }
+      ]
+    },
+    {
+      "name": "Cylinder.009",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 4,
+            "NORMAL": 5,
+            "TEXCOORD_0": 6
+          },
+          "indices": 7,
+          "material": 0
+        },
+        {
+          "attributes": {
+            "POSITION": 8,
+            "NORMAL": 9,
+            "TEXCOORD_0": 10
+          },
+          "indices": 11,
+          "material": 1
+        }
+      ]
+    },
+    {
+      "name": "Cube.014",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 12,
+            "NORMAL": 13,
+            "TEXCOORD_0": 14
+          },
+          "indices": 15,
+          "material": 0
+        },
+        {
+          "attributes": {
+            "POSITION": 16,
+            "NORMAL": 17,
+            "TEXCOORD_0": 18
+          },
+          "indices": 19,
+          "material": 1
+        }
+      ]
+    }
+  ],
+  "textures": [
+    {
+      "sampler": 0,
+      "source": 0
+    },
+    {
+      "sampler": 0,
+      "source": 1
+    },
+    {
+      "sampler": 0,
+      "source": 2
+    },
+    {
+      "sampler": 0,
+      "source": 3
+    },
+    {
+      "sampler": 0,
+      "source": 4
+    },
+    {
+      "sampler": 0,
+      "source": 5
+    }
+  ],
+  "images": [
+    {
+      "mimeType": "image/jpeg",
+      "name": "overhead_crane_trim_nor_gl",
+      "uri": "textures/overhead_crane_trim_nor_gl_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "overhead_crane_trim_diff",
+      "uri": "textures/overhead_crane_trim_diff_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "overhead_crane_trim_metal-overhead_crane_trim_rough",
+      "uri": "textures/overhead_crane_trim_arm_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "overhead_crane_nor_gl",
+      "uri": "textures/overhead_crane_nor_gl_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "overhead_crane_diff",
+      "uri": "textures/overhead_crane_diff_1k.jpg"
+    },
+    {
+      "mimeType": "image/jpeg",
+      "name": "overhead_crane_metal-overhead_crane_rough",
+      "uri": "textures/overhead_crane_arm_1k.jpg"
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 104,
+      "max": [
+        6.245830059051514,
+        0.3625687062740326,
+        4.000000476837158
+      ],
+      "min": [
+        -6.245830059051514,
+        -0.3633486330509186,
+        0
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 104,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 104,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 168,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 4,
+      "componentType": 5126,
+      "count": 10641,
+      "max": [
+        2.406200647354126,
+        1.0392985343933105,
+        0.5595990419387817
+      ],
+      "min": [
+        -2.1752469539642334,
+        -2.618830442428589,
+        -0.6623131036758423
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 5,
+      "componentType": 5126,
+      "count": 10641,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 6,
+      "componentType": 5126,
+      "count": 10641,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 7,
+      "componentType": 5123,
+      "count": 40119,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 8,
+      "componentType": 5126,
+      "count": 25099,
+      "max": [
+        2.4022085666656494,
+        1.1932659149169922,
+        0.5570836663246155
+      ],
+      "min": [
+        -2.13779878616333,
+        -3.3472485542297363,
+        -0.6355312466621399
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 9,
+      "componentType": 5126,
+      "count": 25099,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 10,
+      "componentType": 5126,
+      "count": 25099,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 11,
+      "componentType": 5123,
+      "count": 80733,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 12,
+      "componentType": 5126,
+      "count": 12990,
+      "max": [
+        6.1093668937683105,
+        1.195859432220459,
+        1.4830199480056763
+      ],
+      "min": [
+        -6.1093668937683105,
+        -2.003094434738159,
+        -0.28363505005836487
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 13,
+      "componentType": 5126,
+      "count": 12990,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 14,
+      "componentType": 5126,
+      "count": 12990,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 15,
+      "componentType": 5123,
+      "count": 55404,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 16,
+      "componentType": 5126,
+      "count": 28742,
+      "max": [
+        6.1093668937683105,
+        1.2194554805755615,
+        1.5066159963607788
+      ],
+      "min": [
+        -6.1093668937683105,
+        -2.0266902446746826,
+        -0.046532489359378815
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 17,
+      "componentType": 5126,
+      "count": 28742,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 18,
+      "componentType": 5126,
+      "count": 28742,
+      "type": "VEC2"
+    },
+    {
+      "bufferView": 19,
+      "componentType": 5123,
+      "count": 93468,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 1248,
+      "byteOffset": 0,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 1248,
+      "byteOffset": 1248,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 832,
+      "byteOffset": 2496,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 336,
+      "byteOffset": 3328,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 127692,
+      "byteOffset": 3664,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 127692,
+      "byteOffset": 131356,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 85128,
+      "byteOffset": 259048,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 80238,
+      "byteOffset": 344176,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 301188,
+      "byteOffset": 424416,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 301188,
+      "byteOffset": 725604,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 200792,
+      "byteOffset": 1026792,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 161466,
+      "byteOffset": 1227584,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 155880,
+      "byteOffset": 1389052,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 155880,
+      "byteOffset": 1544932,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 103920,
+      "byteOffset": 1700812,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 110808,
+      "byteOffset": 1804732,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 344904,
+      "byteOffset": 1915540,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 344904,
+      "byteOffset": 2260444,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 229936,
+      "byteOffset": 2605348,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 186936,
+      "byteOffset": 2835284,
+      "target": 34963
+    }
+  ],
+  "samplers": [
+    {
+      "magFilter": 9729,
+      "minFilter": 9987
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 3022220,
+      "uri": "overhead_crane.bin"
+    }
+  ]
+}

@@ -37,6 +37,10 @@ export class GroundNavigation {
     }
     this.open=new Uint8Array(this.points.length).fill(1);
     this.distance=new Int32Array(this.points.length).fill(-1);
+    // Individual tactics can query several stable goals in one frame. Keep a
+    // small bounded set of flow fields instead of rebuilding a whole map for
+    // every soldier when they alternate between cover and the target.
+    this.flowCache=new Map();
     this.queue=new Int32Array(this.points.length);this.goal=-1;
     this.edges=this.points.map(()=>[]);
     for(let i=0;i<this.points.length;i++) {
@@ -88,12 +92,20 @@ export class GroundNavigation {
   neighbors(i,visit) { for(const j of this.edges[i])visit(j); }
   update(target) {
     const goal=this.nearest(target.x,target.z,target.y);if(goal===this.goal)return;
-    this.goal=goal;this.distance.fill(-1);if(goal<0)return;
+    this.goal=goal;
+    if(this.flowCache.has(goal)) {
+      this.distance=this.flowCache.get(goal);
+      this.flowCache.delete(goal);this.flowCache.set(goal,this.distance);
+      return;
+    }
+    this.distance=new Int32Array(this.points.length).fill(-1);if(goal<0)return;
     let head=0,tail=1;this.queue[0]=goal;this.distance[goal]=0;
     while(head<tail) {
       const i=this.queue[head++];
       this.neighbors(i,j=>{if(this.distance[j]<0){this.distance[j]=this.distance[i]+1;this.queue[tail++]=j;}});
     }
+    this.flowCache.set(goal,this.distance);
+    if(this.flowCache.size>12)this.flowCache.delete(this.flowCache.keys().next().value);
   }
   clear(a,b) {
     const steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.16));

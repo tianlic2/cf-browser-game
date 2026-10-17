@@ -1,8 +1,10 @@
 // Stretch the imported arena while leaving players and weapons at their normal
 // size. Source brush planes use n·p < d, so each normal coefficient must be
 // divided by the scale applied to its corresponding coordinate.
-export const PRISON_HORIZONTAL_SCALE = 2;
-export const PRISON_VERTICAL_SCALE = 1.3;
+// The arena was previously 2x wide/long and 1.3x high. Keep 80% of that size:
+// X/Z = 1.6x and Y = 1.04x relative to the imported source map.
+export const PRISON_HORIZONTAL_SCALE = 1.6;
+export const PRISON_VERTICAL_SCALE = 1.04;
 
 export function expandPrisonLayout(
   source, horizontalScale = PRISON_HORIZONTAL_SCALE, verticalScale = PRISON_VERTICAL_SCALE,

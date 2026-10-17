@@ -7,6 +7,61 @@ export function intersectsBrush(c, x, z, feet = 0, radius = .45, step = .5, heig
   return c.planes.every(([nx,ny,nz,d]) => nx*x+ny*cy+nz*z < d+radius*Math.hypot(nx,nz)+Math.abs(ny)*hy-1e-5);
 }
 
+// Conservative horizontal depth inside the brush's radius-expanded AABB.
+// This is used only for recovery after a vertical move has left a player
+// overlapping a wall; the exact convex-plane test remains authoritative.
+function horizontalDepth(c, x, z, radius) {
+  return Math.max(0, Math.min(
+    c.hx + radius - Math.abs(x - c.x),
+    c.hz + radius - Math.abs(z - c.z),
+  ));
+}
+
+// Normal movement may enter no new brush. If the starting point is already
+// overlapping (for example after falling against a crate side), allow only a
+// move that exits a blocker or makes every remaining overlap strictly shallower.
+// The old unconditional "stuck means move anywhere" rule let repeated jump
+// contacts walk the capsule all the way into a box.
+export function canMoveThroughBrushes(colliders, fromX, fromZ, toX, toZ,
+  feet = 0, radius = .45, step = .5, height = 1.78) {
+  let next = null;
+  for (const c of colliders) {
+    if (intersectsBrush(c, toX, toZ, feet, radius, step, height)) (next ||= []).push(c);
+  }
+  if (!next?.length) return true;
+  let current = null;
+  for (const c of colliders) {
+    if (intersectsBrush(c, fromX, fromZ, feet, radius, step, height)) (current ||= []).push(c);
+  }
+  if (!current?.length) return false;
+  const before = new Map(current.map(c => [c, horizontalDepth(c, fromX, fromZ, radius)]));
+  let improved = next.length < current.length;
+  for (const c of next) {
+    const oldDepth = before.get(c);
+    if (oldDepth === undefined) return false;
+    const newDepth = horizontalDepth(c, toX, toZ, radius);
+    if (newDepth > oldDepth + 1e-5) return false;
+    if (newDepth < oldDepth - 1e-5) improved = true;
+  }
+  return improved;
+}
+
+// Push an overlapping capsule to the nearest side of the brush's expanded
+// AABB. Since the AABB contains the convex brush, the returned point is always
+// outside the exact brush too. This is a last-resort correction for vertical
+// descent beside a crate, not the normal movement path.
+export function brushHorizontalEscape(c, x, z, radius = .45) {
+  const eps = 2e-5;
+  const candidates = [
+    { x: c.x - c.hx - radius - eps - x, z: 0 },
+    { x: c.x + c.hx + radius + eps - x, z: 0 },
+    { x: 0, z: c.z - c.hz - radius - eps - z },
+    { x: 0, z: c.z + c.hz + radius + eps - z },
+  ];
+  candidates.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+  return candidates[0];
+}
+
 export function brushTop(c, x, z) {
   if (Math.abs(x-c.x)>c.hx || Math.abs(z-c.z)>c.hz) return -Infinity;
   if (!c.planes) return c.h;

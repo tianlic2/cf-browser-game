@@ -1238,6 +1238,7 @@ export async function buildMap(scene) {
     let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) for (let k = 0; k < nh; k++) {
       const m = new THREE.Mesh(new THREE.BoxGeometry(bx, bx, bx), crateMat(o.colors[k % o.colors.length]));
+      m.userData.bulletMaterial = "wood";
       const x = o.x + (i - (nx - 1) / 2) * (bx + gap);
       const z = o.z + (j - (nz - 1) / 2) * (bx + gap);
       const y = (o.topY || 0) + bx / 2 + k * (bx + gap * 0.5);

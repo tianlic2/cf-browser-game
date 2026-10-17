@@ -19,11 +19,11 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
-import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js";
+import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=golden-thunder-1";
 
-// 会出现在世界里的枪。经典三把是敌人随机携带的池子；巴雷特可由玩家丢弃。
-const WORLD_GUN_IDS = ["ak", "m4", "awm", "barrett", "pistol", "deagle"];
-export const ENEMY_GUN_IDS = ["ak", "m4", "awm"];
+// 会出现在世界里的枪。AK/M4 是普通地图敌人池；巴雷特用于守望之城。
+const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle"];
+export const ENEMY_GUN_IDS = ["ak", "m4"];
 
 const cache = {}; // id → { world: {skinId: Object3D}, enemy: {skinId: Object3D} }
 let built = false;
@@ -164,7 +164,7 @@ function darkenForEnemy(root) {
   });
 }
 
-// 启动时调一次。guns = { ak: Object3D, m4: …, awm: …, pistol: … }（传 owned[id].gun）
+// 启动时调一次。guns = { ak: Object3D, m4: …, barrett: …, deagle: … }（传 owned[id].gun）
 export function buildGunCatalog(guns, models = {}) {
   for (const id of WORLD_GUN_IDS) {
     const src = guns[id];

@@ -6,7 +6,7 @@
 除第五、八、九节保留原 WAV 外，已有转码文件都是**单声道**（除 lobby_theme 为立体声），每个 stem 出两份：
   <stem>.ogg  —— Ogg Vorbis。Chrome / Firefox / Edge 走这一份。
   <stem>.m4a  —— MP4 容器 + AAC。Safari 走这一份（Chrome/Firefox 也认）。
-  **ui/ 与 sw/ 下现用的 12 个 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
+  **ui/ 与 sw/ 下保留的若干 stem 只有 .m4a**：本机没有 Vorbis 编码器（macOS 的
   afconvert 只写 m4af / WAVE / AIFF / CAF / ADTS），这些不是从参考项目搬来的
   ogg，而是我们自己从 wav 编的。加载器对它们直接走第二个候选，不产生 404
   （见 scripts/audio.js 的 M4A_ONLY，按**stem 路径**列）。旧的两条 scope m4a 不再加载。
@@ -65,6 +65,11 @@ foley/c4_explode             <- freesound.org/s/482993/  (large explosion 1 by V
 ------------------------------------------------------------
 二、UI / 手上动作（真实录音，Freesound CC0）
 ------------------------------------------------------------
+**2026-10-17 当前接入状态（覆盖本节后面的历史说明）：**通用 `sw/deploy*`、
+`sw/holster*`、`weapons/ak47_reload_1..3` 与 `melee/knife_swing` 已停止预载和播放。
+切枪、换弹、拉栓及近战攻击现在只使用对应武器素材包自己的原声；没有源原声就静音，
+不再使用通用录音或 Web Audio 合成兜底。下面仍保留这些下线素材的来源，便于审计授权。
+
 **这一节整体替换掉了旧的 Kenney UI Audio 合成 blip**（原来那四个 ui_* 是 35~68 ms
 的方波扫频，用户的反馈是"偏卡通"）。现在同一条分界线上的一切——按钮、页签、面板
 开合、切枪收/出、空枪干击、开镜退镜——都是真实录音，音色靠**谱心**分开：
@@ -165,7 +170,7 @@ classic/ak47_out.wav  <- G_MZC_AK47_CLIPOUT.WAV
 classic/ak47_in.wav   <- G_MZC_AK47_CLIPIN.WAV
 classic/ak47_bolt.wav <- G_RELOAD_AK47.WAV
 
-原速播放；AK 第一人称改用导入骨架后，换弹事件按来源 QC 的第 39、102、202 帧（共 299）映射到本项目换弹周期。M4A1-C 的独立声音见第八节。
+原速播放；AK 第一人称改用导入骨架后，换弹事件按来源 QC 的第 39、102、202 帧（共 299）映射到本项目换弹周期。切枪现在播放完整 `select` 骨骼动作，并按用户提供 Festa MDL 的第 77 帧（`.205333s`）事件复用同一份原始 `ak47_bolt.wav`；该 WAV 与 Festa 包内 `AK47_RELOAD.wav` 逐字节相同，未裁剪、变调或添加合成层。M4A1-C 的独立声音见第八节。
 完整资产记录：assets/classic/CREDITS.md。
 
 Classic CF grenade sounds (not CC0)
@@ -221,11 +226,10 @@ vo/fireinthehole.wav         <- 用户提供的 fireinthehole.wav（原在仓库
 `updateGrenadeAction()` 判到 `a.t >= a.releaseAt` 的那一帧）。**不是拉环那一下**
 （那是 `grenadePin()` / `cf_grenade_pin`，更早）。
 **只有手雷（frag）喊**：调用点的判据是 `def.nade === "frag"`，它同时是 `updateGrenades()`
-里 `g.kind === "frag"` 分流爆炸的那个字段。**闪光弹与烟雾弹的出手不喊这一声**，目前只有
-同帧的甩手 whoosh —— 那是给它们各自补素材留的挂点，不是漏了。
+里 `g.kind === "frag"` 分流爆炸的那个字段。**闪光弹与烟雾弹的出手不喊这一声**；原来同帧
+借用近战合成器生成的甩手 whoosh 已在 2026-10-17 下线。
 **这一声没有合成兜底**（人声合不出来，同 `streak()` 那条线）：素材缺失或还没加载完时它
-静默缺省，而**甩手那一声 whoosh 是同帧的另一个方法（`sfx.throwGrenade()`，注意它与
-`main.js` 里那个同名函数是两回事），照常响** —— 三种投掷物都有。
+静默缺省。`sfx.throwGrenade()` 仍作为动作边界保留，但不再生成声音。
 
 实测（无头 Chrome + 真实投掷路径，见 AGENTS.md 本节）：手雷出手帧 i=50 / t=0.85 上
 `thrown`、手雷计数减一、投掷物入池三件事同帧发生，该帧 lastAttempt 为
@@ -294,6 +298,57 @@ classic/deagle_clipout.wav <- Required/sound/weapons/deagle/de_clipout.WAV
 classic/deagle_clipin.wav  <- Required/sound/weapons/deagle/de_clipin.WAV
 classic/deagle_deploy.wav  <- Required/sound/weapons/deagle/de_deploy.WAV
 
-四段 WAV 原样复制、未转码。开火使用包内独立采样，换弹三阶段分别使用退匣、插匣与
-完成动作声音；不与 USP 共用枪声。它们是社区移植的商业游戏素材，来源页的移植说明
-不等于原权利人的独立再分发或商用授权。
+四段 WAV 原样复制、未转码。它们曾配合旧第一人称沙鹰使用；2026-10-17 导入用户提供的
+Festa CFS 2019 `v_deagle.mdl` 后已停止预载和播放，文件仅留作旧资源与来源记录。
+它们是社区移植的商业游戏素材，来源页的移植说明不等于原权利人的独立再分发或商用授权。
+
+
+------------------------------------------------------------
+十二、生化模式音效（CC0）
+------------------------------------------------------------
+来源：https://opengameart.org/content/zombies-sound-pack
+作者：artisticdude；许可：CC0。
+audio/bio/attack.wav <- zombies/zombie-1.wav
+audio/bio/infect.wav <- zombies/zombie-6.wav
+audio/bio/mother.wav <- zombies/zombie-13.wav
+audio/bio/death.wav  <- zombies/zombie-21.wav
+四段 WAV 从原 zombies.zip 逐字节提取并按用途命名，供幽灵攻击、感染、母体出现与死亡使用。
+
+audio/bio/countdown.ogg <- https://opengameart.org/content/race-start-countdown
+作者 kheetor；来源页列出 CC0，原始 OGG 文件未改动。生化回合最后四秒播放倒计时提示。
+
+
+------------------------------------------------------------
+十三、Festa CFS 2019 沙漠之鹰音效（用户提供，授权未核验）
+------------------------------------------------------------
+来源目录：`Festa CFS 2019 WS/sound/weapons/`
+
+classic/deagle_festa/fire_1.wav <- deagle-1.wav
+classic/deagle_festa/fire_2.wav <- deagle-2.wav
+classic/deagle_festa/select.wav <- SND/Desert Eagle-Silence/DesertEagleSilence_Select.wav
+classic/deagle_festa/blowback.wav <- SND/Desert Eagle-Silence/DesertEagleSilence_BlowBack.wav
+classic/deagle_festa/clipout.wav <- SND/Desert Eagle-Silence/DesertEagleSilence_ClipOut.wav
+classic/deagle_festa/clipin.wav <- SND/Desert Eagle-Silence/DesertEagleSilence_ClipIn.wav
+classic/deagle_festa/del_blowback.wav <- SND/Desert Eagle-Silence/DesertEagleSilence_DelBlowBack.wav
+
+两份 22050 Hz / 16-bit / 单声道 PCM WAV 均原样复制、未转码，时长约 0.5204 秒；二者
+SHA-256 都是 `d5eb64744805953d6bd6b037758818ac84a5d1cb62b6f1aabb702bf326bcddd4`，即源包内
+实际为相同音频。游戏仍按两个源文件槽位接入，不制造音高或合成变体。
+五份动作 WAV 位于源目录的 `sound/SND/Desert Eagle-Silence/`，均为 22050 Hz / 16-bit /
+单声道 PCM，原样复制、未转码、未变调。拔枪按 select 第 1 帧播放；换弹按 reload 的
+第 1 / 29 / 124 / 193 帧播放，对应源 MDL 的五个 5004 事件。该目录未附带可核验授权
+说明；仅用于用户要求的本地项目，不声明 CC0、公开再分发或商业授权。
+
+
+------------------------------------------------------------
+十三、Festa CFS 2019 凤凰斧音效（用户提供的 CF 素材）
+------------------------------------------------------------
+classic/axe_festa/attack_1.wav <- SND/AXE/AXE_KNIFE_ATTACK_1.wav
+classic/axe_festa/attack_2.wav <- SND/AXE/AXE_KNIFE_ATTACK_2.wav
+classic/axe_festa/attack_3.wav <- SND/AXE/AXE_KNIFE_ATTACK_3.wav
+classic/axe_festa/put_up.wav   <- SND/AXE/AXE_KNIFE_PUT_UP.wav
+
+来源是用户提供的 `Festa CFS 2019 WS` 本地素材目录，四段 WAV 原样复制、
+不转码也不变调。播放时刻读取源 MDL 的 5004 动作事件，并按本项目的近战
+攻击周期等比例重定时，使声音与完整骨骼动作保持同相位。源包没有授权文件，
+不据此推定公开再分发或商业使用权。

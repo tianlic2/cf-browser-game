@@ -14,6 +14,7 @@
 // 所以「腿往前抬」是负的 rotation.x，「上身前倾」是正的 rotation.x。
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { NPC_GAIT } from './npc_gait.js';
 
 let enemyMuzzleTexture = null;
 export function setEnemyMuzzleTexture(texture) { enemyMuzzleTexture = texture; }
@@ -467,9 +468,12 @@ const _MOUNT_DEAD_PITCH = 0.45;
 const RIFLE_DEATH_YAW = 1.5;   // 叠加在 RIFLE_YAW 上的横转量（≈86°，几乎垂直于身体）
 const _dropR = new THREE.Vector3(-0.26, -0.28, -0.10);
 const _dropL = new THREE.Vector3(0.30, -0.32, -0.06);
+const _reloadPouch = new THREE.Vector3(0.29, -0.34, 0.16);
+const _reloadMagwell = new THREE.Vector3(0.13, -0.16, 0.31);
 // 握点目标（每帧从常量算出来，绝不在 GRIP/HANDGUARD 上原地 applyMatrix4）
 const _gripT = new THREE.Vector3();
 const _hgT = new THREE.Vector3();
+const _reloadReturn = new THREE.Vector3();
 
 // 逐具骨架的身份计数器。**必须在构造期取、不能放进 `reset()`**：
 // `EnemyManager` 是对象池（`acquire()` 从 `free` 弹出复用），在 `reset()` 里换色的话
@@ -530,7 +534,9 @@ export class SoldierRig {
       for (const g of parts) add(parent, g, material, part);
     };
 
-    // ---------- 层级：root → pelvis →（spine → chest → 双臂/头/枪）+ 双腿 ----------
+    // Keep the weapon-bearing torso independent of the leg driver. Locomotion
+    // can lower/turn the hips to plant the feet without shaking the sightline.
+    // root → pelvis → legs; root → spine → chest → arms/head/weapon.
     const root = new THREE.Group();
     const pelvis = new THREE.Group();
     pelvis.position.y = PELVIS_Y;
@@ -539,8 +545,8 @@ export class SoldierRig {
     add(pelvis, G.teamBand, this.matTeam);
 
     const spine = new THREE.Group();
-    spine.position.y = SPINE_Y;
-    pelvis.add(spine);
+    spine.position.y = PELVIS_Y + SPINE_Y;
+    root.add(spine);
 
     const chest = new THREE.Group();
     chest.position.y = CHEST_Y;
@@ -762,10 +768,10 @@ export class SoldierRig {
   muzzleBody(out) {
     // Read the local matrices written by animate(), including the torso lean
     // and firing impulse. No scene/world matrix refresh is needed here.
-    this.chest.updateMatrix();this.spine.updateMatrix();this.pelvis.updateMatrix();
+    this.chest.updateMatrix();this.spine.updateMatrix();
     out.set(0, 0.02, RIFLE_HALF + 0.03)
       .applyMatrix4(this.mount.matrix).applyMatrix4(this.chest.matrix)
-      .applyMatrix4(this.spine.matrix).applyMatrix4(this.pelvis.matrix);
+      .applyMatrix4(this.spine.matrix);
     return out;
   }
 
@@ -800,21 +806,20 @@ export class SoldierRig {
     const halfStride = Math.min(HALF_STRIDE_MAX, Math.max(0.06, speed * 0.10));
     this.phase += (Math.PI * moved * CADENCE_SLIP) / (2 * halfStride);
 
-    // ② 脚的前后位置与抬脚高度：支撑期在本体系里匀速后移（= 世界坐标里不动），
-    //    摆动期抬起前摆。z/y 都不依赖骨盆高度，所以可以先算出来。
+    // ② The contact/swing curve comes from a CC0 authored jog clip. Only its
+    //    normalized foot trajectory is used; IK still fixes feet to this game's
+    //    terrain and the collision controller still owns all root movement.
     const strideOf = (ph, out) => {
       const q = ((ph % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-      if (q < Math.PI) {                        // 支撑期
-        out.z = halfStride * (1 - (2 * q) / Math.PI);
-        out.lift = 0;
-      } else {                                  // 摆动期
-        const u = (q - Math.PI) / Math.PI;
-        out.z = -halfStride * Math.cos(Math.PI * u);
-        out.lift = 0.15 * Math.sin(Math.PI * u);
-      }
+      const frame = q * (32 / (Math.PI * 2));
+      const i = Math.floor(frame), next = (i + 1) & 31, blend = frame - i;
+      out.z = halfStride * THREE.MathUtils.lerp(NPC_GAIT[i * 2], NPC_GAIT[next * 2], blend);
+      out.lift = .15 * THREE.MathUtils.lerp(NPC_GAIT[i * 2 + 1], NPC_GAIT[next * 2 + 1], blend);
       const travel = out.z;
-      out.z = travel * (Math.abs(this.motionForward) < 0.2 ? 0.2 : this.motionForward) * walkW;
-      out.x = Math.max(-0.10, Math.min(0.10, travel * 0.34 * this.motionSide)) * walkW;
+      // The two feet travel along the actual local movement vector. A strafe
+      // must visibly step sideways while the rifle and chest keep facing out.
+      out.z = travel * this.motionForward * walkW;
+      out.x = Math.max(-.25, Math.min(.25, travel * this.motionSide)) * walkW;
       out.lift *= walkW;
       return out;
     };
@@ -831,8 +836,12 @@ export class SoldierRig {
     this.pelvisY += (wantY - this.pelvisY) * (1 - Math.exp(-dt * 15));
     const idleW = 1 - walkW;
     this.pelvis.position.y = this.pelvisY + idleW * Math.sin(this.breath) * 0.008;
-    this.pelvis.position.x = Math.sin(this.phase) * 0.022 * walkW;
-    this.pelvis.rotation.z = Math.sin(this.phase) * 0.05 * walkW;
+    this.pelvis.position.x = 0;
+    this.pelvis.rotation.z = 0;
+    // Let the hips lag a sharp turn while the feet keep their displacement-
+    // driven cadence. The whole actor still owns actual yaw and hitboxes.
+    this.pelvis.rotation.y = THREE.MathUtils.clamp(-(s.turnRate || 0) * .035, -.10, .10) *
+      (1 - this.deathBlend);
     this._fR.v.set(-HIP_X + sR.x, -this.pelvisY + ANKLE_Y + sR.lift, sR.z);
     this._fL.v.set(HIP_X + sL.x, -this.pelvisY + ANKLE_Y + sL.lift, sL.z);
     const fR = this._fR, fL = this._fL;
@@ -857,15 +866,15 @@ export class SoldierRig {
     solveLeg(this.legR, fR);
     solveLeg(this.legL, fL);
 
-    // ⑤ 躯干：跑起来前倾、走起来左右微扭、受击后仰（都是小幅，不夺走「朝向=瞄准」这个前提）
-    this.spine.rotation.x = 0.05 + 0.09 * walkW + 0.05 * blind - flinch * 0.26;
-    this.spine.rotation.y = Math.sin(this.phase) * 0.09 * walkW * (1 - this.aimBlend) - flinch * 0.14;
-    this.spine.rotation.z = blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06)
-      - this.motionSide * walkW * 0.065;
+    // ⑤ Upper body is an aiming platform: gait phase and travel direction do
+    // not rotate it. Flash, hit and recoil are intentional one-shot reactions.
+    this.spine.rotation.x = 0.05 + 0.05 * blind - flinch * 0.26;
+    this.spine.rotation.y = -flinch * 0.14;
+    this.spine.rotation.z = blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06);
     this.chest.rotation.x = -this.kick * 0.04 * (1 - this.deathBlend);
 
     // ⑥ 头：跑动时抬起来一点、致盲时低头乱晃、受击时向后甩
-    this.neck.rotation.x = -0.04 * walkW + Math.sin(this.breath * 0.9) * 0.02
+    this.neck.rotation.x = Math.sin(this.breath * 0.9) * 0.02
       + blind * 0.20 - flinch * 0.30;
     this.neck.rotation.y = blind
       ? Math.sin(this.breath * 2.3) * 0.45
@@ -880,7 +889,7 @@ export class SoldierRig {
     this.head.rotation.y = (s.scan || 0) * Math.sin(s.scanPhase || 0) * MAX_SCAN * (1 - this.deathBlend);
 
     // ⑦ 枪：低姿 ↔ 据枪 插值，开火时往肩里推 + 抬枪口
-    const k = this.aimBlend * (1 - 0.20 * walkW);
+    const k = this.aimBlend;
     const kick = this.kick;
     const db = this.deathBlend;
     this.mountPos.set(
@@ -904,6 +913,18 @@ export class SoldierRig {
     //    挂点在胸腔系里 → 肩也在胸腔系里，两边同系，IK 直接在这个系里解。
     _gripT.copy(this.anchors.grip).applyMatrix4(this.mount.matrix);
     _hgT.copy(this.anchors.handguard).applyMatrix4(this.mount.matrix);
+    const reload = Number.isFinite(s.reload) ? Math.max(0, Math.min(1, s.reload)) : 0;
+    if (reload > 0 && reload < 1 && this.deathBlend < .02) {
+      // One continuous support-hand path: release the foregrip, fetch a mag,
+      // seat it, then return. The rifle stays anchored to the right hand.
+      const smooth = t => { t = clamp01(t); return t * t * (3 - 2 * t); };
+      if (reload < .34) _hgT.lerp(_reloadPouch, smooth(reload / .34));
+      else if (reload < .68) _hgT.copy(_reloadPouch).lerp(_reloadMagwell,
+        smooth((reload - .34) / .34));
+      else _hgT.copy(_reloadMagwell).lerp(
+        _reloadReturn.copy(this.anchors.handguard).applyMatrix4(this.mount.matrix),
+        smooth((reload - .68) / .32));
+    }
     if (blind > 0.02) _hgT.lerp(_faceT, blind * 0.85);          // 致盲：左手抬起来捂脸
     if (this.deathBlend > 0.02) {                               // 倒地：双手松开垂在身侧
       _gripT.lerp(_dropR, this.deathBlend);

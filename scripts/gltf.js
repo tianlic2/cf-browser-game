@@ -24,6 +24,7 @@
 // 漏一处 = 那一处的这类模型静默变白，而且控制台只有一行 warning（很容易被当成噪声）。
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 const SPEC_GLOSS = "KHR_materials_pbrSpecularGlossiness";
 
@@ -73,5 +74,6 @@ class GLTFSpecGlossExtension {
 export function makeGLTFLoader() {
   const loader = new GLTFLoader();
   loader.register((parser) => new GLTFSpecGlossExtension(parser));
+  loader.setMeshoptDecoder(MeshoptDecoder);
   return loader;
 }

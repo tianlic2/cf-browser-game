@@ -14,7 +14,7 @@
     <!-- 路径一律用「相对当前文档」的写法：本地 http.server 与 GitHub Pages 的项目页
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
-    <link rel="stylesheet" href="./styles/game.css?v=bio-no-power-1" />
+    <link rel="stylesheet" href="./styles/game.css?v=training-mode-1" />
     <link rel="stylesheet" href="./styles/boot.css" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
@@ -84,6 +84,19 @@
         <small>寻找掩体 · 准备防守</small>
       </div>
       <div id="bioHealthLayer" class="bio-health-layer" aria-hidden="true"></div>
+      <aside id="trainingPanel" class="training-panel hidden" aria-label="训练模式伤害统计">
+        <header><strong>训练模式</strong><span>BLACKTOWN RANGE</span></header>
+        <div class="training-help"><kbd>N</kbd> 准心位置放置 NPC　<kbd>Delete</kbd> 删除瞄准 NPC<br><kbd>Shift</kbd>+<kbd>Delete</kbd> 清空 NPC　<kbd>F8</kbd> 清空伤害</div>
+        <div class="training-stats">
+          <span>累计伤害<b id="trainingDamageTotal">0</b></span>
+          <span>命中次数<b id="trainingHitCount">0</b></span>
+          <span>爆头次数<b id="trainingHeadCount">0</b></span>
+          <span>平均伤害<b id="trainingDamageAverage">0</b></span>
+        </div>
+        <div class="training-last"><span>最近伤害</span><b id="trainingLastDamage">—</b></div>
+        <div id="trainingDamageLog" class="training-damage-log" aria-live="polite"></div>
+        <footer>训练 NPC <b id="trainingTargetCount">0</b> / 24　·　全图可按 <kbd>B</kbd> 换背包</footer>
+      </aside>
 
       <!-- 顶部：团队竞技比分 + 回合倒计时（时间到按比分判胜负） -->
       <div class="hud-top">
@@ -245,7 +258,7 @@
         <div id="gameMenuHome">
         <div class="game-menu-actions">
           <button id="gameMenuResume" type="button">返回游戏</button>
-          <button id="gameMenuSettingsOpen" type="button">设置<span>更换准心样式</span></button>
+          <button id="gameMenuSettingsOpen" type="button">设置<span>更换准心样式与颜色</span></button>
           <button id="gameMenuPause" type="button">暂停游戏</button>
           <button id="gameMenuReset" type="button">刷新位置<span>返回复活点</span></button>
           <button id="gameMenuEnd" class="game-menu-end" type="button">结束游戏<span>返回主界面</span></button>
@@ -254,19 +267,27 @@
         </div>
         <div id="gameMenuSettings" class="game-menu-settings hidden" aria-label="准心设置">
           <h3>准心样式</h3>
-          <p>选择你偏好的战场准心。狙击枪持枪时准心会自动隐藏。</p>
+          <p>选择你偏好的战场准心与颜色。狙击枪持枪时准心会自动隐藏。</p>
           <div class="crosshair-choices" role="group" aria-label="选择准心样式">
             <button type="button" class="crosshair-choice" data-crosshair-style="classic" aria-pressed="true">
               <span class="crosshair-choice-preview style-classic" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
               <span>经典</span>
             </button>
-            <button type="button" class="crosshair-choice" data-crosshair-style="compact" aria-pressed="false">
-              <span class="crosshair-choice-preview style-compact" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
-              <span>紧凑</span>
-            </button>
             <button type="button" class="crosshair-choice" data-crosshair-style="wide" aria-pressed="false">
               <span class="crosshair-choice-preview style-wide" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
               <span>扩展</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="fine" aria-pressed="false">
+              <span class="crosshair-choice-preview style-fine" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>精细</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="cross" aria-pressed="false">
+              <span class="crosshair-choice-preview style-cross" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>十字</span>
+            </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="tshape" aria-pressed="false">
+              <span class="crosshair-choice-preview style-tshape" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>T 型</span>
             </button>
             <button type="button" class="crosshair-choice" data-crosshair-style="dot" aria-pressed="false">
               <span class="crosshair-choice-preview style-dot" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
@@ -276,6 +297,22 @@
               <span class="crosshair-choice-preview style-ring" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
               <span>圆环</span>
             </button>
+            <button type="button" class="crosshair-choice" data-crosshair-style="hybrid" aria-pressed="false">
+              <span class="crosshair-choice-preview style-hybrid" aria-hidden="true"><i class="x x-top"></i><i class="x x-bottom"></i><i class="x x-left"></i><i class="x x-right"></i><i class="x x-dot"></i></span>
+              <span>混合</span>
+            </button>
+          </div>
+          <h3 class="crosshair-color-title">准心颜色</h3>
+          <div class="crosshair-colors" role="group" aria-label="选择准心颜色">
+            <button type="button" data-crosshair-color="#78ff8c" aria-label="荧光绿" aria-pressed="true" style="--swatch:#78ff8c"></button>
+            <button type="button" data-crosshair-color="#45dfff" aria-label="冰蓝" aria-pressed="false" style="--swatch:#45dfff"></button>
+            <button type="button" data-crosshair-color="#ffe04a" aria-label="亮黄" aria-pressed="false" style="--swatch:#ffe04a"></button>
+            <button type="button" data-crosshair-color="#ff9b42" aria-label="橙色" aria-pressed="false" style="--swatch:#ff9b42"></button>
+            <button type="button" data-crosshair-color="#ffffff" aria-label="白色" aria-pressed="false" style="--swatch:#ffffff"></button>
+            <button type="button" data-crosshair-color="#ff5fd2" aria-label="洋红" aria-pressed="false" style="--swatch:#ff5fd2"></button>
+            <button type="button" data-crosshair-color="#b58cff" aria-label="紫色" aria-pressed="false" style="--swatch:#b58cff"></button>
+            <button type="button" data-crosshair-color="#ff4b4b" aria-label="红色" aria-pressed="false" style="--swatch:#ff4b4b"></button>
+            <label class="crosshair-custom-color">自定义<input id="crosshairCustomColor" type="color" value="#78ff8c" aria-label="自定义准心颜色"></label>
           </div>
           <div class="game-menu-settings-actions">
             <button id="gameMenuSettingsBack" type="button">返回菜单</button>
@@ -313,6 +350,7 @@
             <div class="bio-mode-select" id="modeSelect" aria-label="选择游戏模式">
               <button type="button" class="active" data-mode="tdm" aria-pressed="true">团队竞技</button>
               <button type="button" data-mode="bio" aria-pressed="false">经典生化</button>
+              <button type="button" data-mode="training" aria-pressed="false">训练模式</button>
             </div>
             <div class="room-match-info"><span>地图 <b id="lobbyMapName">运输船</b></span><span id="lobbyMode">团队竞技</span><span id="lobbyGoal"><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
             <div class="room-actions">
@@ -434,6 +472,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-    <script type="module" src="./scripts/main.js?v=github-publish-1"></script>
+    <script type="module" src="./scripts/main.js?v=melee-multihit-1"></script>
   </body>
 </html>

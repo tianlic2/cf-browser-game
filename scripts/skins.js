@@ -246,10 +246,16 @@ export const SKINS = {
     { id: STOCK, name: "原厂", slots: {}, accent: 0x9a9484 },
   ],
 
-  // 近战槽使用 Festa CFS 2019 凤凰斧的完整视模。旧「屠龙」「龙啸」皮肤
-  // 按已废弃匕首模型的材质名上色，不能误用到这把斧上。
+  // 近战槽按背包选择完整源视模：1/2 号为凤凰斧，3/4 号为屠龙。
   knife: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
+    {
+      id: "dragon", name: "屠龙", displayName: "屠龙", slots: {}, accent: 0xff8a20,
+      model: {
+        file: "./assets/classic/kukri_dragon/world.glb", rotY: Math.PI,
+        targetLen: 0.55, anchorKey: "knife",
+      },
+    },
   ],
 };
 

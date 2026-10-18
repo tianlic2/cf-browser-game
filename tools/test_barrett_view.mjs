@@ -76,7 +76,7 @@ assert.ok(wristRotationDot < .99,
   'idle hands must use the source weapon-holding pose, not the spread-arm reference bind pose');
 assert.match(main, /ClassicView\.load\('barrett'\)/);
 assert.match(main, /if\(barrettView&&vid==='barrett'\)/);
-assert.match(main, /BARRETT_VIEW_POSE = Object\.freeze\(\{[\s\S]*?x: \.99, y: -\.12, z: -\.07, pitch: 0, yaw: \.14, roll: 0, scale: 4\.35,[\s\S]*?\}\)/,
+assert.match(main, /BARRETT_VIEW_POSE = Object\.freeze\(\{[\s\S]*?x: \.99, y: -\.12, z: \.12, pitch: 0, yaw: \.01, roll: 0, scale: 4\.826,[\s\S]*?\}\)/,
   'the Barrett should match the supplied reference position, scale and three-axis angle');
 assert.match(main, /const pose=viewmodelPoseLive\.barrett;[\s\S]*?barrettView\.root\.position\.set\(pose\.x\+bobX,[\s\S]*?pose\.y\+bobY[\s\S]*?pose\.z/,
   'the Barrett view uses its calibrated pose without changing internal proportions');

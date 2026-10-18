@@ -1,6 +1,6 @@
-// Firearm headshot damage is intentionally independent from body-shot range falloff.
-// Direct headshots roll uniformly around the weapon's requested average; penetration
-// multipliers are applied later by the firing pipeline so wooden crates still weaken shots.
+// Authored firearm hit damage that is intentionally independent from ordinary range falloff.
+// Direct hits roll uniformly around the requested average; penetration multipliers are applied
+// later by the firing pipeline so wooden crates still weaken both headshots and Barrett body hits.
 export const HEADSHOT_DAMAGE_AVERAGES = Object.freeze({
   ak: 140,
   m4: 104,
@@ -8,11 +8,14 @@ export const HEADSHOT_DAMAGE_AVERAGES = Object.freeze({
   deagle: 120,
 });
 
+export const BODYSHOT_DAMAGE_AVERAGES = Object.freeze({
+  barrett: 300,
+});
+
 export const HEADSHOT_DAMAGE_MIN_FACTOR = 0.90;
 export const HEADSHOT_DAMAGE_MAX_FACTOR = 1.10;
 
-export function rollHeadshotDamage(weaponId, randomValue = Math.random()) {
-  const average = HEADSHOT_DAMAGE_AVERAGES[weaponId];
+function rollAroundAverage(average, randomValue) {
   if (!Number.isFinite(average)) return null;
 
   const finiteRoll = Number.isFinite(randomValue) ? randomValue : 0.5;
@@ -20,4 +23,12 @@ export function rollHeadshotDamage(weaponId, randomValue = Math.random()) {
   const factor = HEADSHOT_DAMAGE_MIN_FACTOR
     + (HEADSHOT_DAMAGE_MAX_FACTOR - HEADSHOT_DAMAGE_MIN_FACTOR) * roll;
   return Math.round(average * factor);
+}
+
+export function rollHeadshotDamage(weaponId, randomValue = Math.random()) {
+  return rollAroundAverage(HEADSHOT_DAMAGE_AVERAGES[weaponId], randomValue);
+}
+
+export function rollBodyshotDamage(weaponId, randomValue = Math.random()) {
+  return rollAroundAverage(BODYSHOT_DAMAGE_AVERAGES[weaponId], randomValue);
 }

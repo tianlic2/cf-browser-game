@@ -53,6 +53,13 @@ const SAMPLES = {
   axe_festa_attack_2: ["classic/axe_festa/attack_2.wav"],
   axe_festa_attack_3: ["classic/axe_festa/attack_3.wav"],
   axe_festa_put_up: ["classic/axe_festa/put_up.wav"],
+  kukri_dragon_deploy: ["classic/kukri_dragon/deploy.wav"],
+  kukri_dragon_slash1: ["classic/kukri_dragon/slash1.wav"],
+  kukri_dragon_slash2: ["classic/kukri_dragon/slash2.wav"],
+  kukri_dragon_stab: ["classic/kukri_dragon/stab.wav"],
+  kukri_dragon_hit: ["classic/kukri_dragon/hit1.wav", "classic/kukri_dragon/hit2.wav",
+    "classic/kukri_dragon/hit3.wav", "classic/kukri_dragon/hit4.wav"],
+  kukri_dragon_hitwall: ["classic/kukri_dragon/hitwall.wav"],
   ironbeast_fire: ["classic/ironbeast/fire_1.wav", "classic/ironbeast/fire_2.wav"],
   ironbeast_reload: ["classic/ironbeast/reload.wav"],
   ironbeast_clipin_gold: ["classic/ironbeast/clipin_gold.wav"],
@@ -831,17 +838,20 @@ export class SFX {
 
   // 子弹打在掩体或人身上。`p` 给 { x, y, z }（THREE.Vector3 也行）。
   // kind: "wall"（30% 跳弹）/ "flesh" / "metal"（跳弹）/ "knife_wall" / "knife_flesh"
-  impact(p, kind = "wall") {
+  impact(p, kind = "wall", meleeSkin = null) {
     if (!this.ready()) return;
     const x = p ? p.x : undefined, y = p ? p.y : 0, z = p ? p.z : undefined;
     let slot = "impact_wall", vol = 0.75;
-    if (kind === "flesh") slot = "impact_flesh";
+    if (meleeSkin === "dragon" && kind === "knife_flesh") slot = "kukri_dragon_hit";
+    else if (meleeSkin === "dragon" && kind === "knife_wall") slot = "kukri_dragon_hitwall";
+    else if (kind === "flesh") slot = "impact_flesh";
     else if (kind === "knife_flesh") slot = "knife_flesh";
     else if (kind === "knife_wall") slot = "knife_wall";
     else if (kind === "metal" || Math.random() < 0.3) slot = "ricochet";
     if (kind === "flesh" || kind === "knife_flesh") vol = 0.9;
     this._playMapped("impact", {
-      id: slot, kind, x, y, z, vol, wet: 0.35, rateJitter: 0.05,
+      id: slot, kind, x, y, z, vol, wet: meleeSkin === "dragon" ? 0 : 0.35,
+      rateJitter: meleeSkin === "dragon" ? 0 : 0.05,
     }, () => this._impactSynth(kind));
   }
 
@@ -863,15 +873,17 @@ export class SFX {
 
   // 近战挥砍只播放斧头素材包对应的三段原声；缺失时静音。
   // 砍中人体 / 砍中钢板由调用方另外调 impact("knife_flesh" / "knife_wall")。
-  melee(kindOrHeavy) {
+  melee(kindOrHeavy, meleeSkin = null, stage = "swing") {
     if (!this.ready()) return;
     const kind = typeof kindOrHeavy === "string" ? kindOrHeavy : kindOrHeavy ? "heavy" : "light";
     const heavy = kind === "heavy";
-    const sample = kind === "thrust" ? "axe_festa_attack_2"
-      : heavy ? "axe_festa_attack_3" : "axe_festa_attack_1";
+    const sample = meleeSkin === "dragon"
+      ? (kind === "thrust" || (heavy && stage === "windup")
+          ? "kukri_dragon_slash2" : heavy ? "kukri_dragon_stab" : "kukri_dragon_slash1")
+      : kind === "thrust" ? "axe_festa_attack_2" : heavy ? "axe_festa_attack_3" : "axe_festa_attack_1";
     this._playMapped("melee", {
-      id: sample, kind,
-      vol: heavy ? 1.0 : 0.9, rate: 1, rateJitter: 0, wet: 0.4,
+      id: sample, kind, stage,
+      vol: heavy ? 1.0 : 0.9, rate: 1, rateJitter: 0, wet: meleeSkin === "dragon" ? 0 : 0.4,
     });
   }
 
@@ -1057,13 +1069,15 @@ export class SFX {
     if (!this.ready()) return;
     const ironbeast = options.skin === "ironbeastgold";
     const barrett = options.weaponId === "barrett";
-    const axe = options.weaponId === "knife";
+    const axe = options.weaponId === "knife" && options.meleeSkin !== "dragon";
+    const kukri = options.weaponId === "knife" && options.meleeSkin === "dragon";
     const deagle = options.weaponId === "deagle";
     const ak = options.weaponId === "ak";
     const m4c = options.weaponId === "m4" && options.m4c;
     const awm = options.weaponId === "awm";
     const selectEventDelay = ironbeast ? (options.selectDur || 0) * 135 / 319
       : barrett ? (Number.isFinite(options.selectBoltAt) ? options.selectBoltAt : 30 / 35)
+      : kukri ? 0
       : axe ? (Number.isFinite(options.axeSelectAt) ? options.axeSelectAt : .01)
       : deagle ? (Number.isFinite(options.deagleSelectAt) ? options.deagleSelectAt : .01)
       : ak ? (Number.isFinite(options.akSelectAt) ? options.akSelectAt : 77 / 375)
@@ -1071,6 +1085,7 @@ export class SFX {
       : awm ? .16 : 0;
     const sample = ironbeast ? "ironbeast_reload"
       : barrett ? "barrett_bolt"
+      : kukri ? "kukri_dragon_deploy"
       : axe ? "axe_festa_put_up"
       : deagle ? "deagle_festa_select"
       : ak ? "cf_ak_bolt"

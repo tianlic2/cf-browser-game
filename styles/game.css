@@ -258,6 +258,9 @@ body {
   --gap: 5px;
   --len: 9px;
   --spread-scale: 1;
+  --thickness: 2px;
+  --dot-size: 3px;
+  --crosshair-color: #78ff8c;
   position: absolute;
   left: 50%;
   top: 50%;
@@ -267,7 +270,7 @@ body {
 .crosshair.hidden { display: none; }
 .crosshair .x, .crosshair-choice-preview .x {
   position: absolute;
-  background: rgba(120, 255, 140, 0.95);
+  background: var(--crosshair-color, #78ff8c);
   box-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
   transition: background-color 55ms linear, box-shadow 55ms linear;
 }
@@ -277,60 +280,62 @@ body {
   box-shadow: 0 0 5px rgba(255, 30, 30, 0.9);
 }
 .crosshair .x-top {
-  left: -1px;
-  width: 2px;
+  left: 0;
+  width: var(--thickness);
   height: var(--len);
   bottom: calc(var(--gap) * var(--spread-scale, 1));
+  transform: translateX(-50%);
 }
 .crosshair .x-bottom {
-  left: -1px;
-  width: 2px;
+  left: 0;
+  width: var(--thickness);
   height: var(--len);
   top: calc(var(--gap) * var(--spread-scale, 1));
+  transform: translateX(-50%);
 }
 .crosshair .x-left {
-  top: -1px;
-  height: 2px;
+  top: 0;
+  height: var(--thickness);
   width: var(--len);
   right: calc(var(--gap) * var(--spread-scale, 1));
+  transform: translateY(-50%);
 }
 .crosshair .x-right {
-  top: -1px;
-  height: 2px;
+  top: 0;
+  height: var(--thickness);
   width: var(--len);
   left: calc(var(--gap) * var(--spread-scale, 1));
+  transform: translateY(-50%);
 }
 .crosshair .x-dot {
-  left: -1.5px;
-  top: -1.5px;
-  width: 3px;
-  height: 3px;
+  left: 0;
+  top: 0;
+  width: var(--dot-size);
+  height: var(--dot-size);
+  transform: translate(-50%, -50%);
   border-radius: 50%;
-  background: rgba(120, 255, 140, 0.95);
+  background: var(--crosshair-color, #78ff8c);
 }
-.crosshair-choice-preview { --gap: 4px; --len: 8px; --spread-scale: 1; position: relative; display: block; flex: 0 0 38px; width: 38px; height: 38px; }
-.crosshair-choice-preview .x-top { left: 17px; width: 2px; height: var(--len); bottom: calc(50% + var(--gap) * var(--spread-scale)); }
-.crosshair-choice-preview .x-bottom { left: 17px; width: 2px; height: var(--len); top: calc(50% + var(--gap) * var(--spread-scale)); }
-.crosshair-choice-preview .x-left { top: 17px; height: 2px; width: var(--len); right: calc(50% + var(--gap) * var(--spread-scale)); }
-.crosshair-choice-preview .x-right { top: 17px; height: 2px; width: var(--len); left: calc(50% + var(--gap) * var(--spread-scale)); }
-.crosshair-choice-preview .x-dot { left: 17px; top: 17px; width: 4px; height: 4px; border-radius: 50%; background: #78ff8c; }
-.style-compact { --len: 5px; --gap: 3px; --spread-scale: .72; }
-.style-compact .x:not(.x-dot) { width: 1px; height: var(--len); }
-.style-compact .x-left, .style-compact .x-right { width: var(--len); height: 1px; }
-.style-compact .x-dot { width: 2px; height: 2px; left: 18px; top: 18px; }
+.crosshair-choice-preview { --gap: 4px; --len: 8px; --spread-scale: 1; --thickness: 2px; --dot-size: 4px; --crosshair-color: #78ff8c; position: relative; display: block; flex: 0 0 38px; width: 38px; height: 38px; }
+.crosshair-choice-preview .x-top { left: 50%; width: var(--thickness); height: var(--len); bottom: calc(50% + var(--gap) * var(--spread-scale)); transform: translateX(-50%); }
+.crosshair-choice-preview .x-bottom { left: 50%; width: var(--thickness); height: var(--len); top: calc(50% + var(--gap) * var(--spread-scale)); transform: translateX(-50%); }
+.crosshair-choice-preview .x-left { top: 50%; height: var(--thickness); width: var(--len); right: calc(50% + var(--gap) * var(--spread-scale)); transform: translateY(-50%); }
+.crosshair-choice-preview .x-right { top: 50%; height: var(--thickness); width: var(--len); left: calc(50% + var(--gap) * var(--spread-scale)); transform: translateY(-50%); }
+.crosshair-choice-preview .x-dot { left: 50%; top: 50%; width: var(--dot-size); height: var(--dot-size); transform: translate(-50%, -50%); border-radius: 50%; background: var(--crosshair-color, #78ff8c); }
 .style-wide { --len: 12px; --gap: 6px; --spread-scale: 1.18; }
+.style-fine { --len: 11px; --gap: 4px; --spread-scale: .82; --thickness: 1px; }
+.style-fine .x-dot { display: none; }
+.style-cross { --len: 8px; --gap: 0px; --spread-scale: 0; --thickness: 1px; --dot-size: 2px; }
+.style-tshape { --len: 10px; --gap: 4px; --spread-scale: .9; --thickness: 2px; --dot-size: 2px; }
+.style-tshape .x-top { display: none; }
 .style-dot .x:not(.x-dot) { display: none; }
 .style-dot .x-dot { width: 4px; height: 4px; }
 .style-ring .x:not(.x-dot) { display: none; }
-.style-ring::before { content: ""; position: absolute; left: 50%; top: 50%; width: calc(7px + var(--gap) * 1.5); height: calc(7px + var(--gap) * 1.5); transform: translate(-50%, -50%); border: 1.5px solid #78ff8c; border-radius: 50%; box-shadow: 0 0 3px #000; }
-.crosshair.hit.style-ring::before { border-color: #ff3030; box-shadow: 0 0 5px #ff1e1ee6; }
-.crosshair-choice-preview.style-compact .x-top { left: 18px; }
-.crosshair-choice-preview.style-compact .x-bottom { left: 18px; }
-.crosshair-choice-preview.style-compact .x-left { top: 18px; }
-.crosshair-choice-preview.style-compact .x-right { top: 18px; }
-.crosshair-choice-preview.style-compact .x-dot { left: 18px; top: 18px; }
+.style-ring::before, .style-hybrid::before { content: ""; position: absolute; left: 50%; top: 50%; width: calc(7px + var(--gap) * 1.5); height: calc(7px + var(--gap) * 1.5); transform: translate(-50%, -50%); border: 1.5px solid var(--crosshair-color, #78ff8c); border-radius: 50%; box-shadow: 0 0 3px #000; }
+.style-hybrid { --len: 7px; --gap: 8px; --spread-scale: 1; --thickness: 1px; --dot-size: 2px; }
+.crosshair.hit.style-ring::before, .crosshair.hit.style-hybrid::before { border-color: #ff3030; box-shadow: 0 0 5px #ff1e1ee6; }
 .crosshair-choice-preview.style-dot .x:not(.x-dot), .crosshair-choice-preview.style-ring .x:not(.x-dot) { display: none; }
-.crosshair-choice-preview.style-ring::before { content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; transform: translate(-50%, -50%); border: 1.5px solid #78ff8c; border-radius: 50%; }
+.crosshair-choice-preview.style-ring::before, .crosshair-choice-preview.style-hybrid::before { width: 14px; height: 14px; border-color: var(--crosshair-color, #78ff8c); }
 
 /* ---- 顶部：比分 + 回合倒计时 ---- */
 .hud-top {
@@ -2532,6 +2537,14 @@ body {
 .crosshair-choice { min-height: 74px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 1px solid #536153; color: #cbd4c5; background: #1a211e; font: 11px Arial, "Microsoft YaHei", "PingFang SC", sans-serif; cursor: pointer; }
 .crosshair-choice:hover, .crosshair-choice:focus-visible { border-color: #b0bd9f; outline: none; }
 .crosshair-choice[aria-pressed="true"] { border-color: #c6b476; background: linear-gradient(#394136, #242c25); box-shadow: inset 0 0 0 1px #c6b47655, 0 0 10px #c6b47622; color: #f0dfad; }
+.crosshair-color-title { margin-top: 14px !important; }
+.crosshair-colors { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; align-items: center; }
+.crosshair-colors > button { position: relative; width: 100%; aspect-ratio: 1; min-width: 0; padding: 0; border: 1px solid #59675b; background: #111815; cursor: pointer; }
+.crosshair-colors > button::before { content: ""; position: absolute; inset: 5px; border-radius: 50%; background: var(--swatch); box-shadow: 0 0 5px var(--swatch), inset 0 0 0 1px #ffffff44; }
+.crosshair-colors > button:hover, .crosshair-colors > button:focus-visible { border-color: #c2ccb8; outline: none; }
+.crosshair-colors > button[aria-pressed="true"] { border-color: #e8d393; box-shadow: 0 0 0 1px #e8d393, 0 0 9px #e8d39355; }
+.crosshair-custom-color { grid-column: 1 / -1; min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 6px 9px; border: 1px solid #536153; color: #cbd4c5; background: #1a211e; font-size: 11px; }
+.crosshair-custom-color input { width: 54px; height: 24px; padding: 0; border: 1px solid #718074; background: transparent; cursor: pointer; }
 .game-menu-settings-actions { margin-top: 12px; }
 .game-menu-settings-actions button { width: 100%; min-height: 38px; border: 1px solid #657462; color: #e1e5d7; background: linear-gradient(#465244, #2a362b); font: 13px Arial, "Microsoft YaHei", "PingFang SC", sans-serif; cursor: pointer; }
 .game-menu-settings-actions button:hover, .game-menu-settings-actions button:focus-visible { border-color: #b6b99b; outline: 2px solid #c6d9d8; outline-offset: 2px; }
@@ -2557,6 +2570,24 @@ body.bio-mutant .hud-bottom-right .hud-ammo-row,body.bio-mutant .hud-bottom-righ
 .bio-countdown.urgent{border-color:#ff674c;box-shadow:0 8px 32px #000b,0 0 28px #9d2c24a0;animation:bioCountdownPulse 1s ease-in-out infinite}
 @keyframes bioCountdownPulse{50%{filter:brightness(1.28)}}
 .bio-health-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
+.training-panel{position:absolute;z-index:6;top:118px;right:18px;width:min(310px,31vw);box-sizing:border-box;padding:11px 12px 10px;color:#d8e9e3;background:linear-gradient(145deg,rgba(13,29,31,.94),rgba(7,14,17,.9));border:1px solid #658b89;box-shadow:0 7px 24px #000a,inset 0 0 24px #3c8f8830;font:12px/1.35 Arial,"Microsoft YaHei","PingFang SC",sans-serif;pointer-events:none}
+.training-panel.hidden{display:none}
+.training-panel header{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:7px;border-bottom:1px solid #54787566}
+.training-panel header strong{color:#fff2c5;font-size:17px;letter-spacing:2px}
+.training-panel header span{color:#72c8c2;font:9px/1 Consolas,monospace;letter-spacing:1px}
+.training-help{padding:8px 0;color:#b8cbc6;border-bottom:1px solid #54787544}
+.training-panel kbd{display:inline-block;min-width:18px;padding:0 4px;border:1px solid #78918c;background:#162726;color:#f4eee0;text-align:center;font:10px/17px Arial,sans-serif}
+.training-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:9px 0}
+.training-stats span{display:flex;align-items:center;justify-content:space-between;padding:6px 7px;background:#0c181aaa;border-left:2px solid #4daaa0;color:#9db4ae}
+.training-stats b{color:#ffe8a5;font:700 17px/1 Consolas,monospace}
+.training-last{display:flex;justify-content:space-between;align-items:center;padding:7px 8px;background:#26332e;border:1px solid #60796e;color:#b9cac2}
+.training-last b{color:#ffb76f;font:700 18px/1 Consolas,monospace}
+.training-damage-log{max-height:154px;margin-top:7px;overflow:hidden}
+.training-damage-log div{display:grid;grid-template-columns:1fr auto auto;gap:7px;padding:4px 2px;border-bottom:1px solid #ffffff14;color:#adc2bd}
+.training-damage-log div b{color:#f4efe0}.training-damage-log div em{color:#ffbd78;font-style:normal}
+.training-panel footer{margin-top:8px;padding-top:7px;border-top:1px solid #54787555;color:#8eaaa4}
+body.training-playing .roundbar{border-color:#4d8d85;box-shadow:0 0 13px #3fa89b40}
+@media(max-width:760px){.training-panel{top:105px;right:8px;width:min(290px,54vw);font-size:10px}.training-damage-log{max-height:104px}}
 .bio-health{position:absolute;transform:translate(-50%,-100%);min-width:114px;max-width:145px;padding:4px 6px 5px;background:linear-gradient(#172422dd,#0b1111ee);border:1px solid #7fa097a3;box-shadow:0 2px 9px #000b;color:#e8f4e8;text-align:center;font:700 11px/1.1 Arial,"Microsoft YaHei","PingFang SC",sans-serif;text-shadow:0 1px #000}
 .bio-health.mother{border-color:#ec8055;color:#ffe6cb}
 .bio-health-row{display:flex;justify-content:space-between;gap:6px;white-space:nowrap}
@@ -2572,6 +2603,7 @@ body.bio-mutant .hud-bottom-right .hud-ammo-row,body.bio-mutant .hud-bottom-righ
 /* Developer-only multi-weapon viewmodel tuner (?viewmodelTuner=1). */
 #viewmodelTuner {
   position: fixed; z-index: 1000; top: 14px; right: 14px; width: min(350px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px); overflow-y: auto;
   box-sizing: border-box; padding: 12px; color: #edf7ff; background: #07111be8;
   border: 1px solid #7bb5d4; border-radius: 7px; box-shadow: 0 8px 30px #000b;
   font: 13px/1.35 "PingFang SC", system-ui, sans-serif; pointer-events: auto; user-select: none;
@@ -2582,6 +2614,22 @@ body.bio-mutant .hud-bottom-right .hud-ammo-row,body.bio-mutant .hud-bottom-righ
 #viewmodelTuner .bvt-picker { margin-bottom: 9px; }
 #viewmodelTuner .bvt-picker select { min-width: 0; padding: 5px 7px; color: #f4fbff; background: #132d3e; border: 1px solid #5795b5; border-radius: 4px; }
 #viewmodelTuner .bvt-fields { display: grid; gap: 5px; }
+#viewmodelTuner .bvt-kukri-speed { margin-top: 10px; padding-top: 9px; border-top: 1px solid #43708a; }
+#viewmodelTuner .bvt-kukri-speed[hidden] { display: none; }
+#viewmodelTuner .bvt-kukri-speed h4 { margin: 0 0 7px; color: #ffe69a; font-size: 14px; }
+#viewmodelTuner .bvt-speed-fields { display: grid; gap: 5px; }
+#viewmodelTuner .bvt-combat-title { margin-top: 12px; padding-top: 9px; border-top: 1px solid #284b60; }
+#viewmodelTuner .bvt-combat-fields { display: grid; gap: 5px; }
+#viewmodelTuner .bvt-hit-preview { display: block; width: 100%; height: auto; margin-top: 9px; border: 1px solid #355c73; border-radius: 4px; }
+#viewmodelTuner .bvt-combat-summary { display: block; margin-top: 7px; color: #ffe2a5; font-variant-numeric: tabular-nums; }
+#viewmodelTuner .bvt-hit-preview { cursor: crosshair; touch-action: none; }
+#viewmodelTuner .bvt-target-title { margin-top: 12px; padding-top: 9px; border-top: 1px solid #284b60; }
+#viewmodelTuner .bvt-target-fields { display: grid; gap: 7px; }
+#viewmodelTuner .bvt-target-card { padding: 6px; background: #102330; border: 1px solid #294b60; border-radius: 4px; }
+#viewmodelTuner .bvt-target-card strong { display: block; margin-bottom: 4px; color: var(--target-color); }
+#viewmodelTuner .bvt-target-summary { display: block; margin-top: 7px; color: #ffb9c1; font-weight: 700; }
+#viewmodelTuner .bvt-preview-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+#viewmodelTuner .bvt-timing { display: block; margin-top: 7px; color: #9de5ff; font-variant-numeric: tabular-nums; }
 #viewmodelTuner label { display: grid; grid-template-columns: 82px 1fr 43px; gap: 7px; align-items: center; }
 #viewmodelTuner input[type="range"] { width: 100%; accent-color: #59c8f5; }
 #viewmodelTuner .bvt-value { text-align: right; color: #ffe69a; font-variant-numeric: tabular-nums; }

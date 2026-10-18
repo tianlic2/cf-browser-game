@@ -1,11 +1,11 @@
 // ===== 战术突击 FPS - 主游戏（运输船 · 团队竞技 · CF 手感）=====
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
-import { SFX } from "./audio.js?v=ironbeast-melee-2";
-import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=goldsrc-visible-wall-1";
+import { SFX } from "./audio.js?v=kukri-heavy-audio-1";
+import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=training-mode-1";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
 import { buildMap } from "./map.js?v=wood-penetration-1";
-import { ClassicView } from "./classic_view.js?v=github-publish-1";
+import { ClassicView } from "./classic_view.js?v=kukri-scoped-vfx-1";
 import { loadAuthoredViews } from "./authored_view.js?v=orient3";
 import { KNIFE, knifePose } from "./melee.js?v=axe-speed-1";
 import { GRENADE, advanceGrenade, sweepGrenade, grenadePose } from "./grenades.js";
@@ -28,8 +28,8 @@ import { ViewArms, ARM_ANCHORS, ELBOWS, MAGWELL } from "./viewarms.js?v=orient5"
 import {
   SKINS, STOCK, DEFAULT_SKIN, DEFAULT_MUZZLE,
   skinsFor, findSkin, isSkinned, skinLabel, paintSkin, modelOf, allModelSkins,
-} from "./skins.js?v=golden-thunder-1";
-import { buildGunCatalog, worldModel, enemyModel, randomGunRoll } from "./guncatalog.js?v=golden-thunder-1";
+} from "./skins.js?v=kukri-dragon-1";
+import { buildGunCatalog, worldModel, enemyModel, randomGunRoll } from "./guncatalog.js?v=kukri-dragon-1";
 import { Chat } from "./chat.js";
 import { makeBlobShadow } from "./blobshadow.js";
 // IBL 去蓝的唯一实现（规则、推导与**实测的剂量–反应**都在 envtame.js 的文件头）
@@ -38,7 +38,7 @@ import { weaponIconSvg, headshotBadgeSvg, killMedalSvg } from "./icons.js";
 import { Minimap, mmVisible } from "./minimap.js";
 import { Lobby } from "./lobby.js?v=bio-no-power-1";
 import { weaponPreview } from "./weapon_preview.js";
-import { rollHeadshotDamage } from "./headshot_damage.js?v=headshot-random-1";
+import { rollHeadshotDamage, rollBodyshotDamage } from "./headshot_damage.js?v=barrett-body-random-1";
 
 // ---------- DOM ----------
 const viewport = document.getElementById("viewport");
@@ -103,7 +103,7 @@ function bootFail(error) {
 let lobby = null;
 const fxLayer = document.getElementById("fx-layer");
 const cross = document.getElementById("crosshair");
-const CROSSHAIR_STYLE_IDS = ["classic", "compact", "wide", "dot", "ring"];
+const CROSSHAIR_STYLE_IDS = ["classic", "wide", "fine", "cross", "tshape", "dot", "ring", "hybrid"];
 function applyCrosshairStyle(styleId, persist = false) {
   const safeId = CROSSHAIR_STYLE_IDS.includes(styleId) ? styleId : "classic";
   for (const id of CROSSHAIR_STYLE_IDS) cross.classList.toggle(`style-${id}`, id === safeId);
@@ -122,6 +122,35 @@ try {
 applyCrosshairStyle(savedCrosshairStyle);
 document.querySelectorAll("[data-crosshair-style]").forEach(button => {
   button.addEventListener("click", () => applyCrosshairStyle(button.dataset.crosshairStyle, true));
+});
+const CROSSHAIR_DEFAULT_COLOR = "#78ff8c";
+function normalizedCrosshairColor(color) {
+  return /^#[0-9a-f]{6}$/i.test(color || "") ? color.toLowerCase() : CROSSHAIR_DEFAULT_COLOR;
+}
+function applyCrosshairColor(color, persist = false) {
+  const safeColor = normalizedCrosshairColor(color);
+  cross.style.setProperty("--crosshair-color", safeColor);
+  document.querySelectorAll(".crosshair-choice-preview").forEach(preview => {
+    preview.style.setProperty("--crosshair-color", safeColor);
+  });
+  document.querySelectorAll("[data-crosshair-color]").forEach(button => {
+    button.setAttribute("aria-pressed", String(button.dataset.crosshairColor.toLowerCase() === safeColor));
+  });
+  const custom = document.getElementById("crosshairCustomColor");
+  if (custom && custom.value.toLowerCase() !== safeColor) custom.value = safeColor;
+  if (persist) {
+    try { localStorage.setItem("cf.crosshairColor", safeColor); } catch { /* storage may be disabled */ }
+  }
+}
+let savedCrosshairColor = CROSSHAIR_DEFAULT_COLOR;
+try { savedCrosshairColor = normalizedCrosshairColor(localStorage.getItem("cf.crosshairColor")); }
+catch { /* use the default when storage is unavailable */ }
+applyCrosshairColor(savedCrosshairColor);
+document.querySelectorAll("[data-crosshair-color]").forEach(button => {
+  button.addEventListener("click", () => applyCrosshairColor(button.dataset.crosshairColor, true));
+});
+document.getElementById("crosshairCustomColor")?.addEventListener("input", event => {
+  applyCrosshairColor(event.currentTarget.value, true);
 });
 const hpVal = document.getElementById("hpVal");
 const hpFill = document.getElementById("hpFill");
@@ -328,6 +357,8 @@ const bioHealthLayer = document.getElementById('bioHealthLayer');
 const bioHealthNodes = new Map();
 let lastBioCountdownSecond = null;
 const bioMatch = () => selectedModeId === "bio";
+const trainingMatch = () => selectedModeId === "training";
+const tdmMatch = () => selectedModeId === "tdm";
 const sniperOnlyMatch = () => selectedMapId === "prison";
 const prisonWeaponAllowed = (id) => ["sniper", "melee"].includes(WEAPON_DEFS[id]?.type);
 let obstacleMeshes = [];
@@ -454,7 +485,7 @@ const WEAPON_DEFS = {
     // source speed; the following bolt segment is intentionally 20% slower,
     // making the complete gameplay lock 2.36s.  The runtime derives this from
     // the imported clip; this value is its safe fallback and public stat.
-    stats: { magSize: 10, reserve: 20, interval: 1.55, dmg: 130, reload: 3.85, rangeMod: 0.99, boltTime: 2.36, zoom: true },
+    stats: { magSize: 10, reserve: 20, interval: 1.55, dmg: 300, reload: 3.85, rangeMod: 0.99, boltTime: 2.36, zoom: true },
     pattern: [[0, 0], [0.25, 4.2], [-0.25, 4.2]],
     recoilReset: 0.55, punchHold: 0.22, viewTrack: 1.0, punchDecay: { exp: 6, lin: 10 },
     inacc: INACC_AWP,
@@ -545,6 +576,13 @@ function damageAt(def, dist) {
 function headshotDamage(def, randomValue = Math.random()) {
   const rolled = rollHeadshotDamage(def.id, randomValue);
   return rolled ?? damageAt(def, 0);
+}
+
+// 巴雷特身体命中按固定均值 300 做 ±10% 均匀随机，不再吃距离衰减；其他枪仍走
+// damageAt()。木箱衰减在 fire() 的公共命中链路中后乘，因此随机范围与穿透规则不混淆。
+function bodyshotDamage(def, dist, randomValue = Math.random()) {
+  const rolled = rollBodyshotDamage(def.id, randomValue);
+  return rolled ?? damageAt(def, dist);
 }
 
 // 推进一步弹道表：把 `aimPunch` 加到**下一发**要用的偏移上。
@@ -1046,7 +1084,7 @@ const IRONBEAST_MELEE = Object.freeze({
 });
 let ironbeastView = null, ironbeastFireT = Infinity, ironbeastShotN = -1, ironbeastMeleeState = null;
 let barrettView = null, barrettFireT = Infinity;
-let axeView = null;
+let axeView = null, kukriView = null;
 let knifeBind = null;
 let strideAcc = 0;
 let curFov = BASE_FOV;
@@ -1139,6 +1177,144 @@ const sfx = new SFX();
 const enemyManager = new EnemyManager(scene, 60);
 enemyManager.onFootstep = (x, z) => sfx.footstep(x, 1.0, z);
 const raycaster = new THREE.Raycaster();
+const TRAINING_TARGET_MAX = 24;
+const trainingTargets = [];
+const trainingStats = { total: 0, hits: 0, heads: 0, last: 0, history: [] };
+const trainingPanel = document.getElementById("trainingPanel");
+const trainingDamageTotal = document.getElementById("trainingDamageTotal");
+const trainingHitCount = document.getElementById("trainingHitCount");
+const trainingHeadCount = document.getElementById("trainingHeadCount");
+const trainingDamageAverage = document.getElementById("trainingDamageAverage");
+const trainingLastDamage = document.getElementById("trainingLastDamage");
+const trainingDamageLog = document.getElementById("trainingDamageLog");
+const trainingTargetCount = document.getElementById("trainingTargetCount");
+
+function renderTrainingPanel() {
+  const active = state === "playing" && trainingMatch();
+  trainingPanel?.classList.toggle("hidden", !active);
+  document.body.classList.toggle("training-playing", active);
+  if (!trainingPanel) return;
+  trainingDamageTotal.textContent = String(trainingStats.total);
+  trainingHitCount.textContent = String(trainingStats.hits);
+  trainingHeadCount.textContent = String(trainingStats.heads);
+  trainingDamageAverage.textContent = trainingStats.hits
+    ? (trainingStats.total / trainingStats.hits).toFixed(1) : "0";
+  trainingLastDamage.textContent = trainingStats.hits ? String(trainingStats.last) : "—";
+  trainingTargetCount.textContent = String(trainingTargets.length);
+  trainingDamageLog.textContent = "";
+  for (const hit of trainingStats.history) {
+    const row = document.createElement("div");
+    const weapon = document.createElement("span");
+    const part = document.createElement("b");
+    const damage = document.createElement("em");
+    weapon.textContent = hit.weapon;
+    part.textContent = hit.headshot ? "爆头" : "命中";
+    damage.textContent = `-${hit.damage}`;
+    row.append(weapon, part, damage);
+    trainingDamageLog.appendChild(row);
+  }
+}
+
+function resetTrainingStats() {
+  Object.assign(trainingStats, { total: 0, hits: 0, heads: 0, last: 0 });
+  trainingStats.history.length = 0;
+  renderTrainingPanel();
+}
+
+function recordTrainingDamage(target, amount, headshot) {
+  if (!trainingMatch()) return;
+  const damage = Math.max(0, Math.round(Number(amount) || 0));
+  trainingStats.total += damage;
+  trainingStats.hits++;
+  if (headshot) trainingStats.heads++;
+  trainingStats.last = damage;
+  trainingStats.history.unshift({ damage, headshot: !!headshot,
+    weapon: gunDisplayName(currentId), target: target.name });
+  trainingStats.history.length = Math.min(10, trainingStats.history.length);
+  renderTrainingPanel();
+  updateScoreHud();
+}
+
+function removeTrainingTarget(target, quiet = false) {
+  const index = trainingTargets.indexOf(target);
+  if (index < 0) return false;
+  trainingTargets.splice(index, 1);
+  const enemyIndex = enemyManager.enemies.indexOf(target);
+  if (enemyIndex >= 0) enemyManager.enemies.splice(enemyIndex, 1);
+  target.trainingImmortal = false;
+  target.onTrainingDamage = null;
+  enemyManager.release(target);
+  renderTrainingPanel();
+  updateScoreHud();
+  if (!quiet) showToast(`已删除 ${target.name}`);
+  return true;
+}
+
+function clearTrainingTargets(quiet = false) {
+  for (const target of [...trainingTargets]) removeTrainingTarget(target, true);
+  renderTrainingPanel();
+  if (!quiet) showToast("已清空训练 NPC");
+}
+
+function trainingAimRay() {
+  camera.updateMatrixWorld(true);
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const direction = new THREE.Vector3(0, 0, -1)
+    .applyEuler(new THREE.Euler(player.pitch + recoilPitch, player.yaw + recoilYaw, 0, "YXZ"));
+  return { origin, direction };
+}
+
+function addTrainingTargetAtCrosshair() {
+  if (!trainingMatch() || state !== "playing" || dead) return false;
+  if (trainingTargets.length >= TRAINING_TARGET_MAX) {
+    showToast(`训练 NPC 最多 ${TRAINING_TARGET_MAX} 个`, true); return false;
+  }
+  const { origin, direction } = trainingAimRay();
+  raycaster.set(origin, direction); raycaster.far = 120;
+  const worldHit = raycaster.intersectObjects(obstacleFlat, false)[0];
+  const base = worldHit?.point?.clone() || origin.clone().addScaledVector(direction, 6);
+  let placement = null;
+  for (const retreat of [.48, .8, 1.15, 0]) {
+    const x = Math.max(-bounds.hw + .5, Math.min(bounds.hw - .5, base.x - direction.x * retreat));
+    const z = Math.max(-bounds.hl + .5, Math.min(bounds.hl - .5, base.z - direction.z * retreat));
+    const y = supportAt(x, z, worldHit?.point?.y ?? player.pos.y);
+    if (Number.isFinite(y) && !blockedBy(x, z, y)) { placement = { x, y, z }; break; }
+  }
+  if (!placement) { showToast("准心位置无法放置训练 NPC", true); return false; }
+  if (trainingTargets.some(target =>
+    Math.hypot(target.group.position.x - placement.x, target.group.position.z - placement.z) < .75 &&
+    Math.abs(target.group.position.y - placement.y) < 1.8)) {
+    showToast("该位置已有训练 NPC，请瞄准其他位置", true);
+    return false;
+  }
+  const target = enemyManager.acquire(placement.x, placement.z);
+  target.group.position.set(placement.x, placement.y, placement.z);
+  target.group.rotation.y = Math.atan2(player.pos.x - placement.x, player.pos.z - placement.z);
+  target.eyeline.set(placement.x, placement.y + 1.68, placement.z);
+  target.name = `训练靶 ${trainingTargets.length + 1}`;
+  target.health = 99;
+  target.maxHealth = 100;
+  target.trainingImmortal = true;
+  target.onTrainingDamage = (amount, headshot) => recordTrainingDamage(target, amount, headshot);
+  target.wantShoot = false;
+  enemyManager.enemies.push(target);
+  trainingTargets.push(target);
+  renderTrainingPanel();
+  updateScoreHud();
+  showToast(`${target.name} 已放置 · 不移动 / 不死亡`);
+  return true;
+}
+
+function removeAimedTrainingTarget() {
+  if (!trainingMatch() || !trainingTargets.length) return false;
+  const { origin, direction } = trainingAimRay();
+  raycaster.set(origin, direction); raycaster.far = 120;
+  const meshes = trainingTargets.flatMap((target) => target.meshes);
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  const target = hit?.object?.userData?.enemy;
+  if (!target?.trainingImmortal) { showToast("准心没有指向训练 NPC", true); return false; }
+  return removeTrainingTarget(target);
+}
 
 // ---------- 预加载 ----------
 // 敌人那把枪**不再单独加载**：世界模型目录（scripts/guncatalog.js）在初始化的最后
@@ -1557,10 +1733,10 @@ function updateDeathBar(p) {
 // 与 CF 一致（CF 里这也是两件不同的事）。
 // Classic loadout; modern model skins remain available to the existing skin API.
 const BACKPACKS = [
-  { primary: "ak", skin: DEFAULT_SKIN.ak, secondary: "deagle" },
-  { primary: "m4", skin: DEFAULT_SKIN.m4, secondary: "deagle" },
-  { primary: "barrett", skin: DEFAULT_SKIN.barrett, secondary: "deagle" },
-  { primary: "m4", skin: "ironbeastgold", secondary: "deagle" },
+  { primary: "ak", skin: DEFAULT_SKIN.ak, secondary: "deagle", meleeSkin: STOCK },
+  { primary: "m4", skin: DEFAULT_SKIN.m4, secondary: "deagle", meleeSkin: STOCK },
+  { primary: "barrett", skin: DEFAULT_SKIN.barrett, secondary: "deagle", meleeSkin: "dragon" },
+  { primary: "m4", skin: "ironbeastgold", secondary: "deagle", meleeSkin: "dragon" },
 ];
 let curBp = 0;
 
@@ -1581,6 +1757,7 @@ function resetLoadout() {
     b.primary = LOADOUT_DEFAULT.packs[i].primary;
     b.skin = LOADOUT_DEFAULT.packs[i].skin;
     b.secondary = LOADOUT_DEFAULT.packs[i].secondary;
+    b.meleeSkin = LOADOUT_DEFAULT.packs[i].meleeSkin;
   });
   GEAR_SKIN.deagle = LOADOUT_DEFAULT.gear.deagle;
   GEAR_SKIN.knife = LOADOUT_DEFAULT.gear.knife;
@@ -1612,7 +1789,7 @@ function activeSkinId(id) {
   }
   if (def.slot === "secondary")
     return lifePickup.secondary?.id === id ? lifePickup.secondary.skin : GEAR_SKIN[id];
-  if (id === "knife") return GEAR_SKIN.knife;
+  if (id === "knife") return BACKPACKS[curBp].meleeSkin || GEAR_SKIN.knife;
   return null;
 }
 
@@ -1813,6 +1990,7 @@ function inSpawnZone() {
 }
 function canSwapBackpack() {
   if (state !== "playing" || dead) return false;
+  if (trainingMatch()) return true;
   if (bioMatch()) return bioMode?.phase === "prepare";
   return inSpawnZone() && !actedThisLife;
 }
@@ -1821,6 +1999,7 @@ function canSwapBackpack() {
 // updateBackpack 的面板提示）共用这一份，免得文案各自演化后互相矛盾。
 function swapBlockReason() {
   if (dead) return "阵亡中，复活后才能换背包";
+  if (trainingMatch()) return "训练模式可在任意位置更换背包";
   if (bioMatch()) return "僵尸已出现，无法更换背包";
   if (actedThisLife) return "本回合已开火，需复活后才能换背包";
   return "只能在复活点安全区内换背包";
@@ -1839,6 +2018,7 @@ const IRONBEAST_SELECT_DURATION = 319 / 400;
 const BARRETT_SELECT_DURATION = 1.371429;
 // Festa CFS 2019 斧的 select 是源模型里的 110 帧 / 100fps 完整拔出动作。
 const AXE_SELECT_DURATION = 1.09;
+const KUKRI_SELECT_DURATION = 76 / 110;
 // Festa CFS 2019 AK MDL: select is 300 frames at 375 fps and dispatches the
 // original AK47_RELOAD.WAV event at frame 77. The WAV itself has an authored
 // 80ms lead-in, placing its mechanical transient on the charging-handle travel.
@@ -1849,7 +2029,7 @@ const AK_SELECT_EVENT_AT = 77 / 375;
 // scope turrets and receiver remain upright; uniform scale preserves the source
 // mesh, hand proportions and every authored hand/bolt animation.
 const BARRETT_VIEW_POSE = Object.freeze({
-  x: .99, y: -.12, z: -.07, pitch: 0, yaw: .14, roll: 0, scale: 4.35,
+  x: .99, y: -.12, z: .12, pitch: 0, yaw: .01, roll: 0, scale: 4.826,
 });
 const VIEWMODEL_TUNER_FIELDS = Object.freeze([
   { key: "x", label: "左右 X", min: -2, max: 2, step: .01, digits: 2 },
@@ -1867,6 +2047,7 @@ const VIEWMODEL_TUNER_ITEMS = Object.freeze([
   { id: "ironbeast", label: "炫金雷神", weapon: "m4", backpack: 3 },
   { id: "deagle", label: "沙漠之鹰", weapon: "deagle", backpack: 0 },
   { id: "knife", label: "CFS 2019 凤凰斧", weapon: "knife", backpack: 0 },
+  { id: "kukri", label: "屠龙", weapon: "knife", backpack: 2 },
 ]);
 const VIEWMODEL_POSE_DEFAULTS = Object.freeze({
   ak: Object.freeze({ x: .38, y: -.18, z: .01, pitch: .01, yaw: .02, roll: 0, scale: 2.63 }),
@@ -1876,9 +2057,82 @@ const VIEWMODEL_POSE_DEFAULTS = Object.freeze({
   // Festa MDL 已在导入时校正为米制、枪口朝相机 -Z；以下为用户在实时调节器中确认的构图。
   deagle: Object.freeze({ x: .23, y: -.19, z: -.55, pitch: 0, yaw: -.04, roll: 0, scale: 1.368 }),
   knife: Object.freeze({ x: .64, y: -.42, z: -1.39, pitch: .01, yaw: 1.55, roll: -.05, scale: 2.414 }),
+  // The Source v44 viewmodel is authored directly around the first-person
+  // camera.  Its importer keeps that origin and converts Source +X to camera
+  // -Z, so no compensating offset/rotation/scale belongs here.
+  kukri: Object.freeze({ x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1.13 }),
 });
 const viewmodelTunerQuery = new URLSearchParams(location.search);
 const VIEWMODEL_TUNER_ACTIVE = viewmodelTunerQuery.has("viewmodelTuner") || viewmodelTunerQuery.has("barrettTuner");
+const KUKRI_SPEED_FIELDS = Object.freeze([
+  { key: "light", label: "轻击速度", min: .4, max: 2, step: .01, digits: 2 },
+  { key: "heavy", label: "重击速度", min: .1, max: 2, step: .01, digits: 2 },
+]);
+const KUKRI_ATTACK_SPEED_DEFAULTS = Object.freeze({ light: .87, heavy: .36 });
+const kukriAttackSpeedLive = { ...KUKRI_ATTACK_SPEED_DEFAULTS };
+for (const field of KUKRI_SPEED_FIELDS) {
+  const queryKey = `vtKukri${field.key[0].toUpperCase()}${field.key.slice(1)}Speed`;
+  const value = Number(viewmodelTunerQuery.get(queryKey));
+  if (VIEWMODEL_TUNER_ACTIVE && viewmodelTunerQuery.has(queryKey) && Number.isFinite(value))
+    kukriAttackSpeedLive[field.key] = Math.min(field.max, Math.max(field.min, value));
+}
+const KUKRI_TIMING_FIELDS = Object.freeze([
+  { key: "heavyHitAt", label: "重击伤害判定", min: .2, max: 1.3, step: .01, digits: 3, suffix: "s" },
+]);
+const KUKRI_TIMING_DEFAULTS = Object.freeze({ heavyHitAt: .67 });
+const kukriTimingLive = { ...KUKRI_TIMING_DEFAULTS };
+for (const field of KUKRI_TIMING_FIELDS) {
+  const queryKey = `vtKukri${field.key[0].toUpperCase()}${field.key.slice(1)}`;
+  const value = Number(viewmodelTunerQuery.get(queryKey));
+  if (VIEWMODEL_TUNER_ACTIVE && viewmodelTunerQuery.has(queryKey) && Number.isFinite(value))
+    kukriTimingLive[field.key] = Math.min(field.max, Math.max(field.min, value));
+}
+const KUKRI_COMBAT_FIELDS = Object.freeze([
+  { key: "range", label: "攻击距离", min: .5, max: 3, step: .05, digits: 2, suffix: "m" },
+  { key: "lightDmg", label: "轻击身体", min: 1, max: 300, step: 1, digits: 0, suffix: "" },
+  { key: "lightHead", label: "轻击爆头", min: 1, max: 500, step: 1, digits: 0, suffix: "" },
+  { key: "lightBack", label: "轻击背刺", min: 1, max: 500, step: 1, digits: 0, suffix: "" },
+  { key: "lightAngle", label: "轻击范围", min: 2, max: 120, step: 1, digits: 0, suffix: "°", urlDigits: 3 },
+  { key: "heavyDmg", label: "重击身体", min: 1, max: 500, step: 1, digits: 0, suffix: "" },
+  { key: "heavyHead", label: "重击爆头", min: 1, max: 1000, step: 1, digits: 0, suffix: "" },
+  { key: "heavyBack", label: "重击背刺", min: 1, max: 1000, step: 1, digits: 0, suffix: "" },
+  { key: "heavyAngle", label: "重击范围", min: 2, max: 120, step: 1, digits: 0, suffix: "°", urlDigits: 3 },
+]);
+const KUKRI_COMBAT_DEFAULTS = Object.freeze({
+  range: 1.45,
+  lightDmg: 60, lightHead: 100, lightBack: 60,
+  lightAngle: 30,
+  heavyDmg: 130, heavyHead: 180, heavyBack: 180,
+  heavyAngle: 105,
+});
+const kukriCombatLive = { ...KUKRI_COMBAT_DEFAULTS };
+for (const field of KUKRI_COMBAT_FIELDS) {
+  const queryKey = `vtKukri${field.key[0].toUpperCase()}${field.key.slice(1)}`;
+  const value = Number(viewmodelTunerQuery.get(queryKey));
+  if (VIEWMODEL_TUNER_ACTIVE && viewmodelTunerQuery.has(queryKey) && Number.isFinite(value))
+    kukriCombatLive[field.key] = Math.min(field.max, Math.max(field.min, value));
+}
+const KUKRI_TARGET_FIELDS = Object.freeze([
+  { key: "distance", label: "距离", min: .3, max: 3, step: .05, digits: 2, suffix: "m" },
+  { key: "angle", label: "左右角度", min: -90, max: 90, step: 1, digits: 0, suffix: "°" },
+]);
+const KUKRI_TARGET_DEFAULTS = Object.freeze([
+  Object.freeze({ distance: 1.65, angle: -30 }),
+  Object.freeze({ distance: 1.35, angle: 18 }),
+  Object.freeze({ distance: 1.8, angle: 35 }),
+]);
+const kukriTargetsLive = KUKRI_TARGET_DEFAULTS.map((target) => ({ ...target }));
+for (let index = 0; index < kukriTargetsLive.length; index++) {
+  const packed = viewmodelTunerQuery.get(`vtKukriTarget${index + 1}`)?.split(",").map(Number);
+  if (!VIEWMODEL_TUNER_ACTIVE || packed?.length !== KUKRI_TARGET_FIELDS.length || packed.some((value) => !Number.isFinite(value))) continue;
+  KUKRI_TARGET_FIELDS.forEach((field, fieldIndex) => {
+    kukriTargetsLive[index][field.key] = Math.min(field.max, Math.max(field.min, packed[fieldIndex]));
+  });
+}
+const KUKRI_TARGET_COLORS = Object.freeze([0x45dfff, 0xffad45, 0xc58aff]);
+const kukriTrainingTargets = [];
+const kukriTrainingTargetMeshes = [];
+let kukriHitPreviewCanvas = null, kukriTargetSummary = null;
 const viewmodelPoseLive = Object.fromEntries(Object.entries(VIEWMODEL_POSE_DEFAULTS)
   .map(([id, pose]) => [id, { ...pose }]));
 for (const item of VIEWMODEL_TUNER_ITEMS) {
@@ -1917,19 +2171,51 @@ function mountViewmodelTuner() {
   panel.setAttribute("aria-label", "武器视模实时调节器");
   panel.innerHTML = '<div class="bvt-head"><strong>武器视模调节</strong><span>实时预览</span></div>' +
     '<label class="bvt-picker"><span>预览武器</span><select></select></label>' +
-    '<div class="bvt-fields"></div><output class="bvt-output"></output>' +
+    '<div class="bvt-fields"></div>' +
+    '<section class="bvt-kukri-speed" hidden><h4>屠龙动作速度</h4>' +
+    '<div class="bvt-speed-fields"></div><div class="bvt-preview-actions">' +
+    '<button type="button" data-preview="light">预览轻击（交替）</button>' +
+    '<button type="button" data-preview="heavy">预览重击</button></div>' +
+    '<output class="bvt-timing"></output><div class="bvt-speed-fields bvt-timing-fields"></div>' +
+    '<p>速度会同步缩放动画与攻击间隔；重击伤害判定可单独后移，stab 音效会跟随该节点。</p>' +
+    '<h4 class="bvt-combat-title">屠龙伤害与判定范围</h4><div class="bvt-combat-fields"></div>' +
+    '<canvas class="bvt-hit-preview" width="640" height="280" aria-label="屠龙攻击范围实时预览"></canvas>' +
+    '<output class="bvt-combat-summary"></output><p>俯视图中蓝色为轻击、橙色为重击；扇形就是实战射线扫掠范围。</p>' +
+    '<h4 class="bvt-target-title">可移动训练靶</h4><div class="bvt-target-fields"></div>' +
+    '<output class="bvt-target-summary">点击攻击预览以测试命中</output>' +
+    '<p>可拖动俯视图中的 A/B/C 靶点，或用滑块精确调整距离和左右角度。</p></section>' +
+    '<output class="bvt-output"></output>' +
     '<div class="bvt-actions"><button type="button" data-action="reset">恢复当前正式参数</button>' +
     '<button type="button" data-action="copy">复制全部参数</button></div>' +
     '<p>每把武器分别保存。全部调好后告诉我“调好了”，当前网址包含全部数值。</p>';
   const fields = panel.querySelector(".bvt-fields");
   const output = panel.querySelector(".bvt-output");
+  const kukriSection = panel.querySelector(".bvt-kukri-speed");
+  const speedFields = panel.querySelector(".bvt-speed-fields");
+  const timingFields = panel.querySelector(".bvt-timing-fields");
+  const timingOutput = panel.querySelector(".bvt-timing");
+  const combatFields = panel.querySelector(".bvt-combat-fields");
+  const hitPreview = panel.querySelector(".bvt-hit-preview");
+  const combatSummary = panel.querySelector(".bvt-combat-summary");
+  const targetFields = panel.querySelector(".bvt-target-fields");
+  kukriHitPreviewCanvas = hitPreview;
+  kukriTargetSummary = panel.querySelector(".bvt-target-summary");
   const picker = panel.querySelector("select");
   for (const item of VIEWMODEL_TUNER_ITEMS) picker.add(new Option(item.label, item.id));
   picker.value = viewmodelTunerItem;
   const currentPose = () => viewmodelPoseLive[viewmodelTunerItem];
   const packed = (id) => VIEWMODEL_TUNER_FIELDS.map(({ key, digits }) => viewmodelPoseLive[id][key].toFixed(digits)).join(",");
+  const packedKukriSpeed = () => KUKRI_SPEED_FIELDS.map(({ key, digits }) =>
+    `${key}=${kukriAttackSpeedLive[key].toFixed(digits)}`).join("  ");
+  const packedKukriTiming = () => KUKRI_TIMING_FIELDS.map(({ key, digits }) =>
+    `${key}=${kukriTimingLive[key].toFixed(digits)}`).join("  ");
+  const packedKukriCombat = () => KUKRI_COMBAT_FIELDS.map(({ key, digits, urlDigits }) =>
+    `${key}=${kukriCombatLive[key].toFixed(urlDigits ?? digits)}`).join("  ");
+  const packedKukriTargets = () => kukriTargetsLive.map((target, index) =>
+    `${String.fromCharCode(65 + index)}=${target.distance.toFixed(2)},${target.angle.toFixed(0)}`).join("  ");
   const format = () => `${VIEWMODEL_TUNER_ITEMS.find((item) => item.id === viewmodelTunerItem).label}: ` +
-    VIEWMODEL_TUNER_FIELDS.map(({ key, digits }) => `${key}=${currentPose()[key].toFixed(digits)}`).join("  ");
+    VIEWMODEL_TUNER_FIELDS.map(({ key, digits }) => `${key}=${currentPose()[key].toFixed(digits)}`).join("  ") +
+    (viewmodelTunerItem === "kukri" ? `  ${packedKukriSpeed()}  ${packedKukriTiming()}  ${packedKukriCombat()}  ${packedKukriTargets()}` : "");
   const sync = (writeUrl = true) => {
     panel.querySelectorAll("input[data-key]").forEach((input) => {
       const value = currentPose()[input.dataset.key];
@@ -1937,6 +2223,41 @@ function mountViewmodelTuner() {
       const field = VIEWMODEL_TUNER_FIELDS.find(({ key }) => key === input.dataset.key);
       input.parentElement.querySelector(".bvt-value").textContent = value.toFixed(field.digits);
     });
+    kukriSection.hidden = viewmodelTunerItem !== "kukri";
+    speedFields.querySelectorAll("input[data-speed-key]").forEach((input) => {
+      const field = KUKRI_SPEED_FIELDS.find(({ key }) => key === input.dataset.speedKey);
+      input.value = String(kukriAttackSpeedLive[field.key]);
+      input.parentElement.querySelector(".bvt-value").textContent = `${kukriAttackSpeedLive[field.key].toFixed(field.digits)}×`;
+    });
+    timingFields.querySelectorAll("input[data-timing-key]").forEach((input) => {
+      const field = KUKRI_TIMING_FIELDS.find(({ key }) => key === input.dataset.timingKey);
+      input.value = String(kukriTimingLive[field.key]);
+      input.parentElement.querySelector(".bvt-value").textContent =
+        `${kukriTimingLive[field.key].toFixed(field.digits)}${field.suffix}`;
+    });
+    if (viewmodelTunerItem === "kukri") {
+      const timing = kukriAttackTiming();
+      timingOutput.textContent = `轻击 ${timing.lightDuration.toFixed(3)}s｜重击 ${timing.heavyDuration.toFixed(3)}s｜` +
+        `slash2 ${timing.heavySlashAt.toFixed(3)}s｜stab ${timing.heavyStabAt.toFixed(3)}s`;
+      combatFields.querySelectorAll("input[data-combat-key]").forEach((input) => {
+        const field = KUKRI_COMBAT_FIELDS.find(({ key }) => key === input.dataset.combatKey);
+        input.value = String(kukriCombatLive[field.key]);
+        input.parentElement.querySelector(".bvt-value").textContent =
+          `${kukriCombatLive[field.key].toFixed(field.digits)}${field.suffix}`;
+      });
+      combatSummary.textContent = `轻击：身体 ${kukriCombatLive.lightDmg} / 爆头 ${kukriCombatLive.lightHead} / 背刺 ${kukriCombatLive.lightBack}｜` +
+        `重击：身体 ${kukriCombatLive.heavyDmg} / 爆头 ${kukriCombatLive.heavyHead} / 背刺 ${kukriCombatLive.heavyBack}｜` +
+        `距离 ${kukriCombatLive.range.toFixed(2)}m`;
+      targetFields.querySelectorAll("input[data-target-index]").forEach((input) => {
+        const index = Number(input.dataset.targetIndex);
+        const field = KUKRI_TARGET_FIELDS.find(({ key }) => key === input.dataset.targetKey);
+        const value = kukriTargetsLive[index][field.key];
+        input.value = String(value);
+        input.parentElement.querySelector(".bvt-value").textContent = `${value.toFixed(field.digits)}${field.suffix}`;
+      });
+      updateKukriTrainingTargets();
+      drawKukriHitPreview(hitPreview);
+    }
     output.textContent = format();
     if (writeUrl) {
       const url = new URL(location.href);
@@ -1945,6 +2266,19 @@ function mountViewmodelTuner() {
       url.searchParams.set("viewmodelTuner", "1");
       url.searchParams.set("vtWeapon", viewmodelTunerItem);
       for (const item of VIEWMODEL_TUNER_ITEMS) url.searchParams.set(`vt_${item.id}`, packed(item.id));
+      for (const field of KUKRI_SPEED_FIELDS)
+        url.searchParams.set(`vtKukri${field.key[0].toUpperCase()}${field.key.slice(1)}Speed`,
+          kukriAttackSpeedLive[field.key].toFixed(field.digits));
+      for (const field of KUKRI_TIMING_FIELDS)
+        url.searchParams.set(`vtKukri${field.key[0].toUpperCase()}${field.key.slice(1)}`,
+          kukriTimingLive[field.key].toFixed(field.digits));
+      for (const field of KUKRI_COMBAT_FIELDS)
+        url.searchParams.set(`vtKukri${field.key[0].toUpperCase()}${field.key.slice(1)}`,
+          kukriCombatLive[field.key].toFixed(field.urlDigits ?? field.digits));
+      for (let index = 0; index < kukriTargetsLive.length; index++) {
+        const target = kukriTargetsLive[index];
+        url.searchParams.set(`vtKukriTarget${index + 1}`, `${target.distance.toFixed(2)},${target.angle.toFixed(0)}`);
+      }
       history.replaceState(null, "", url);
     }
   };
@@ -1957,17 +2291,104 @@ function mountViewmodelTuner() {
     });
     fields.append(row);
   }
+  for (const field of KUKRI_SPEED_FIELDS) {
+    const row = document.createElement("label");
+    row.innerHTML = `<span>${field.label}</span><input data-speed-key="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}"><b class="bvt-value"></b>`;
+    row.querySelector("input").addEventListener("input", (event) => {
+      kukriAttackSpeedLive[field.key] = Number(event.currentTarget.value);
+      sync();
+    });
+    speedFields.append(row);
+  }
+  for (const field of KUKRI_TIMING_FIELDS) {
+    const row = document.createElement("label");
+    row.innerHTML = `<span>${field.label}</span><input data-timing-key="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}"><b class="bvt-value"></b>`;
+    row.querySelector("input").addEventListener("input", (event) => {
+      kukriTimingLive[field.key] = Number(event.currentTarget.value);
+      sync();
+    });
+    timingFields.append(row);
+  }
+  for (const field of KUKRI_COMBAT_FIELDS) {
+    const row = document.createElement("label");
+    row.innerHTML = `<span>${field.label}</span><input data-combat-key="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}"><b class="bvt-value"></b>`;
+    row.querySelector("input").addEventListener("input", (event) => {
+      kukriCombatLive[field.key] = Number(event.currentTarget.value);
+      sync();
+    });
+    combatFields.append(row);
+  }
+  for (let index = 0; index < kukriTargetsLive.length; index++) {
+    const card = document.createElement("section");
+    card.className = "bvt-target-card";
+    card.innerHTML = `<strong style="--target-color:#${KUKRI_TARGET_COLORS[index].toString(16).padStart(6, "0")}">训练靶 ${String.fromCharCode(65 + index)}</strong>`;
+    for (const field of KUKRI_TARGET_FIELDS) {
+      const row = document.createElement("label");
+      row.innerHTML = `<span>${field.label}</span><input data-target-index="${index}" data-target-key="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}"><b class="bvt-value"></b>`;
+      row.querySelector("input").addEventListener("input", (event) => {
+        kukriTargetsLive[index][field.key] = Number(event.currentTarget.value);
+        if (kukriTargetSummary) kukriTargetSummary.textContent = "点击攻击预览以测试命中";
+        sync();
+      });
+      card.append(row);
+    }
+    targetFields.append(card);
+  }
+  let draggedTarget = -1;
+  const targetFromPointer = (event) => {
+    const rect = hitPreview.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * hitPreview.width / rect.width,
+      y: (event.clientY - rect.top) * hitPreview.height / rect.height };
+  };
+  hitPreview.addEventListener("pointerdown", (event) => {
+    const pointer = targetFromPointer(event);
+    let best = -1, bestDistance = 36 * hitPreview.width / hitPreview.clientWidth;
+    kukriTargetsLive.forEach((target, index) => {
+      const point = kukriTargetCanvasPoint(hitPreview, target);
+      const distance = Math.hypot(pointer.x - point.x, pointer.y - point.y);
+      if (distance < bestDistance) { best = index; bestDistance = distance; }
+    });
+    if (best < 0) return;
+    draggedTarget = best;
+    hitPreview.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  hitPreview.addEventListener("pointermove", (event) => {
+    if (draggedTarget < 0) return;
+    const pointer = targetFromPointer(event), metrics = kukriTargetCanvasMetrics(hitPreview);
+    const dx = pointer.x - metrics.ox, dz = metrics.oy - pointer.y;
+    const distanceField = KUKRI_TARGET_FIELDS[0], angleField = KUKRI_TARGET_FIELDS[1];
+    kukriTargetsLive[draggedTarget].distance = Math.min(distanceField.max,
+      Math.max(distanceField.min, Math.hypot(dx, dz) / metrics.pixelsPerMeter));
+    kukriTargetsLive[draggedTarget].angle = Math.min(angleField.max,
+      Math.max(angleField.min, THREE.MathUtils.radToDeg(Math.atan2(dx, dz))));
+    if (kukriTargetSummary) kukriTargetSummary.textContent = "点击攻击预览以测试命中";
+    sync();
+  });
+  const stopTargetDrag = () => { draggedTarget = -1; };
+  hitPreview.addEventListener("pointerup", stopTargetDrag);
+  hitPreview.addEventListener("pointercancel", stopTargetDrag);
+  panel.querySelector('[data-preview="light"]').addEventListener("click", () => previewKukriAttack("light"));
+  panel.querySelector('[data-preview="heavy"]').addEventListener("click", () => previewKukriAttack("heavy"));
   picker.addEventListener("change", () => {
     selectViewmodelTunerItem(picker.value);
     sync();
   });
   panel.querySelector('[data-action="reset"]').addEventListener("click", () => {
     Object.assign(currentPose(), VIEWMODEL_POSE_DEFAULTS[viewmodelTunerItem]);
+    if (viewmodelTunerItem === "kukri") {
+      Object.assign(kukriAttackSpeedLive, KUKRI_ATTACK_SPEED_DEFAULTS);
+      Object.assign(kukriTimingLive, KUKRI_TIMING_DEFAULTS);
+      Object.assign(kukriCombatLive, KUKRI_COMBAT_DEFAULTS);
+      kukriTargetsLive.forEach((target, index) => Object.assign(target, KUKRI_TARGET_DEFAULTS[index]));
+      if (kukriTargetSummary) kukriTargetSummary.textContent = "点击攻击预览以测试命中";
+    }
     sync();
   });
   panel.querySelector('[data-action="copy"]').addEventListener("click", async (event) => {
     try {
-      await navigator.clipboard.writeText(VIEWMODEL_TUNER_ITEMS.map((item) => `${item.label}: ${packed(item.id)}`).join("\n"));
+      await navigator.clipboard.writeText(VIEWMODEL_TUNER_ITEMS.map((item) => `${item.label}: ${packed(item.id)}`).join("\n") +
+        `\n屠龙动作速度: ${packedKukriSpeed()}\n屠龙判定时间: ${packedKukriTiming()}\n屠龙伤害判定: ${packedKukriCombat()}\n屠龙训练靶: ${packedKukriTargets()}`);
       event.currentTarget.textContent = "已复制";
       setTimeout(() => { event.currentTarget.textContent = "复制全部参数"; }, 1200);
     } catch {
@@ -2003,7 +2424,8 @@ function switchDeployDuration(id) {
   if (id === "ak" && activeSkinId(id) === "classic") return classicView?.duration('select') ?? .854286;
   if (id === "m4" && activeSkinId(id) === "classic") return m4cView?.duration('select') ?? 1;
   if (id === "barrett") return BARRETT_SELECT_DURATION;
-  if (id === "knife") return AXE_SELECT_DURATION;
+  if (id === "knife") return activeSkinId(id)==="dragon"
+    ? (kukriView?.duration("select") ?? KUKRI_SELECT_DURATION) : AXE_SELECT_DURATION;
   if (id === "deagle") return deagleFestaView?.duration('select') ?? .79;
   if (id === "m4" && activeSkinId(id) === "ironbeastgold") return IRONBEAST_SELECT_DURATION;
   return SWITCH_DEPLOY[type] ?? SWITCH_DEPLOY.rifle;
@@ -2055,13 +2477,15 @@ function commitWeaponVisual(id) {
   switchVisible = id;
   const ironbeastSkin=id==='m4'&&activeSkinId(id)==='ironbeastgold';
   const m4cSkin=id==='m4'&&activeSkinId(id)==='classic';
+  const meleeSkin=id==='knife'?activeSkinId(id):undefined;
   sfx.deploy(WEAPON_DEFS[id]&&WEAPON_DEFS[id].type,{
     skin:ironbeastSkin?'ironbeastgold':undefined,
     m4c:m4cSkin,
     weaponId:id,
+    meleeSkin,
     selectDur:switchState?Math.max(0,switchState.dur-switchState.holster):0,
     selectBoltAt:id==='barrett'?barrettView?.eventTime('select','Weapon_AWP.Bolt'):undefined,
-    axeSelectAt:id==='knife'?axeView?.eventTime('select','SND/AXE/AXE_KNIFE_PUT_UP.WAV'):undefined,
+    axeSelectAt:id==='knife'&&meleeSkin!=="dragon"?axeView?.eventTime('select','SND/AXE/AXE_KNIFE_PUT_UP.WAV'):undefined,
     deagleSelectAt:id==='deagle'?deagleFestaView?.eventTime('select',
       'SND/Desert Eagle-Silence/DesertEagleSilence_Select.WAV'):undefined,
     akSelectAt:id==='ak'?AK_SELECT_EVENT_AT:undefined,
@@ -2221,7 +2645,7 @@ function switchTimes(id) {
 function canQuickSwitchTo(id) {
   const def = WEAPON_DEFS[id];
   if (!def || id === currentId || !owned[id] || (sniperOnlyMatch() && !prisonWeaponAllowed(id))) return false;
-  if (def.type === "grenade") return owned[id].state.count > 0;
+  if (def.type === "grenade") return trainingMatch() || owned[id].state.count > 0;
   if (def.slot === "primary" || def.slot === "secondary") return slotWeapon(def.slot) === id;
   return def.type === "melee";
 }
@@ -2311,7 +2735,7 @@ function switchBackpack(i) {
 // 数字键 4：在手雷 / 闪光弹 / 烟雾弹之间循环（CF 的投掷物槽行为）
 function switchNade() {
   if (sniperOnlyMatch()) { showToast("守望之城仅限狙击枪与近身武器", true); return; }
-  const avail = NADE_IDS.filter((id) => owned[id] && owned[id].state.count > 0);
+  const avail = NADE_IDS.filter((id) => owned[id] && (trainingMatch() || owned[id].state.count > 0));
   const list = avail.length ? avail : NADE_IDS;
   const idx = list.indexOf(currentId);
   switchWeapon(list[(idx + 1) % list.length] || list[0]);
@@ -2422,6 +2846,20 @@ function updateBackpack() {
   updateBpHint();
 }
 
+// 背包卡片不能直接照抄 `owned[id].state`：普通 M4A1-C 与炫金雷神共用武器 id `m4`，
+// 但弹匣/备用弹药分别是 30/90 与 35/105。预览未装备背包时，按“现在确认这个背包后”
+// 会得到的状态计算；当前背包则继续显示实时消耗值。这样 UI 与 switchBackpack() 的
+// freshLoadout / 容量收缩规则逐项一致，不会再把普通 M4 的 30/90 印到炫金雷神卡片上。
+function backpackAmmoState(bpIndex,id,skin,slot) {
+  const st=owned[id]?.state,def=WEAPON_DEFS[id];
+  if(!st||!def||def.type==="grenade"||def.type==="melee")return null;
+  if(slot!=="primary"||bpIndex===curBp)return {mag:st.mag,reserve:st.reserve};
+  const magSize=magazineSizeFor(id,skin);
+  if(!actedThisLife)return {mag:magSize,reserve:startingReserve(id,def.stats,skin)};
+  const excess=Math.max(0,st.mag-magSize);
+  return {mag:Math.min(st.mag,magSize),reserve:st.reserve+excess};
+}
+
 function updateBackpackLoadout() {
   const grid = document.getElementById("bpLoadout");
   if (!grid) return;
@@ -2430,18 +2868,20 @@ function updateBackpackLoadout() {
   const bp = BACKPACKS[previewBp];
   const slots = sniperOnlyMatch() ? [
     ["主武器", bp.primary, bp.skin, "primary"],
-    ["近身武器", "knife", GEAR_SKIN.knife, "melee"],
+    ["近身武器", "knife", bp.meleeSkin, "melee"],
   ] : [
     ["主武器", bp.primary, bp.skin, "primary"],
     ["副武器", bp.secondary, GEAR_SKIN[bp.secondary], "secondary"],
-    ["近身武器", "knife", GEAR_SKIN.knife, "melee"],
+    ["近身武器", "knife", bp.meleeSkin, "melee"],
     ["投掷武器", "frag", null, "throwable"],
     ["战术装备", "flash", null, "throwable"],
     ["战术装备", "smoke", null, "throwable"],
   ];
   for (const [label, id, skin, slot] of slots) {
     const st = owned[id]?.state;
-    const absent = (!!emptySlot[slot] && (slot !== "primary" || previewBp === curBp)) || (WEAPON_DEFS[id].type === "grenade" && !(st?.count > 0));
+    const ammo = backpackAmmoState(previewBp,id,skin,slot);
+    const absent = (!!emptySlot[slot] && (slot !== "primary" || previewBp === curBp)) ||
+      (WEAPON_DEFS[id].type === "grenade" && !trainingMatch() && !(st?.count > 0));
     const card = document.createElement("div");
     card.className = "bp-weapon-card bp-slot-" + slot + (absent ? " is-empty" : "");
     card.dataset.weapon = id;
@@ -2464,7 +2904,8 @@ function updateBackpackLoadout() {
       }
       card.append(picture);
       const detail = document.createElement("span");detail.className = "bp-weapon-detail";
-      detail.textContent = slot === "throwable" ? "× " + st.count : slot === "melee" ? "近战" : st ? st.mag + " / " + st.reserve : "";
+      detail.textContent = slot === "throwable" ? "× " + (trainingMatch() ? "∞" : st.count) :
+        slot === "melee" ? "近战" : ammo ? ammo.mag + " / " + (trainingMatch() ? "∞" : ammo.reserve) : "";
       card.append(detail);
     }
     grid.append(card);
@@ -2744,15 +3185,15 @@ function enemyWeaponName(e) {
 // 「靠调用方自觉」（见文件上方 skins 一节的说明）。
 function buildMenuMatch() {
   const val = document.getElementById("enemyCountVal");
-  if (val) val.textContent = String(bioMatch() ? 5 : enemyTarget);
+  if (val) val.textContent = String(trainingMatch() ? 0 : bioMatch() ? 5 : enemyTarget);
   // 大厅顶栏那个「8 人 · 普通」徽章。挂在这里是因为 `buildMenuMatch()` 是
   // `enemyTarget` / `difficultyId` 的**唯一既有汇总点** —— init 的首句、步进器、
   // `__tactical.setEnemyTarget`、`setDifficulty` 四处都会调它，挂这儿就不会漏。
   // ⚠️ 必须排在下面 `if (!box) return;` **之前**，否则 `#mlDiff` 缺失时徽章不更新。
   if (lobby) {
     const d = findDifficulty(difficultyId);
-    lobby.setMatch({ enemies: bioMatch() ? 5 : enemyTarget,
-      difficulty: bioMatch() ? '生化' : (d && d.name) || "普通" });
+    lobby.setMatch({ enemies: trainingMatch() ? 0 : bioMatch() ? 5 : enemyTarget,
+      difficulty: trainingMatch() ? '自由训练' : bioMatch() ? '生化' : (d && d.name) || "普通" });
   }
   const box = document.getElementById("mlDiff");
   if (!box) return;
@@ -2774,46 +3215,51 @@ function buildMenuMatch() {
 function updateMapChoiceUi() {
   const name = mapData?.name || "运输船";
   document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
-    const available = !!mapCatalog[button.dataset.map] &&
-      (bioMatch() ? button.dataset.map === 'bio' : button.dataset.map !== 'bio');
+    const available = !!mapCatalog[button.dataset.map] && (trainingMatch()
+      ? button.dataset.map === 'blacktown'
+      : bioMatch() ? button.dataset.map === 'bio' : button.dataset.map !== 'bio');
     button.disabled = !available || state === "playing";
     button.classList.toggle("active", button.dataset.map === selectedMapId);
     button.setAttribute("aria-pressed", button.dataset.map === selectedMapId ? "true" : "false");
   });
   document.querySelectorAll('#modeSelect [data-mode]').forEach(button => {
-    button.disabled = button.dataset.mode === 'bio' && !mapCatalog.bio;
+    button.disabled = (button.dataset.mode === 'bio' && !mapCatalog.bio) ||
+      (button.dataset.mode === 'training' && !mapCatalog.blacktown);
     button.classList.toggle('active', button.dataset.mode === selectedModeId);
     button.setAttribute('aria-pressed', String(button.dataset.mode === selectedModeId));
   });
   const label = document.getElementById("lobbyMapName");
   if (label) label.textContent = name;
   const chip = document.getElementById("lobbyMapChip");
-  if (chip) chip.textContent = name + (bioMatch() ? ' · 经典生化' : ' · 团队竞技');
-  document.getElementById('lobbyMode').textContent = bioMatch() ? '经典生化' : '团队竞技';
-  document.getElementById('lobbyGoal').innerHTML = bioMatch() ? '生存 / 感染' : '<b id="lobbyLimit">40</b> 杀';
-  document.getElementById('lobbyTime').textContent = bioMatch() ? '03:00' : '10:00';
-  document.querySelector('.ml-row .ml-label').textContent = bioMatch() ? '佣兵人数' : '电脑人数';
-  document.getElementById('enemyCountVal').textContent = bioMatch() ? '5' : String(enemyTarget);
-  document.getElementById('enemyMinus').disabled = bioMatch();
-  document.getElementById('enemyPlus').disabled = bioMatch();
-  document.getElementById('mlDiff').closest('.ml-row').style.display = bioMatch() ? 'none' : '';
-  document.querySelector('.room-team-title.room-bl h2').textContent = bioMatch() ? '待命队员' : '潜伏者';
-  document.querySelector('.room-team-title.room-gr h2').textContent = bioMatch() ? '作战者' : '保卫者';
-  document.querySelector('.room-team-title.room-bl small').textContent = bioMatch() ? 'MERCENARIES' : 'BLACK LIST';
-  document.querySelector('.room-team-title.room-gr small').textContent = bioMatch() ? 'PLAYER' : 'GLOBAL RISK';
-  document.querySelector('.room-versus').textContent = bioMatch() ? '+' : 'VS';
-  document.querySelector('.room-team.room-bl').setAttribute('aria-label', bioMatch() ? '待命佣兵队员' : '潜伏者电脑队伍');
-  document.querySelector('.room-team.room-gr').setAttribute('aria-label', bioMatch() ? '玩家' : '保卫者队伍');
+  const modeLabel = trainingMatch() ? '训练模式' : bioMatch() ? '经典生化' : '团队竞技';
+  if (chip) chip.textContent = name + ' · ' + modeLabel;
+  document.getElementById('lobbyMode').textContent = modeLabel;
+  document.getElementById('lobbyGoal').innerHTML = trainingMatch() ? '自由练枪 / 伤害测试' :
+    bioMatch() ? '生存 / 感染' : '<b id="lobbyLimit">40</b> 杀';
+  document.getElementById('lobbyTime').textContent = trainingMatch() ? '不限时' : bioMatch() ? '03:00' : '10:00';
+  document.querySelector('.ml-row .ml-label').textContent = trainingMatch() ? '初始靶数' : bioMatch() ? '佣兵人数' : '电脑人数';
+  document.getElementById('enemyCountVal').textContent = trainingMatch() ? '0' : bioMatch() ? '5' : String(enemyTarget);
+  document.getElementById('enemyMinus').disabled = !tdmMatch();
+  document.getElementById('enemyPlus').disabled = !tdmMatch();
+  document.getElementById('mlDiff').closest('.ml-row').style.display = tdmMatch() ? '' : 'none';
+  document.querySelector('.room-team-title.room-bl h2').textContent = trainingMatch() ? '训练靶' : bioMatch() ? '待命队员' : '潜伏者';
+  document.querySelector('.room-team-title.room-gr h2').textContent = trainingMatch() ? '练习者' : bioMatch() ? '作战者' : '保卫者';
+  document.querySelector('.room-team-title.room-bl small').textContent = trainingMatch() ? 'TARGETS' : bioMatch() ? 'MERCENARIES' : 'BLACK LIST';
+  document.querySelector('.room-team-title.room-gr small').textContent = trainingMatch() ? 'PLAYER' : bioMatch() ? 'PLAYER' : 'GLOBAL RISK';
+  document.querySelector('.room-versus').textContent = bioMatch() ? '+' : trainingMatch() ? '／' : 'VS';
+  document.querySelector('.room-team.room-bl').setAttribute('aria-label', trainingMatch() ? '训练靶' : bioMatch() ? '待命佣兵队员' : '潜伏者电脑队伍');
+  document.querySelector('.room-team.room-gr').setAttribute('aria-label', trainingMatch() ? '练习者' : bioMatch() ? '玩家' : '保卫者队伍');
   const radar = document.getElementById("minimap");
   if (radar) radar.dataset.mapLabel = name + " · 战术地图";
   const scoreboardMap = document.querySelector('.sb-sub');
   if (scoreboardMap) scoreboardMap.textContent =
     name.toUpperCase() +
-    (bioMatch() ? ' · 经典生化' : ' · 团队竞技');
+    ` · ${modeLabel}`;
 }
 
 function activateMap(id) {
-  if (state === "playing" || !mapCatalog[id] || (bioMatch() ? id !== 'bio' : id === 'bio')) return false;
+  if (state === "playing" || !mapCatalog[id] ||
+      (trainingMatch() ? id !== 'blacktown' : bioMatch() ? id !== 'bio' : id === 'bio')) return false;
   impactVfx.clear();
   selectedMapId = id;
   if (mapData && mapData !== mapCatalog[id]) mapData.setActive?.(false);
@@ -2851,10 +3297,10 @@ function activateMap(id) {
 }
 
 function selectMode(id) {
-  if (state === 'playing' || !['tdm', 'bio'].includes(id) ||
-      (id === 'bio' && !mapCatalog.bio)) return false;
+  if (state === 'playing' || !['tdm', 'bio', 'training'].includes(id) ||
+      (id === 'bio' && !mapCatalog.bio) || (id === 'training' && !mapCatalog.blacktown)) return false;
   selectedModeId = id;
-  activateMap(id === 'bio' ? 'bio' : 'transport');
+  activateMap(id === 'bio' ? 'bio' : id === 'training' ? 'blacktown' : 'transport');
   buildMenuMatch();
   if (lobby) lobby.refresh();
   return true;
@@ -2928,20 +3374,23 @@ function lobbyStorageRows() {
   const rows = BACKPACKS.map((bp, i) => card("背包 " + (i + 1), bp.primary, bp.skin, i === curBp));
   rows.push(card("副武器", BACKPACKS[curBp].secondary,
     GEAR_SKIN[BACKPACKS[curBp].secondary], false));
-  rows.push(card("近战", "knife", GEAR_SKIN.knife, false));
+  rows.push(card("近战", "knife", BACKPACKS[curBp].meleeSkin, false));
   return rows;
 }
 
 function lobbyData() {
+  const roomEnemyCount = trainingMatch() ? 0 : bioMatch() ? 5 : enemyTarget;
   return {
     room: {
-      enemies: Array.from({ length: bioMatch() ? 5 : enemyTarget }, (_, i) => ({
+      enemies: Array.from({ length: roomEnemyCount }, (_, i) => ({
         name: roster[i]?.name || ENEMY_NAMES[i % ENEMY_NAMES.length],
         role: "电脑", status: state === "playing" ? "对局中" : "准备",
       })),
       players: [{ name: "你", role: "房主", status: state === "playing" ? "对局中" : "准备" }],
     },
-    ticker: bioMatch()
+    ticker: trainingMatch()
+      ? '训练模式 · 黑色城镇 · 按 N 在准心落点放置不死 NPC · 按 B 随时更换背包 · 右侧面板记录伤害'
+      : bioMatch()
       ? '经典生化 · 黑色城镇（雨夜） · 15 秒准备，坚守 3 分钟或感染全部佣兵 · 按 Enter 打开战场聊天'
       : "团队竞技 · " + (mapData?.name || "运输船") + " · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
         Math.round(TDM_TIME / 60) + " 分钟 · 按 Enter 打开战场聊天",
@@ -2993,7 +3442,7 @@ function cancelGrenade(){grenadeAction=null;}
 function primeGrenade(){
   const c=cur();
   if(grenadeAction||WEAPON_DEFS[currentId].type!=='grenade'||dead||state!=='playing'||switchBlocking()||c.state.throwCd>0)return;
-  if(c.state.count<=0){sfx.empty();return;}
+  if(!trainingMatch()&&c.state.count<=0){sfx.empty();return;}
   grenadeAction={id:currentId,t:0,releaseAt:Infinity,thrown:false,pinSound:false};
 }
 function releaseGrenade(){
@@ -3228,8 +3677,9 @@ function throwGrenade() {
   const def = WEAPON_DEFS[currentId];
   const st = def.stats;
   if (state !== "playing" || dead || switchBlocking() || cur().state.throwCd > 0) return;
-  if (cur().state.count <= 0) { sfx.empty(); return; }
-  cur().state.count--;
+  if (!trainingMatch() && cur().state.count <= 0) { sfx.empty(); return; }
+  // 自由训练只保留投掷冷却与完整动作，不消耗手雷、闪光弹或烟雾弹。
+  if (!trainingMatch()) cur().state.count--;
   actedThisLife = true; // 本回合已行动 → 锁定背包切换（CF 规则）
   cur().state.throwCd = st.throwCooldown;
   sfx.throwGrenade();
@@ -3275,17 +3725,168 @@ function throwGrenade() {
 
 // ---------- 近战：前摇 → 有效刀刃窗口 → 收刀 ----------
 const AXE_CLIP_BY_ATTACK = Object.freeze({ light: "combo_1", thrust: "combo_2", heavy: "bigshot" });
+const KUKRI_CLIP_BY_ATTACK = Object.freeze({ light: "midslash1", thrust: "midslash2", heavy: "stab" });
+const KUKRI_MELEE = Object.freeze({
+  range: KNIFE.range,
+  light: Object.freeze({ ...KNIFE.light, interval: 74/150, hitStart: (74/150)*.275, hitEnd: (74/150)*.50 }),
+  thrust: Object.freeze({ ...KNIFE.thrust, interval: 74/150, hitStart: (74/150)*.30, hitEnd: (74/150)*.46 }),
+  heavy: Object.freeze({ ...KNIFE.heavy, interval: 162/300, hitStart: (162/300)*.38, hitEnd: (162/300)*.48 }),
+});
+const KUKRI_ACTION_SOUND_AT = .01;
+function kukriSpeedFor(kind) {
+  return kukriAttackSpeedLive[kind === "heavy" ? "heavy" : "light"];
+}
+function scaledKukriMode(kind) {
+  const source = KUKRI_MELEE[kind], speed = kukriSpeedFor(kind);
+  const heavy = kind === "heavy";
+  const interval = source.interval / speed;
+  const scaledHitStart = source.hitStart / speed;
+  const hitDuration = (source.hitEnd - source.hitStart) / speed;
+  const hitStart = heavy ? Math.min(kukriTimingLive.heavyHitAt, interval - hitDuration) : scaledHitStart;
+  return { ...source,
+    dmg: kukriCombatLive[heavy ? "heavyDmg" : "lightDmg"],
+    head: kukriCombatLive[heavy ? "heavyHead" : "lightHead"],
+    backstab: kukriCombatLive[heavy ? "heavyBack" : "lightBack"],
+    arc: THREE.MathUtils.degToRad(kukriCombatLive[heavy ? "heavyAngle" : "lightAngle"]) / 2,
+    interval,
+    hitStart, hitEnd: hitStart + hitDuration };
+}
+function drawKukriHitPreview(canvas) {
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d"), w = canvas.width, h = canvas.height;
+  const { ox, oy, pixelsPerMeter } = kukriTargetCanvasMetrics(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#061019"; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = "#355466"; ctx.lineWidth = 2;
+  ctx.fillStyle = "#83a9bc"; ctx.font = "20px system-ui"; ctx.textAlign = "left";
+  for (let meters = .5; meters <= 3; meters += .5) {
+    ctx.beginPath(); ctx.arc(ox, oy, meters * pixelsPerMeter, Math.PI, Math.PI * 2); ctx.stroke();
+    ctx.fillText(`${meters.toFixed(1)}m`, ox + 8, oy - meters * pixelsPerMeter + 18);
+  }
+  const sector = (range, angle, fill, stroke) => {
+    const half = THREE.MathUtils.degToRad(angle) / 2, radius = range * pixelsPerMeter;
+    ctx.beginPath(); ctx.moveTo(ox, oy);
+    ctx.arc(ox, oy, radius, -Math.PI / 2 - half, -Math.PI / 2 + half);
+    ctx.closePath(); ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = stroke; ctx.lineWidth = 4; ctx.stroke();
+  };
+  sector(kukriCombatLive.range, kukriCombatLive.lightAngle, "#45dfff32", "#45dfff");
+  sector(kukriCombatLive.range, kukriCombatLive.heavyAngle, "#ffad4538", "#ffad45");
+  ctx.fillStyle = "#eaf8ff"; ctx.beginPath(); ctx.arc(ox, oy, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.textAlign = "center"; ctx.font = "bold 22px system-ui";
+  ctx.fillStyle = "#45dfff"; ctx.fillText(`轻击 ${kukriCombatLive.lightAngle.toFixed(0)}°`, ox - 115, 27);
+  ctx.fillStyle = "#ffad45"; ctx.fillText(`重击 ${kukriCombatLive.heavyAngle.toFixed(0)}°`, ox + 115, 27);
+  kukriTargetsLive.forEach((target, index) => {
+    const point = kukriTargetCanvasPoint(canvas, target), hit = kukriTrainingTargets[index]?.userData.hitUntil > time;
+    ctx.beginPath(); ctx.arc(point.x, point.y, 17, 0, Math.PI * 2);
+    ctx.fillStyle = hit ? "#ff4455" : `#${KUKRI_TARGET_COLORS[index].toString(16).padStart(6, "0")}`;
+    ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = "#07111b"; ctx.font = "bold 20px system-ui"; ctx.textAlign = "center";
+    ctx.fillText(String.fromCharCode(65 + index), point.x, point.y + 7);
+  });
+}
+function kukriTargetCanvasMetrics(canvas) {
+  return { ox: canvas.width / 2, oy: canvas.height - 30, pixelsPerMeter: (canvas.height - 58) / 3 };
+}
+function kukriTargetCanvasPoint(canvas, target) {
+  const { ox, oy, pixelsPerMeter } = kukriTargetCanvasMetrics(canvas);
+  const angle = THREE.MathUtils.degToRad(target.angle), radius = target.distance * pixelsPerMeter;
+  return { x: ox + Math.sin(angle) * radius, y: oy - Math.cos(angle) * radius };
+}
+function ensureKukriTrainingTargets() {
+  if (kukriTrainingTargets.length || !VIEWMODEL_TUNER_ACTIVE) return;
+  for (let index = 0; index < kukriTargetsLive.length; index++) {
+    const group = new THREE.Group(), materials = [];
+    const material = (color, opacity = .42) => {
+      const created = new THREE.MeshBasicMaterial({ color, toneMapped: false, transparent: true, opacity, depthWrite: false });
+      materials.push(created); return created;
+    };
+    const baseColor = KUKRI_TARGET_COLORS[index];
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(.22, .26, .06, 20), material(0x26343d, .7));
+    base.position.y = .04;
+    const pole = new THREE.Mesh(new THREE.BoxGeometry(.05, 1.08, .05), material(0x7f929d, .65));
+    pole.position.y = .57;
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(.36, .52, .07), material(baseColor));
+    torso.position.y = 1.36;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.14, 18, 12), material(baseColor));
+    head.position.y = 1.75;
+    for (const mesh of [base, pole, torso, head]) {
+      mesh.userData.trainingTarget = index;
+      group.add(mesh); kukriTrainingTargetMeshes.push(mesh);
+    }
+    group.userData.materials = materials;
+    group.userData.hitUntil = -Infinity;
+    group.userData.baseColor = baseColor;
+    scene.add(group); kukriTrainingTargets.push(group);
+  }
+}
+function updateKukriTrainingTargets() {
+  ensureKukriTrainingTargets();
+  const visible = VIEWMODEL_TUNER_ACTIVE && viewmodelTunerItem === "kukri" && state === "playing";
+  kukriTrainingTargets.forEach((group, index) => {
+    group.visible = visible;
+    if (!visible) return;
+    const target = kukriTargetsLive[index];
+    const yaw = player.yaw - THREE.MathUtils.degToRad(target.angle);
+    const x = player.pos.x - Math.sin(yaw) * target.distance;
+    const z = player.pos.z - Math.cos(yaw) * target.distance;
+    group.position.set(x, supportAt(x, z, player.pos.y), z);
+    group.rotation.y = player.yaw;
+    const hit = group.userData.hitUntil > time;
+    group.userData.materials.forEach((material, materialIndex) => {
+      material.color.setHex(hit ? 0xff4455 : materialIndex < 2 ? (materialIndex ? 0x7f929d : 0x26343d) : group.userData.baseColor);
+    });
+  });
+  if (visible) drawKukriHitPreview(kukriHitPreviewCanvas);
+}
+function previewKukriTargetHits(kind, mode) {
+  updateKukriTrainingTargets();
+  scene.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+  const origin = camera.getWorldPosition(new THREE.Vector3()), hits = new Set();
+  const targetsAndWalls = [...kukriTrainingTargetMeshes, ...obstacleFlat];
+  const steps = 48;
+  for (let index = 0; index <= steps; index++) {
+    const u = index / steps;
+    const yaw = player.yaw + mode.arc * mode.sweepSign * (1 - 2 * u);
+    const pitch = player.pitch + mode.pitchArc * (1 - 2 * u);
+    const direction = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(pitch, yaw, 0, "YXZ"));
+    raycaster.set(origin, direction); raycaster.far = kukriCombatLive.range;
+    const hit = raycaster.intersectObjects(targetsAndWalls, false)[0];
+    if (Number.isInteger(hit?.object?.userData?.trainingTarget)) hits.add(hit.object.userData.trainingTarget);
+  }
+  kukriTrainingTargets.forEach((target, index) => { target.userData.hitUntil = hits.has(index) ? time + .8 : -Infinity; });
+  if (kukriTargetSummary) kukriTargetSummary.textContent = hits.size
+    ? `${kind === "heavy" ? "重击" : "轻击"}命中：${[...hits].map((index) => `训练靶 ${String.fromCharCode(65 + index)}`).join("、")}`
+    : `${kind === "heavy" ? "重击" : "轻击"}未命中任何训练靶`;
+  drawKukriHitPreview(kukriHitPreviewCanvas);
+  return hits.size > 0;
+}
+function kukriAttackTiming() {
+  const light = scaledKukriMode("light"), heavy = scaledKukriMode("heavy");
+  return { lightDuration: light.interval, heavyDuration: heavy.interval,
+    heavySlashAt: KUKRI_ACTION_SOUND_AT / kukriSpeedFor("heavy"), heavyStabAt: heavy.hitStart };
+}
 const AXE_EVENT_BY_ATTACK = Object.freeze({
   light: "SND/AXE/AXE_KNIFE_ATTACK_1.WAV",
   thrust: "SND/AXE/AXE_KNIFE_ATTACK_2.WAV",
   heavy: "SND/AXE/AXE_KNIFE_ATTACK_3.WAV",
 });
 function axeAttackSoundAt(kind, mode) {
+  if(activeSkinId("knife")==="dragon")return KUKRI_ACTION_SOUND_AT/kukriSpeedFor(kind);
   const clip = AXE_CLIP_BY_ATTACK[kind];
   const sourceAt = axeView?.eventTime(clip, AXE_EVENT_BY_ATTACK[kind]);
   const sourceDuration = axeView?.duration(clip);
   return Number.isFinite(sourceAt) && sourceDuration > 0
     ? sourceAt / sourceDuration * mode.interval : mode.hitStart * .65;
+}
+function meleeMode(kind){return activeSkinId("knife")==="dragon"?scaledKukriMode(kind):KNIFE[kind];}
+let kukriPreviewLightAlt = false;
+function previewKukriAttack(requestedKind) {
+  if (viewmodelTunerItem !== "kukri") return;
+  cancelMelee();
+  const kind = requestedKind === "heavy" ? "heavy" : (kukriPreviewLightAlt ? "thrust" : "light");
+  if (requestedKind !== "heavy") kukriPreviewLightAlt = !kukriPreviewLightAlt;
+  meleeState={kind,t:0,hit:false,damageResolved:false,sounded:false,heavyStabSounded:false,previewOnly:true,previewTargetChecked:false,
+    sourceClip:kind==="heavy"?"stab_miss":null};
 }
 function cancelMelee() {
   meleeState=null;meleeHold=null;ironbeastMeleeState=null;
@@ -3295,8 +3896,9 @@ function meleeAttack(heavy=false) {
   if (currentId!=="knife" || state!=="playing" || dead || switchBlocking() || meleeState || cur().state.cooldown>0) return;
   if (!heavy && time-knifeLastSwingAt>.9) knifeChain=0;
   const kind=heavy?'heavy':knifeChain%2?'thrust':'light';
-  const mode=KNIFE[kind];
-  meleeState={kind,t:0,hit:false,sounded:false};
+  const mode=meleeMode(kind);
+  meleeState={kind,t:0,hit:false,damageResolved:false,sounded:false,heavyStabSounded:false,
+    sourceClip:activeSkinId("knife")==="dragon"&&kind==="heavy"?"stab_miss":null};
   knifeChain=heavy?0:knifeChain+1;
   knifeLastSwingAt=heavy?-Infinity:time;
   cur().state.cooldown=mode.interval;
@@ -3305,28 +3907,64 @@ function meleeAttack(heavy=false) {
 function updateMelee(dt) {
   if(!meleeState)return;
   if(currentId!=="knife"||dead||state!=="playing"||switchBlocking()){cancelMelee();cancelGrenade();return;}
-  const a=meleeState,mode=KNIFE[a.kind],before=a.t;a.t+=dt;
-  if(!a.sounded&&a.t>=axeAttackSoundAt(a.kind,mode)){sfx.melee(a.kind);a.sounded=true;}
-  if(!a.hit&&a.t>=mode.hitStart&&before<=mode.hitEnd) {
-    scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);
-    const from=Math.max(before,mode.hitStart),to=Math.min(a.t,mode.hitEnd);
-    // Subdivide the swept interval so a slow frame cannot skip the entire cut.
-    const steps=Math.max(1,Math.ceil((to-from)*120)),targets=flatTargets();
-    const origin=camera.getWorldPosition(new THREE.Vector3());
-    for(let i=0;i<=steps&&!a.hit;i++) {
-      const u=(from+(to-from)*i/steps-mode.hitStart)/(mode.hitEnd-mode.hitStart);
-      const yaw=player.yaw+mode.arc*mode.sweepSign*(1-2*u);
-      const pitch=player.pitch+mode.pitchArc*(1-2*u);
-      const dir=new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(pitch,yaw,0,"YXZ"));
-      raycaster.set(origin,dir);raycaster.far=KNIFE.range;
-      const hit=raycaster.intersectObjects(targets,false)[0];
-      if(hit){a.hit=true;resolveKnifeHit(hit,dir,mode);}
-    }
+  const a=meleeState,mode=meleeMode(a.kind),before=a.t;a.t+=dt;
+  const meleeSkin=activeSkinId("knife"),dragonHeavy=meleeSkin==="dragon"&&a.kind==="heavy";
+  if(!a.sounded&&a.t>=axeAttackSoundAt(a.kind,mode)){
+    sfx.melee(a.kind,meleeSkin,dragonHeavy?"windup":"swing");a.sounded=true;
   }
+  if(dragonHeavy&&!a.heavyStabSounded&&a.t>=mode.hitStart){
+    sfx.melee(a.kind,meleeSkin,"strike");a.heavyStabSounded=true;
+  }
+  if(a.previewOnly&&!a.previewTargetChecked&&a.t>=mode.hitStart){
+    if(previewKukriTargetHits(a.kind,mode)&&dragonHeavy)a.sourceClip="stab";
+    a.previewTargetChecked=true;
+  }
+  if(!a.previewOnly&&!a.damageResolved&&a.t>=mode.hitStart&&before<=mode.hitEnd)resolveMeleeSweep(a,mode,meleeSkin);
   if(a.t>=mode.interval)meleeState=null;
+}
+
+// A melee swing is a swept sector, not a single bullet.  Keep walking through enemy
+// intersections on each ray so two aligned enemies can both be cut, but stop at the
+// first non-enemy surface so a wall still protects everything behind it.  The Map
+// makes one attack damage each enemy at most once even when several body meshes or
+// neighbouring sweep rays intersect the same actor.
+function accumulateMeleeRayHits(intersections,enemyHits,direction) {
+  for(const hit of intersections) {
+    const enemy=hit.object.userData.enemy;
+    if(!enemy)return hit;
+    if(enemy.dead)continue;
+    const previous=enemyHits.get(enemy);
+    const isHead=hit.object.userData.part==='head';
+    const previousIsHead=previous?.hit.object.userData.part==='head';
+    if(!previous||isHead&&!previousIsHead)enemyHits.set(enemy,{hit,direction});
+  }
+  return null;
+}
+function resolveMeleeSweep(action,mode,meleeSkin) {
+  scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);
+  const targets=flatTargets(),origin=camera.getWorldPosition(new THREE.Vector3());
+  const enemyHits=new Map();
+  let wallImpact=null;
+  const steps=64;
+  for(let i=0;i<=steps;i++) {
+    const u=i/steps;
+    const yaw=player.yaw+mode.arc*mode.sweepSign*(1-2*u);
+    const pitch=player.pitch+mode.pitchArc*(1-2*u);
+    const direction=new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(pitch,yaw,0,"YXZ"));
+    raycaster.set(origin,direction);
+    raycaster.far=meleeSkin==="dragon"?kukriCombatLive.range:KNIFE.range;
+    const wall=accumulateMeleeRayHits(raycaster.intersectObjects(targets,false),enemyHits,direction);
+    if(wall&&(!wallImpact||wall.distance<wallImpact.hit.distance))wallImpact={hit:wall,direction};
+  }
+  for(const {hit,direction} of enemyHits.values())resolveKnifeHit(hit,direction,mode);
+  if(enemyHits.size===0&&wallImpact)resolveKnifeHit(wallImpact.hit,wallImpact.direction,mode);
+  action.hit=enemyHits.size>0||!!wallImpact;
+  action.damageResolved=true;
+  if(enemyHits.size>0&&meleeSkin==="dragon"&&action.kind==="heavy")action.sourceClip="stab";
 }
 function resolveKnifeHit(h,dir,mode) {
   const enemy=h.object.userData.enemy;
+  const meleeSkin=activeSkinId("knife"),silentEnemyImpact=meleeSkin==="dragon";
   if(enemy&&!enemy.dead) {
     const head=h.object.userData.part==='head';
     const ef=new THREE.Vector3(Math.sin(enemy.group.rotation.y),0,Math.cos(enemy.group.rotation.y));
@@ -3334,14 +3972,14 @@ function resolveKnifeHit(h,dir,mode) {
     const dmg=head?mode.head:backstab?mode.backstab:mode.dmg;
     enemy.combatAt=time;spawnBlood(h.point,dir);
     flashCrosshairHit();
-    if(head)sfx.headshot();
+    if(head&&!silentEnemyImpact)sfx.headshot();
     if(enemy.takeDamage(dmg,head,dir)){
       if(head)spawnHeadshotBurst(h.point,dir);
-      onEnemyDeath(enemy,head,"军用匕首",golden);
+      onEnemyDeath(enemy,head,gunDisplayName("knife"),golden);
     }
-    else {addHitMark(head?"head":"hit",{golden});if(!head)sfx.hit();enemy.setFlash();}
-    sfx.impact(h.point,"knife_flesh");
-  } else if(!enemy){impactVfx.surface(h,false);sfx.impact(h.point,"knife_wall");}
+    else {addHitMark(head?"head":"hit",{golden});if(!head&&!silentEnemyImpact)sfx.hit();enemy.setFlash();}
+    if(!silentEnemyImpact)sfx.impact(h.point,"knife_flesh",meleeSkin);
+  } else if(!enemy){impactVfx.surface(h,false);sfx.impact(h.point,"knife_wall",activeSkinId("knife"));}
 }
 
 // 炫金雷神源 MDL 的第七段动作名就是 `knife-attack`，并带自己的 5004 音效事件。
@@ -3555,10 +4193,10 @@ function fire() {
         const head = h.object.userData.part === "head";
         // 穿箱命中只有伤害、血效和声音，不把准心染红；直接命中仍保留 0.11s 红闪。
         if (!h.penetratedWood) flashCrosshairHit();
-        // 身体伤害继续按距离衰减；爆头改走各枪独立的平均值 ±10% 随机区间。
+        // 普通枪身体伤害继续按距离衰减；巴雷特身体伤害与四枪爆头走各自的 ±10% 随机区间。
         // 「击杀前满血」**必须在 takeDamage() 之前**取（那一句之后 health 就是 0 了）。
         const golden = head && enemy.health >= enemy.maxHealth;
-        const baseDamage = head ? headshotDamage(def) : damageAt(def, h.distance);
+        const baseDamage = head ? headshotDamage(def) : bodyshotDamage(def, h.distance);
         const dmg = Math.max(1, Math.round(baseDamage * (h.damageMultiplier ?? 1)));
         enemy.combatAt = time;   // 挨打即暴露（小地图），见 enemiesShoot 那条
         spawnBlood(h.point,dir);
@@ -3642,11 +4280,11 @@ function onKill(headshot, enemyName, weaponName, golden) {
                !!headshot, false, currentId);
   if (streakCount >= 2) showStreak(streakCount);
   updateScoreHud();
-  if (!bioMatch() && state === "playing" && kills >= TDM_LIMIT) endTDM("win");
+  if (tdmMatch() && state === "playing" && kills >= TDM_LIMIT) endTDM("win");
 }
 
 function refillEnemies() {
-  if (state !== "playing") return;
+  if (state !== "playing" || !tdmMatch()) return;
   const alive = enemyManager.aliveCount();
   if (alive >= enemyTarget) return;
   const before = enemyManager.enemies.length;
@@ -3659,10 +4297,11 @@ function refillEnemies() {
 // 只在「人数变了 / 新开一局」时写 —— 不做每帧更新，免得又踩 renderScoreboard()
 // 那种「面板隐藏就早退」的坑。两个位置一起写：对局里按 +/- 的结果，回到菜单看得见。
 function refreshEnemyCountUi() {
+  const count = trainingMatch() ? trainingTargets.length : bioMatch() ? 5 : enemyTarget;
   const hud = document.getElementById("enemyNumVal");
-  if (hud) hud.textContent = String(enemyTarget);
+  if (hud) hud.textContent = String(count);
   const menu = document.getElementById("enemyCountVal");
-  if (menu) menu.textContent = String(enemyTarget);
+  if (menu) menu.textContent = String(count);
 }
 
 // 改「场上敌人数」。**一个原子操作：变量、在场实例、名册三处必须一起改**，
@@ -3671,6 +4310,8 @@ function refreshEnemyCountUi() {
 //         两个敌人共用一条 → 阵亡时战绩互相覆盖；
 //   调小：refillEnemies 的 `alive >= enemyTarget` 恒成立、直接 return，多出来的人永远不下线。
 function setEnemyTarget(n) {
+  // 训练靶只允许由 N / 删除键管理；调试用的敌人数入口不得把不死靶回收到对象池。
+  if (state === "playing" && !tdmMatch()) { refreshEnemyCountUi(); return enemyTarget; }
   const want = Math.max(ENEMY_MIN, Math.min(ENEMY_MAX, Math.round(Number(n) || ENEMY_MIN)));
   if (want === enemyTarget) { refreshEnemyCountUi(); return enemyTarget; }
   enemyTarget = want;
@@ -3703,7 +4344,8 @@ function setEnemyTarget(n) {
 
 // ---------- 换弹 ----------
 function startReload() {
-  if (ironbeastMeleeState || WEAPON_STATE.reloading || WEAPON_STATE.mag === WEAPON_STATE.magSize || WEAPON_STATE.reserve <= 0) return;
+  if (ironbeastMeleeState || WEAPON_STATE.reloading || WEAPON_STATE.mag === WEAPON_STATE.magSize ||
+      (!trainingMatch() && WEAPON_STATE.reserve <= 0)) return;
   WEAPON_STATE.reloading = true;
   WEAPON_STATE.reloadT = 0;
   if (WEAPON_DEFS[currentId].stats.zoom) {
@@ -3720,9 +4362,11 @@ function updateReload(dt) {
   if (!WEAPON_STATE.reloading) return;
   WEAPON_STATE.reloadT += dt;
   if (WEAPON_STATE.reloadT >= WEAPON_STATE.reloadDur) {
-    const take = Math.min(WEAPON_STATE.magSize - WEAPON_STATE.mag, WEAPON_STATE.reserve);
+    // 训练模式的备用弹匣是规则层面的无限量：仍完整播放换弹动作，但不扣持久状态中的备用弹药。
+    const take = trainingMatch() ? WEAPON_STATE.magSize - WEAPON_STATE.mag :
+      Math.min(WEAPON_STATE.magSize - WEAPON_STATE.mag, WEAPON_STATE.reserve);
     WEAPON_STATE.mag += take;
-    WEAPON_STATE.reserve -= take;
+    if (!trainingMatch()) WEAPON_STATE.reserve -= take;
     WEAPON_STATE.reloading = false;
     showToast("");
     updateAmmoHud();
@@ -4145,11 +4789,23 @@ document.addEventListener("keydown", (e) => {
     keys[IS_CROUCH] = true;
   }
   if (state !== "playing") return;
+  if (trainingMatch() && !e.repeat) {
+    if (e.code === "KeyN") { e.preventDefault(); addTrainingTargetAtCrosshair(); return; }
+    if (e.code === "Delete") {
+      e.preventDefault();
+      if (e.shiftKey) clearTrainingTargets();
+      else removeAimedTrainingTarget();
+      return;
+    }
+    if (e.code === "F8") {
+      e.preventDefault(); resetTrainingStats(); showToast("伤害统计已清空"); return;
+    }
+  }
   // 对局中增减敌人数量（1~8）。放在 dead 之前是有意的：死亡视角那 3 秒里也能调。
   // 用 e.code 而不是 e.key —— `+` 在不同布局/输入法下 e.key 不一样，而 Shift+Equal 与
   // 小键盘加号都是稳定的物理键。Shift 会顺带置一次 IS_SNEAK，抬手即清，无副作用。
-  if (!bioMatch() && (e.code === "Equal" || e.code === "NumpadAdd")) { e.preventDefault(); setEnemyTarget(enemyTarget + 1); return; }
-  if (!bioMatch() && (e.code === "Minus" || e.code === "NumpadSubtract")) { e.preventDefault(); setEnemyTarget(enemyTarget - 1); return; }
+  if (tdmMatch() && (e.code === "Equal" || e.code === "NumpadAdd")) { e.preventDefault(); setEnemyTarget(enemyTarget + 1); return; }
+  if (tdmMatch() && (e.code === "Minus" || e.code === "NumpadSubtract")) { e.preventDefault(); setEnemyTarget(enemyTarget - 1); return; }
   // 死亡视角期间不换弹、不切枪、不开背包面板（枪模都藏起来了，换枪没有意义）。
   // Tab 战绩面板在上面已经处理过，不受这里影响。
   if (dead) {
@@ -4267,7 +4923,8 @@ function refreshPlayerPosition() {
 function quitMatchToLobby() {
   if (state !== "playing") return;
   bioMode?.clear();
-  document.body.classList.remove('bio-playing', 'bio-mutant');
+  clearTrainingTargets(true);
+  document.body.classList.remove('bio-playing', 'bio-mutant', 'training-playing');
   state = "menu";
   updateMapChoiceUi();
   lockRequestCancelled = true;
@@ -4284,6 +4941,7 @@ function quitMatchToLobby() {
   for (const cloud of smokes) for (const sprite of cloud.sprites) { sprite.visible = false; smokePool.push(sprite); }
   smokes.length = 0;
   chat.clear();
+  renderTrainingPanel();
   hud.classList.add("hidden"); gameover.classList.add("hidden");
   menu.classList.remove("hidden"); viewport.classList.remove("active");
   if (lobby) { lobby.setResume(false); lobby.refresh(); }
@@ -4439,13 +5097,15 @@ document.addEventListener("keydown", (e) => {
 // ---------- 开始 / 结束 ----------
 function gameStart() {
   bioMode?.clear();
+  clearTrainingTargets(true);
+  resetTrainingStats();
   document.body.classList.toggle('bio-playing', bioMatch());
   document.body.classList.remove('bio-mutant');
   if (!bioMatch()) {
-    document.querySelector('.rb-side.rb-a .rb-team').textContent = '保卫者';
-    document.querySelector('.rb-side.rb-b .rb-team').textContent = '潜伏者';
-    document.getElementById('limitVal').textContent = TDM_LIMIT;
-    document.querySelector('.hud-match-details').firstChild.textContent = '敌人数 ';
+    document.querySelector('.rb-side.rb-a .rb-team').textContent = trainingMatch() ? '练习者' : '保卫者';
+    document.querySelector('.rb-side.rb-b .rb-team').textContent = trainingMatch() ? '训练靶' : '潜伏者';
+    document.getElementById('limitVal').textContent = trainingMatch() ? '训练' : TDM_LIMIT;
+    document.querySelector('.hud-match-details').firstChild.textContent = trainingMatch() ? '训练靶 ' : '敌人数 ';
   }
   matchPaused = false;
   closeGameMenu();
@@ -4548,7 +5208,7 @@ function gameStart() {
   enemyManager.enemies = [];
   enemyManager.corpses = [];
   enemyManager.wave = 0;
-  if (bioMatch()) roster = [];
+  if (bioMatch() || trainingMatch()) roster = [];
   else initRoster();
   refreshEnemyCountUi();
   showScoreboard(false);
@@ -4559,7 +5219,8 @@ function gameStart() {
   updateAmmoHud();
   updateScoreHud();
   updateTimerHud();
-  showToast(bioMatch() ? '经典生化 · 感染即将开始' : '团队竞技开始');
+  showToast(trainingMatch() ? '训练模式 · 按 N 在准心位置放置 NPC' :
+    bioMatch() ? '经典生化 · 感染即将开始' : '团队竞技开始');
   // 开局这里**故意没有音效**：曾有一记 `sfx.roundStart()`（船笛，`match_start` 采样），
   // 那是一段 0.97s / 基频 ≈150Hz 的持续低鸣，用户听起来就是「水牛的叫声」，已整个删除。
   // 按钮那一下仍有 `ui("click")`，所以「进入战场」不是无声的。**别再往这里加音效。**
@@ -4567,7 +5228,8 @@ function gameStart() {
     bioMode.start(mapData, player);
     timeLeft = bioMode.timer;
     updateBioHud();
-  } else refillEnemies();
+  } else if (tdmMatch()) refillEnemies();
+  renderTrainingPanel();
 }
 
 // result: "win" | "lose" | "draw"
@@ -4621,11 +5283,11 @@ function updateAmmoHud() {
     hudWeaponIcon.dataset.weapon = currentId;
   }
   if (def.type === "grenade") {
-    ammoMag.textContent = cur().state.count;
-    ammoReserve.textContent = "0";
-    ammoVal.classList.toggle("low", cur().state.count <= 0);
-    ammoFill.style.width = Math.min(100, (cur().state.count / cur().state.maxCount) * 100) + "%";
-    ammoFill.classList.toggle("low", cur().state.count <= 1);
+    ammoMag.textContent = trainingMatch() ? "∞" : cur().state.count;
+    ammoReserve.textContent = trainingMatch() ? "∞" : "0";
+    ammoVal.classList.toggle("low", !trainingMatch() && cur().state.count <= 0);
+    ammoFill.style.width = trainingMatch() ? "100%" : Math.min(100, (cur().state.count / cur().state.maxCount) * 100) + "%";
+    ammoFill.classList.toggle("low", !trainingMatch() && cur().state.count <= 1);
   } else if (def.type === "melee") {
     ammoMag.textContent = "--";
     ammoReserve.textContent = "--";
@@ -4634,7 +5296,7 @@ function updateAmmoHud() {
     ammoFill.classList.remove("low");
   } else {
     ammoMag.textContent = WEAPON_STATE.mag;
-    ammoReserve.textContent = WEAPON_STATE.reserve;
+    ammoReserve.textContent = trainingMatch() ? "∞" : WEAPON_STATE.reserve;
     ammoVal.classList.toggle("low", WEAPON_STATE.mag <= 6);
     ammoFill.style.width = (WEAPON_STATE.mag / WEAPON_STATE.magSize) * 100 + "%";
     ammoFill.classList.toggle("low", WEAPON_STATE.mag <= 6);
@@ -4644,6 +5306,13 @@ function updateAmmoHud() {
 }
 function updateScoreHud() {
   if (bioMatch() && bioMode) { updateBioHud(); return; }
+  if (trainingMatch()) {
+    teamScoreVal.textContent = String(trainingStats.total);
+    enemyScoreVal.textContent = String(trainingTargets.length);
+    document.getElementById("enemyNumVal").textContent = String(trainingTargets.length);
+    aceBadge.classList.remove("active");
+    return;
+  }
   teamScoreVal.textContent = kills;
   enemyScoreVal.textContent = enemyScore;
   aceBadge.classList.toggle("active", kills > 0 && kills >= Math.max(0, ...roster.map(r => r.kills)));
@@ -4739,6 +5408,11 @@ function renderBioHealth() {
   }
 }
 function updateTimerHud() {
+  if (trainingMatch()) {
+    roundTimeEl.textContent = "自由训练";
+    roundTimeEl.classList.remove("low");
+    return;
+  }
   const t = Math.max(0, Math.ceil(timeLeft));
   const mm = String(Math.floor(t / 60)).padStart(2, "0");
   const ss = String(t % 60).padStart(2, "0");
@@ -5059,6 +5733,7 @@ function animateWeapon(dt) {
   if(ironbeastView)ironbeastView.root.visible=false;
   if(barrettView)barrettView.root.visible=false;
   if(axeView)axeView.root.visible=false;
+  if(kukriView)kukriView.root.visible=false;
   if(deagleFestaView)deagleFestaView.root.visible=false;
   for(const v of Object.values(classicNades))v.root.visible=false;
   if(authoredViews)for(const v of Object.values(authoredViews))v.root.visible=false;
@@ -5207,7 +5882,7 @@ function animateWeapon(dt) {
   // 屏幕位置才钉得住（否则整段下探被甩到画面外，见 viewarms.js 里 POUCH 的注释）。
   _invGroup.copy(c.group.matrix).invert();
   viewArms.update(reloading, reloadP, _invGroup);
-  if(def.type==='grenade'){viewArms.poseGrenade(grenadeAction,_invGroup);c.gun.visible=!(grenadeAction?.thrown)&&c.state.count>0;}
+  if(def.type==='grenade'){viewArms.poseGrenade(grenadeAction,_invGroup);c.gun.visible=!(grenadeAction?.thrown)&&(trainingMatch()||c.state.count>0);}
   _muzzleLocal.copy(c.muzzleLocal).applyMatrix4(c.group.matrix);
   muzzleLight.position.copy(_muzzleLocal);
 
@@ -5220,7 +5895,7 @@ function animateWeapon(dt) {
     const fireStart=a?a.releaseAt:Infinity;
     const clip=a?(a.t>=fireStart?'fire':'prefire'):'idle_0';
     v.sample(clip,a?(clip==='fire'?a.t-fireStart:a.t):time%v.duration('idle_0'));
-    v.gun.visible=!a?.thrown&&c.state.count>0;
+    v.gun.visible=!a?.thrown&&(trainingMatch()||c.state.count>0);
   }
   classicFireT+=dt;
   if(classicView&&vid==='ak'&&activeSkinId('ak')==='classic') {
@@ -5340,7 +6015,23 @@ function animateWeapon(dt) {
     muzzleShot.position.copy(_muzzleLocal);
     muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
+  if(kukriView&&vid==='knife'&&activeSkinId('knife')==='dragon') {
+    c.gun.visible=false;viewArms.root.visible=false;kukriView.root.visible=true;
+    const deploy=switchState?.to===vid&&switchState.committed&&switchState.t<switchState.dur;
+    const pose=viewmodelPoseLive.kukri;
+    kukriView.root.scale.setScalar(pose.scale);
+    kukriView.root.position.set(pose.x+bobX,pose.y+bobY+(deploy?0:swDy),pose.z+(deploy?0:swDz));
+    kukriView.root.rotation.set(pose.pitch+(deploy?0:swRx),pose.yaw+(deploy?0:swRy),pose.roll+(deploy?0:swRz));
+    const attack=meleeHold||meleeState,kind=attack?.kind;
+    const clip=kind?(attack.sourceClip||KUKRI_CLIP_BY_ATTACK[kind]):deploy?'select':'idle_0';
+    const interval=kind?meleeMode(kind).interval:kukriView.duration(clip);
+    const t=attack?attack.t/interval*kukriView.duration(clip):deploy?
+      (switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*kukriView.duration('select'):
+      time%kukriView.duration('idle_0');
+    kukriView.sample(clip,t);
+  }
   if(axeView&&vid==='knife') {
+    if(activeSkinId('knife')!=='dragon') {
     c.gun.visible=false;viewArms.root.visible=false;axeView.root.visible=true;
     const deploy=switchState?.to===vid&&switchState.committed&&switchState.t<switchState.dur;
     const pose=viewmodelPoseLive.knife;
@@ -5357,8 +6048,11 @@ function animateWeapon(dt) {
       (switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*axeView.duration('select'):
       time%axeView.duration('idle_0');
     axeView.sample(clip,t);
+    }
   }
-  if(authoredViews && ((vid === 'deagle' && !deagleFestaView) || (vid === 'knife' && !axeView))) {
+  if(authoredViews && ((vid === 'deagle' && !deagleFestaView) ||
+      (vid === 'knife' && activeSkinId('knife')==='dragon' && !kukriView) ||
+      (vid === 'knife' && activeSkinId('knife')!=='dragon' && !axeView))) {
     const v=authoredViews[vid];
     c.gun.visible=false;
     if(vid==='knife')viewArms.root.visible=true;
@@ -5426,7 +6120,8 @@ function update(dt, rawDt) {
   // 聊天：行寿命 / 限流冷却 / 应答延迟 / 冷场计时全部由 dt 推进（绝不用 setTimeout 或
   // CSS 动画 —— 那样跟不上 __tactical.pause()，也没法在无头测试里定步长快进）。
   // 放在下面那行 `state !== "playing"` 的 return **之前**：结算画面上已有的行也能淡完。
-  chat.update(dt);
+  // 训练靶不是实战队员：保留玩家手动聊天，但不让静止靶自动刷战术台词。
+  if (!trainingMatch()) chat.update(dt);
   // 连杀窗口过期就把计数归零。**单靠 onKill 里那次过期判定是不够的**：那条只在「下一次
   // 击杀」时才跑，中间这几个秒里 `streak()` 读口会一直报一个早就该没了的数（调试和测试都
   // 会被它骗）。两条判定用的是同一个比较，不会互相打架。
@@ -5446,7 +6141,7 @@ function update(dt, rawDt) {
   if (state !== "playing") return;
 
   // 回合计时：时间到按比分判胜负
-  if (!bioMatch()) {
+  if (tdmMatch()) {
     timeLeft -= dt;
     if (timeLeft <= 0) {
       timeLeft = 0;
@@ -5455,8 +6150,10 @@ function update(dt, rawDt) {
       return;
     }
     updateTimerHud();
-  } else {
+  } else if (bioMatch()) {
     timeLeft = bioMode?.timer ?? 0;
+    updateTimerHud();
+  } else {
     updateTimerHud();
   }
 
@@ -5504,6 +6201,7 @@ function update(dt, rawDt) {
   camera.rotation.z = scoped ? Math.sin(time * 1.6) * 0.006 : 0;
 
   movePlayer(dt);
+  updateKukriTrainingTargets();
   player.viewDip = Math.max(0, player.viewDip - dt * 5.5);
   // 台阶滞后从正负两侧都向 0 收。黑色城镇连续阶梯的下降速度更高，正偏移
   // 用更快恢复率，避免多级台阶把偏移累积到上限后重新出现一次跳变。
@@ -5549,6 +6247,13 @@ function update(dt, rawDt) {
 
   if (bioMatch()) {
     bioMode?.update(dt, player, ddt);
+    return;
+  }
+  if (trainingMatch()) {
+    for (const target of trainingTargets) {
+      target.wantShoot = false;
+      target.update(dt, player, trainingTargets, false);
+    }
     return;
   }
   spawnAcc += dt;
@@ -5846,8 +6551,14 @@ async function init() {
   // without depending on Pointer Lock support in the automation browser.
   const debugParams = new URLSearchParams(location.search);
   const debugMap = debugParams.get('debugMap');
+  const debugMode = debugParams.get('debugMode');
+  if (debugMode === 'training' && mapCatalog.blacktown) {
+    selectedModeId = 'training';
+    activateMap('blacktown');
+  }
   if (debugMap && mapCatalog[debugMap]) {
     if (debugMap === 'bio') selectedModeId = 'bio';
+    else if (debugMode !== 'training') selectedModeId = 'tdm';
     activateMap(debugMap);
   }
   bootPart("map", 1);
@@ -5877,7 +6588,7 @@ async function init() {
   let assetsDone = 0;
   const trackAsset = async (promise) => {
     try { return await promise; }
-    finally { bootPart("assets", ++assetsDone / 20); }
+    finally { bootPart("assets", ++assetsDone / 21); }
   };
   const requiredWeapon = async (id) => {
     if (!await loadWeapon(WEAPON_DEFS[id])) throw new Error("武器模型加载失败：" + id);
@@ -5907,6 +6618,10 @@ async function init() {
       axeView=v;
       if(v){v.root.scale.setScalar(viewmodelPoseLive.knife.scale);vmScene.add(v.root);v.root.visible=false;}
     })),
+    trackAsset(ClassicView.load('kukri_dragon').then(v=>{
+      kukriView=v;
+      if(v){v.root.scale.setScalar(viewmodelPoseLive.kukri.scale);vmScene.add(v.root);v.root.visible=false;}
+    })),
     trackAsset(ClassicView.load('deagle_festa').then(v=>{
       deagleFestaView=v;
       if(v){v.root.scale.setScalar(viewmodelPoseLive.deagle.scale);vmScene.add(v.root);v.root.visible=false;}
@@ -5926,10 +6641,11 @@ async function init() {
   // picking up a dropped gun preserves its actual appearance.
   bootPhase("actors", "正在整理武器库", "加载经典皮肤与世界模型");
   for (const id of ["ak","m4"]) mountGunModel(id,DEFAULT_SKIN[id]);
+  mountGunModel("knife","dragon");
   let skinsDone = 0;
-  await Promise.all(["ak","m4"].map(async id=>{
-    await owned[id]?.modelLoads[DEFAULT_SKIN[id]];
-    bootPart("skins", ++skinsDone / 2);
+  await Promise.all(["ak","m4","knife"].map(async id=>{
+    await owned[id]?.modelLoads[id==="knife"?"dragon":DEFAULT_SKIN[id]];
+    bootPart("skins", ++skinsDone / 3);
   }));
   // 世界模型目录（敌人手持 + 地面掉落）。**必须在全部武器加载完之后** ——
   // 它从玩家这几把枪派生「枪型 × 皮肤」的全部变体。建目录这一步不存在异步，
@@ -5940,7 +6656,8 @@ async function init() {
     m4: owned.m4 && owned.m4.baseGun,
     barrett: owned.barrett && owned.barrett.baseGun,
     deagle: owned.deagle && owned.deagle.baseGun,
-  }, {ak:owned.ak?.models,m4:owned.m4?.models});
+    knife: owned.knife && owned.knife.baseGun,
+  }, {ak:owned.ak?.models,m4:owned.m4?.models,knife:owned.knife?.models});
   // 敌人每次刷出都随机抽一把经典主武器；世界目录与玩家共用已加载几何。
   // 挂在 picker 上而不是一次性发下去：敌人是对象池复用的，acquire() 每次都调它
   // （见 enemies.js），所以池里捞出来的旧敌人也会换上新枪。
@@ -6073,6 +6790,20 @@ async function init() {
         colliders: colliders.length, obstacles: obstacleFlat.length,
         navNodes: enemyManager.navigation?.points?.length || 0,
         spawns: mapData?.spawns }),
+      trainingState: () => ({
+        active: trainingMatch(),
+        targets: trainingTargets.map(target => ({ name: target.name, dead: target.dead,
+          health: target.health, immortal: target.trainingImmortal,
+          position: target.group.position.toArray() })),
+        stats: { total: trainingStats.total, hits: trainingStats.hits,
+          heads: trainingStats.heads, last: trainingStats.last,
+          average: trainingStats.hits ? trainingStats.total / trainingStats.hits : 0,
+          history: trainingStats.history.map(hit => ({ ...hit })) },
+      }),
+      addTrainingTarget: addTrainingTargetAtCrosshair,
+      removeTrainingTarget: removeAimedTrainingTarget,
+      clearTrainingTargets: () => clearTrainingTargets(true),
+      resetTrainingStats,
       impactFx: () => impactVfx.stats(),
       movementStep: (dt) => movePlayer(dt),
       supportAt,
@@ -6082,6 +6813,8 @@ async function init() {
       time: () => time,
       headshotDamage: (id = currentId, randomValue = Math.random()) =>
         headshotDamage(WEAPON_DEFS[id] || WEAPON_DEFS[currentId], randomValue),
+      bodyshotDamage: (id = currentId, dist = 0, randomValue = Math.random()) =>
+        bodyshotDamage(WEAPON_DEFS[id] || WEAPON_DEFS[currentId], dist, randomValue),
       // 改动地图后核对「有没有两件东西占同一块地方」用的拍平列表 —— obstacles 是
       // Mesh 与 Group 混装（见 obstacleFlat 那条注释），直接给外面的必须是拍平后的。
       obstacles: () => obstacleFlat,
@@ -6171,6 +6904,7 @@ async function init() {
         acted: actedThisLife,
         list: BACKPACKS.map((b) => b.primary),
         skins: BACKPACKS.map((b) => b.skin),
+        meleeSkins: BACKPACKS.map((b) => b.meleeSkin),
         gear: { ...GEAR_SKIN },
         // 「这条命捡来的枪」。**捡到枪之后 `list[curBp]`（背包配装）与 `held`（手上那把）
         // 会分道扬镳，而 `list` 恰恰是**不该变**的那一半** —— 所以断言「捡了枪」要看
@@ -6188,6 +6922,7 @@ async function init() {
       skinState: () => ({
         cur: activeSkinId(currentId),
         bp: BACKPACKS.map((b) => b.skin),
+        meleeBp: BACKPACKS.map((b) => b.meleeSkin),
         gear: { ...GEAR_SKIN },
         glow: (owned[currentId].glowMats || []).map((g) => g.mat.emissiveIntensity),
         muzzle: { sprite: muzzleShot.material.color.getHex(), light: muzzleLight.color.getHex() },
@@ -6199,7 +6934,8 @@ async function init() {
         // **注意它不写 LOADOUT_DEFAULT** —— 这是刻意的：这样「先 beginGame() 再 setSkin()」
         // 的既有测试写法才不会被 resetLoadout 的语义搅乱，也与「捡来的枪只活一局」同一边。
         const bpIdx = BACKPACKS.findIndex((b) => b.primary === weaponId);
-        if (bpIdx >= 0) BACKPACKS[bpIdx].skin = skinId;
+        if (weaponId === "knife") BACKPACKS[curBp].meleeSkin = skinId;
+        else if (bpIdx >= 0) BACKPACKS[bpIdx].skin = skinId;
         else GEAR_SKIN[weaponId] = skinId;
         if (currentId === weaponId) {
           // 顺序与 switchWeapon 里完全一致：先定模型，再挂枪口火光/手臂锚点，最后上漆。
@@ -6445,6 +7181,9 @@ async function init() {
       ironbeastMeleeState:()=>ironbeastMeleeState?{...ironbeastMeleeState}:null,
       ironbeastMeleeStep:dt=>{if(owned.m4)owned.m4.state.cooldown=Math.max(0,owned.m4.state.cooldown-dt);updateIronbeastMelee(dt);animateWeapon(0);},
       ironbeastMeleeStats:()=>({...IRONBEAST_MELEE}),
+      kukriCombatStats:()=>({ ...kukriCombatLive,
+        timing:{...kukriTimingLive},
+        light:scaledKukriMode("light"), thrust:scaledKukriMode("thrust"), heavy:scaledKukriMode("heavy") }),
       poseMelee:(kind,t)=>{meleeHold=kind?{kind,t}:null;animateWeapon(0);},
       knifeStats:()=>JSON.parse(JSON.stringify(KNIFE)),
       classicViewState:()=>classicView?{visible:classicView.root.visible,clip:classicView.clip,bones:classicView.bones.length}:null,
@@ -6916,6 +7655,16 @@ async function init() {
       player.pos.set(pose[0], pose[1], pose[2]);
       if (Number.isFinite(pose[3])) player.yaw = pose[3];
       if (Number.isFinite(pose[4])) player.pitch = pose[4];
+    }
+    // 只供本地画面回归：自动开局后的第二帧，按与 N 键完全相同的准心射线放一个靶；
+    // 可选的 debugTrainingHit 会再走一次真实 takeDamage，便于同时验收面板与不死分支。
+    if (trainingMatch() && debugParams.get('debugTrainingTarget') === '1') {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (!addTrainingTargetAtCrosshair()) return;
+        const debugDamage = Number(debugParams.get('debugTrainingHit'));
+        if (Number.isFinite(debugDamage) && debugDamage > 0)
+          trainingTargets[0]?.takeDamage(debugDamage, true);
+      }));
     }
   }
   // 只在显式调试参数下生成固定结算页，供不同窗口尺寸做视觉回归；正常入口不会经过这里。

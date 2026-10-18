@@ -352,3 +352,21 @@ classic/axe_festa/put_up.wav   <- SND/AXE/AXE_KNIFE_PUT_UP.wav
 不转码也不变调。播放时刻读取源 MDL 的 5004 动作事件，并按本项目的近战
 攻击周期等比例重定时，使声音与完整骨骼动作保持同相位。源包没有授权文件，
 不据此推定公开再分发或商业使用权。
+
+
+------------------------------------------------------------
+十四、屠龙 Kukri 音效（用户提供，授权未核验）
+------------------------------------------------------------
+来源目录：`尼伯尔/sound/weapons/knife/`
+
+classic/kukri_dragon/deploy.wav  <- knife_deploy1.WAV
+classic/kukri_dragon/slash1.wav  <- knife_slash1.WAV
+classic/kukri_dragon/slash2.wav  <- knife_slash2.WAV
+classic/kukri_dragon/stab.wav    <- knife_stab.WAV
+classic/kukri_dragon/hit1..4.wav <- knife_hit1..4.WAV
+classic/kukri_dragon/hitwall.wav <- knife_hitwall1.WAV
+
+九段 WAV 均逐字节复制、不转码、不变调、不叠合成或通用近战音效。Source v44
+模型的六个 sequence 没有嵌入声音事件，故拔出、两段挥砍、刺击、命中人体和命中墙面
+按源文件命名所表达的动作语义播放，不声称存在源文件没有提供的精确事件帧。源目录
+没有可核验授权说明，仅按用户要求用于本地项目。

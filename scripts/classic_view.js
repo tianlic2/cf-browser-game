@@ -7,14 +7,18 @@ export class ClassicView {
   static async load(asset='ak/view') {
     try {
       const base=new URL(`../assets/classic/${asset}/`,import.meta.url);
-      const version='github-publish-1';
+      const version='kukri-scoped-vfx-1';
       const assetUrl=name=>{const u=new URL(name,base);u.searchParams.set('v',version);return u;};
       const r=await fetch(assetUrl('view.json'));if(!r.ok)throw new Error('view.json');
       const data=await r.json();
       const bytes=await fetchJoinedAsset(data.binaryParts||['view.bin'],assetUrl,'视模');
-      const textures=await Promise.all(data.parts.map(async p=>({
-        map:await new THREE.TextureLoader().loadAsync(assetUrl(p.map).href),
-      })));
+      const loader=new THREE.TextureLoader();
+      const textures=await Promise.all(data.parts.map(async p=>{
+        const load=async name=>name?loader.loadAsync(assetUrl(name).href):null;
+        return {map:await load(p.map),normalMap:await load(p.normalMap),
+          metalnessMap:await load(p.metalnessMap),aoMap:await load(p.aoMap),
+          emissiveMap:await load(p.emissiveMap),reflectionMap:await load(p.reflectionMap)};
+      }));
       return new ClassicView(data,bytes,textures,asset!=='m4_ironbeast');
     } catch(e) { console.warn('CF 视模加载失败，使用握点回退',e);return null; }
   }
@@ -56,7 +60,13 @@ export class ClassicView {
       }
       for(let j=0;j<p.count;j++)g.attributes.uv.setY(j,1-g.attributes.uv.getY(j));
       // UVs above already flip the SMD V axis; TextureLoader must not flip it again.
-      const map=textures[i].map;map.flipY=false;map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=8;
+      const maps=textures[i],map=maps.map;
+      for(const texture of Object.values(maps))if(texture){texture.flipY=false;texture.anisotropy=8;}
+      // Additive colour-space is asset-authored.  Most existing imported views
+      // (including Iron Beast) use the established sRGB path; only assets that
+      // explicitly opt in, such as Kukri's w4/0 cards, bypass the conversion.
+      map.colorSpace=p.linearAdditive?THREE.NoColorSpace:THREE.SRGBColorSpace;
+      if(maps.emissiveMap)maps.emissiveMap.colorSpace=THREE.SRGBColorSpace;
       let material;
       if(p.additive) {
         // GoldSrc's compiled MDL marks both the S_ bodygroup and every VFX
@@ -64,11 +74,34 @@ export class ClassicView {
         // of interpreting the S_ bitmap as a modern PBR metalness mask.
         material=new THREE.MeshBasicMaterial({map,transparent:true,depthTest:true,depthWrite:false,
           blending:THREE.AdditiveBlending,side:THREE.DoubleSide,toneMapped:false});
+      } else if(p.unlit) {
+        // Several CF conversions bake the intended diffuse colour and contrast
+        // directly into the Source sheet.  Rendering that through the level's
+        // blue IBL changes gold into black/blue, so preserve the authored base
+        // and apply its $envmapmask as a separate low-energy overlay below.
+        material=new THREE.MeshBasicMaterial({map,toneMapped:false});
       } else {
-        material=new THREE.MeshStandardMaterial({map,roughness:.85,metalness:.04});
+        material=new THREE.MeshStandardMaterial({map,
+          normalMap:maps.normalMap||null,metalnessMap:maps.metalnessMap||null,
+          aoMap:maps.aoMap||null,emissiveMap:maps.emissiveMap||null,
+          roughness:p.roughness??.85,metalness:p.metalness??.04,
+          envMapIntensity:p.envMapIntensity??1,
+          emissive:p.emissive?new THREE.Color(p.emissive):new THREE.Color(0),
+          emissiveIntensity:p.emissiveIntensity??0});
+        if(maps.aoMap&&!g.attributes.uv1)g.setAttribute('uv1',g.attributes.uv.clone());
       }
       const mesh=new THREE.SkinnedMesh(g,material);
       mesh.frustumCulled=false;rig.add(mesh);mesh.bind(skeleton,rig.matrixWorld);
+      if(maps.reflectionMap) {
+        maps.reflectionMap.colorSpace=THREE.NoColorSpace;
+        const reflectionMaterial=new THREE.MeshBasicMaterial({map:maps.reflectionMap,
+          transparent:true,opacity:p.reflectionOpacity??.18,depthTest:true,depthWrite:false,
+          blending:THREE.AdditiveBlending,side:THREE.FrontSide,toneMapped:false,
+          polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1});
+        const reflection=new THREE.SkinnedMesh(g,reflectionMaterial);
+        reflection.frustumCulled=false;reflection.renderOrder=1;rig.add(reflection);
+        reflection.bind(skeleton,rig.matrixWorld);
+      }
       if(p.specular)mesh.renderOrder=1;
       if(p.effect){mesh.renderOrder=2;this.effects.push(mesh);}
       if(i===0||p.weapon)this.gun=mesh;

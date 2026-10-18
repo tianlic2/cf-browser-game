@@ -40,6 +40,10 @@ const effects = view.parts.filter((part) => part.kind === 'effect');
 assert.equal(effects.length, 12, 'all twelve source muzzle and shot effect materials are imported');
 assert.ok(effects.every((part) => part.additive && part.sourceFlags === 32),
   'all twelve VFX materials use the MDL-authored additive flag, including smoke');
+assert.ok(effects.every((part) => !part.linearAdditive),
+  'Iron Beast keeps its original sRGB additive colour path');
+assert.match(viewRenderer, /p\.linearAdditive\?THREE\.NoColorSpace:THREE\.SRGBColorSpace/,
+  'direct additive colour sampling is opt-in and cannot alter Iron Beast');
 for (const name of ['idle_0', 'reload', 'select', 'fire', 'prefire', 'postfire'])
   assert.ok(view.clips[name]?.times.length, `source animation ${name} is present`);
 assert.equal(sourceMdl.readInt32LE(164), 7, 'the original MDL contains seven animation sequences');

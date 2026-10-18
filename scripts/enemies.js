@@ -131,6 +131,9 @@ export class Enemy {
     this.clearHelmetDrop();
     this.health = ENEMY_HP;
     this.maxHealth = ENEMY_HP;
+    // 训练模式会临时把池中实例设为不死靶；复用到普通对局前必须清干净。
+    this.trainingImmortal = false;
+    this.onTrainingDamage = null;
     this.damage = (opts.damage ?? ENEMY_DAMAGE) * ENEMY_TUNING.dmg;
     this.name = opts.name || ENEMY_NAMES[0];
     // 枪型/皮肤每局随机（main.js 的 loadoutPicker 抽的），死亡时按这两个字段掉在地上。
@@ -728,6 +731,11 @@ export class Enemy {
   // 击杀 → 进入倒地状态（先不销毁：尸身要留在场上）
   takeDamage(amount, headshot = false) {
     if (this.dead) return false;
+    if (this.trainingImmortal) {
+      this.setFlash();
+      this.onTrainingDamage?.(amount, headshot);
+      return false;
+    }
     this.health -= amount;
     this.setFlash();
     if (!headshot && this.health > 0 && this.health < 75) {

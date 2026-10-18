@@ -64,8 +64,8 @@ assert.equal(barrett[2].penetratedWood, true,
 
 const defs = source.slice(source.indexOf('const WEAPON_DEFS ='), source.indexOf('const PRIMARY_IDS'));
 const expected = { ak: .40, m4: .85, barrett: .80, deagle: .35 };
-const baseDamage = { ak: 36, m4: 33, barrett: 130, deagle: 54 };
-const expectedAfterOneBox = { ak: 14, m4: 28, barrett: 104, deagle: 19 };
+const baseDamage = { ak: 36, m4: 33, barrett: 300, deagle: 54 };
+const expectedAfterOneBox = { ak: 14, m4: 28, barrett: 240, deagle: 19 };
 for (const [id, ratio] of Object.entries(expected)) {
   const from = defs.indexOf(`  ${id}:`);
   const to = defs.indexOf('\n  },', from);
@@ -82,6 +82,8 @@ assert.match(fire, /woodDamageMultiplier:\s*def\.woodPenetration/,
   'live firing passes the held weapon wood multiplier');
 assert.match(fire, /baseDamage \* \(h\.damageMultiplier \?\? 1\)/,
   'live damage applies the penetration multiplier after range/head calculation');
+assert.match(fire, /head \? headshotDamage\(def\) : bodyshotDamage\(def, h\.distance\)/,
+  'Barrett body randomization occurs before the shared wood multiplier');
 assert.match(fire, /if \(!h\.penetratedWood\) flashCrosshairHit\(\)/,
   'wood-penetrated enemy hits do not flash the crosshair red');
 

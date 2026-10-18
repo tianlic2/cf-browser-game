@@ -21,6 +21,7 @@ counter-strike-in-browser-main/
 # 网页只需要 assets/classic/ 中已转换、压缩的版本。
 /cstrike/
 /黑色城镇/
+/尼伯尔/
 /artifacts/
 
 # GitHub 发布使用 600 KiB 分块；原始大文件留在本地供导入脚本复用，网页通过

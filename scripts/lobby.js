@@ -44,6 +44,9 @@ const KEYBINDS = [
   { keys: ["Tab"], label: "按住查看战绩" },
   { keys: ["Enter"], label: "聊天（再按一次发送）" },
   { keys: ["+", "−"], label: "对局中增减敌人数量" },
+  { keys: ["N"], label: "训练模式：在准心位置放置静止 NPC" },
+  { keys: ["Delete"], label: "训练模式：删除瞄准 NPC；Shift + Delete 清空" },
+  { keys: ["F8"], label: "训练模式：清空伤害统计" },
   { keys: ["Esc"], label: "释放鼠标，回到大厅" },
 ];
 

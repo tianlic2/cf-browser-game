@@ -19,10 +19,10 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
-import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=golden-thunder-1";
+import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=kukri-dragon-1";
 
 // 会出现在世界里的枪。AK/M4 是普通地图敌人池；巴雷特用于守望之城。
-const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle"];
+const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle", "knife"];
 export const ENEMY_GUN_IDS = ["ak", "m4"];
 
 const cache = {}; // id → { world: {skinId: Object3D}, enemy: {skinId: Object3D} }

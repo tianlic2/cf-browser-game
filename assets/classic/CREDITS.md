@@ -133,6 +133,12 @@
 - `tools/import_ironbeast_view.py` 从 MDL 提取 47 根骨骼、手/斧网格、四张内嵌调色板贴图以及 `idle_0/select/combo_1/combo_2/bigshot` 等原动作，输出到 `axe_festa/view.json`、`view.bin` 和 PNG。
 - `tools/import_ironbeast_m4.py` 从同一视模派生只含斧头的 `axe_festa/axe.glb`，仅用于大厅预览及动作视模失败时的静态回退。命中距离、伤害和扫掠判定仍由 `scripts/melee.js` 决定。
 
+## 屠龙 Kukri（2026-10-18）
+
+- 模型、VTF/VMT、双手骨骼、动作与音效由用户放入本地 `尼伯尔/` 目录；素材包未附带可核验的授权说明，仅按用户要求用于本地项目，不据此推定公开再分发或商业使用权。
+- `tools/import_source_kukri.py` 从 Source v44 `v_knife_t.mdl/.vvd/.dx90.vtx` 导入 45 根骨骼、枪刃与双手六个材质部件，并完整保留 `idle/draw/stab/stab_miss/midslash1/midslash2` 六段动作。`w4` 与 `0` 按源 VMT 保留为独立 additive/self-illum 光效层；刀身保留 `KUKRI_BEAST_N_S` 反射遮罩，手臂保留法线和 AO 贴图。
+- 同一脚本从 `w_knife_t` 生成 `kukri_dragon/world.glb` 用于背包预览和世界回退，并把九段 WAV 原样复制到 `audio/classic/kukri_dragon/`。源 MDL 没有动画事件，因此声音按文件名所表达的源动作语义接入，不臆造不存在的帧事件。
+
 ## NPC 步态参考（2026-10-16）
 
 - [Quaternius Universal Animation Library 1 Standard](https://quaternius.com/packs/universalanimationlibrary.html)，作者 Quaternius，下载包 `License.txt` 标注 CC0 1.0。使用免费包中的 `Jog_Fwd_Loop`，由 `tools/extract_npc_gait.py` 在 32 个等距时刻提取左脚相对于骨盆的前后位移与抬脚高度，并归一化为 `scripts/npc_gait.js`。

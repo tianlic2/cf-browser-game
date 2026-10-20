@@ -21,9 +21,12 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
 import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=kukri-dragon-1";
 
-// 会出现在世界里的枪。AK/M4 是普通地图敌人池；巴雷特用于守望之城。
+// 会出现在世界里的枪。普通团队竞技包含少量巴雷特；守望之城仍只用狙击。
 const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle", "knife"];
-export const ENEMY_GUN_IDS = ["ak", "m4"];
+export const ENEMY_GUN_IDS = ["ak", "m4", "barrett"];
+// 每五次普通敌人出生覆盖三种主武器，同时让栓动狙保持稀有。
+const ENEMY_GUN_BAG = ["ak", "ak", "m4", "m4", "barrett"];
+let remainingEnemyGuns = [];
 
 const cache = {}; // id → { world: {skinId: Object3D}, enemy: {skinId: Object3D} }
 let built = false;
@@ -220,6 +223,16 @@ export function enemyModel(id, skinId) {
 // Classic battlefield palette, including enemy drops. Catalog entries for the
 // modern skins remain available, but do not enter the default match pool.
 export function randomGunRoll(allowedIds = ENEMY_GUN_IDS) {
-  const id = allowedIds[(Math.random() * allowedIds.length) | 0];
+  let id;
+  if (allowedIds === ENEMY_GUN_IDS) {
+    if (!remainingEnemyGuns.length) {
+      remainingEnemyGuns = ENEMY_GUN_BAG.slice();
+      for (let i = remainingEnemyGuns.length - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        [remainingEnemyGuns[i], remainingEnemyGuns[j]] = [remainingEnemyGuns[j], remainingEnemyGuns[i]];
+      }
+    }
+    id = remainingEnemyGuns.pop();
+  } else id = allowedIds[(Math.random() * allowedIds.length) | 0];
   return { id, skin: DEFAULT_SKIN[id] };
 }

@@ -1,14 +1,18 @@
 import * as THREE from 'three';
 import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
-import { ClassicSoldierRig } from './classic_soldier.js';
+import { HumanSoldierRig } from './human_soldier.js?v=enemy-loadouts-4';
 import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
-import { enemyModel } from './guncatalog.js';
+import { enemyModel } from './guncatalog.js?v=enemy-loadouts-1';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';
 import { overlapsActors, sweepActorAxis, findActorSpawn } from './actor_collision.js';
-import { ZOMBIE_RESPAWN_SECONDS, refillTwoMagazines } from './bio_rules.js';
+import { BIO_DAMAGE_MILESTONE, BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT,
+  ZOMBIE_RESPAWN_SECONDS, crossedDamageMilestones, refillTwoMagazines } from './bio_rules.js?v=bio-population-damage-1';
 import { chooseIntent, createDirector, directorProfile, humanRole, seededTraits,
   updateDirector, zombieRole, zombieTargetScore } from './bio_ai.js';
+import { BIO_HUMAN_SENSE_INTERVAL, BIO_ZOMBIE_ROUTE_INTERVAL,
+  BIO_ZOMBIE_SENSE_INTERVAL, bioAnimationInterval, bioBudgetDue,
+  bioSenseOffset } from './bio_performance.js?v=bio-lod-1';
 
 const ASSET = new URL('../assets/bio/zombie/', import.meta.url).href;
 const CLIPS = ['idle', 'run', 'attack', 'hit', 'death', 'scream'];
@@ -38,14 +42,19 @@ const ZOMBIE_SIGHT_RANGE = 34;
 const HUMAN_HEARING_RANGE = 18;
 const ZOMBIE_HEARING_RANGE = 24;
 
+const MERCENARY_NAMES = ['猎鹰', '夜莺', '冷锋', '铁锤', '红隼', '灰狼', '黑曜', '雷鹰', '苍龙', '雪豹', '山鬼', '破晓'];
+
 export class BioMode {
-  constructor({ scene, sound, onPlayerInfected, onPlayerRespawn, onRoundEnd, onZombieKilled, onChange }) {
+  constructor({ scene, camera = null, sound, onPlayerInfected, onPlayerRespawn, onRoundEnd, onZombieKilled,
+    onDamageMilestone, onChange }) {
     this.scene = scene;
+    this.camera = camera;
     this.sound = sound;
     this.onPlayerInfected = onPlayerInfected;
     this.onPlayerRespawn = onPlayerRespawn;
     this.onRoundEnd = onRoundEnd;
     this.onZombieKilled = onZombieKilled;
+    this.onDamageMilestone = onDamageMilestone;
     this.onChange = onChange;
     this.phase = 'off';
     this.playerZombie = false;
@@ -55,6 +64,7 @@ export class BioMode {
     this.timer = 0;
     this.kills = 0;
     this.infections = 0;
+    this.playerDamage = 0;
     this._playerAttack = 0;
     this.playerMaxHealth = 100;
     this.playerRespawnT = 0;
@@ -62,6 +72,17 @@ export class BioMode {
     this.director = createDirector();
     this.combatHeat = 0;
     this.playerNoise = null;
+    this._viewFrustum = new THREE.Frustum();
+    this._viewProjection = new THREE.Matrix4();
+    this._viewSphere = new THREE.Sphere(new THREE.Vector3(), 1.35);
+    this._viewValid = false;
+    this._localColliderCache = new Map();
+    this.performance = this._newPerformanceStats();
+  }
+
+  _newPerformanceStats() {
+    return { senseRefreshes: 0, lineOfSightRays: 0, navigationRefreshes: 0,
+      animationUpdates: 0, animationSkips: 0, colliderCandidates: 0 };
   }
 
   async load() {
@@ -172,6 +193,10 @@ export class BioMode {
     this.director = createDirector();
     this.combatHeat = 0;
     this.playerNoise = null;
+    this.playerDamage = 0;
+    this._viewValid = false;
+    this._localColliderCache.clear();
+    this.performance = this._newPerformanceStats();
     this.onChange?.();
   }
 
@@ -183,18 +208,18 @@ export class BioMode {
     this.timer = PREP;
     this.kills = this.infections = 0;
     const spawns = map.bio?.humans || map.spawns.player;
-    for (let i = 0; i < Math.min(5, spawns.length); i++) {
+    for (let i = 0; i < Math.min(BIO_NPC_COUNT, spawns.length); i++) {
       const [x, y, z] = spawns[i];
       const spot = this._findSpawn(x, y, z);
       if (!spot) continue;
       const group = new THREE.Group();
-      const rig = new ClassicSoldierRig(enemyModel('m4'));
+      const rig = new HumanSoldierRig(enemyModel('m4'));
       group.add(rig.root);
       group.position.fromArray(spot);
       group.rotation.y = Math.PI;
       this.scene.add(group);
       this.humans.push({ group, rig, alive: true, infected: false,
-        name: ['猎鹰', '夜莺', '冷锋', '铁锤', '红隼'][i], shotCd: .3 + i * .23,
+        name: MERCENARY_NAMES[i % MERCENARY_NAMES.length], shotCd: .3 + i * .23,
         hold: i % (map.bio?.holdPoints?.length || 1), panic: 0, hp: 100,
         ammo: HUMAN_MAG_SIZE, reserve: HUMAN_INITIAL_RESERVE, reloadT: 0,
         routeT: 0, routeX: 0, routeZ: 0, moveX: 0, moveZ: 0,
@@ -203,7 +228,10 @@ export class BioMode {
         traits: seededTraits(i, 'human'), role: 'anchor', intent: 'hold', intentT: 0,
         decisionT: .12 + i * .035, acquireT: 0, burstLeft: 2 + i % 3,
         shotNoiseT: 0, sharedThreat: null, sharedThreatT: 0,
-        searchSide: i % 2 ? 1 : -1, threatVisible: false });
+        searchSide: i % 2 ? 1 : -1, threatVisible: false,
+        senseT: bioSenseOffset(i, Math.min(BIO_NPC_COUNT, spawns.length), BIO_HUMAN_SENSE_INTERVAL),
+        senseCache: [], animLodT: 0,
+        animMotion: { moved: 0, x: 0, z: 0, aimed: false } });
     }
     this.onChange?.();
   }
@@ -239,6 +267,9 @@ export class BioMode {
       traits: seededTraits(this.zombies.length, 'zombie'),
       decisionT: 0, commitT: 0, heardTarget: false, visibleTarget: false,
       flankSide: this.zombies.length % 2 ? 1 : -1, searchAngle: 0,
+      senseT: bioSenseOffset(this.zombies.length, BIO_NPC_COUNT, BIO_ZOMBIE_SENSE_INTERVAL),
+      senseCache: new Map(), routeT: 0, routeX: 0, routeZ: 0,
+      routeGoalX: NaN, routeGoalZ: NaN, animLodT: 0,
       mixer: new THREE.AnimationMixer(model), active: null,
       actions: new Map() };
     for (const [key, clip] of (hazmat ? this.hazmatClips : this.clips))
@@ -332,6 +363,66 @@ export class BioMode {
       ...(this.playerRef && !this.playerOut ? [this.playerRef] : [])];
   }
 
+  _updateViewFrustum() {
+    const camera = this.camera;
+    if (!camera) { this._viewValid = false; return; }
+    // main.js 已经写好本帧相机旋转；这里仅刷新矩阵用于 CPU 侧视锥判断。
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+    this._viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this._viewFrustum.setFromProjectionMatrix(this._viewProjection);
+    this._viewValid = true;
+  }
+
+  _actorInView(actor) {
+    if (!this._viewValid) return true;
+    const p = actor.group?.position || actor.pos;
+    if (!p) return true;
+    this._viewSphere.center.set(p.x, p.y + .95, p.z);
+    return this._viewFrustum.intersectsSphere(this._viewSphere);
+  }
+
+  _animationStep(actor, dt) {
+    actor.animLodT = (actor.animLodT || 0) + dt;
+    const p = actor.group?.position || actor.pos;
+    const player = this.playerRef?.pos || this.playerRef;
+    const distance = p && player ? Math.hypot(p.x - player.x, p.z - player.z) : 0;
+    const interval = bioAnimationInterval(this._actorInView(actor), distance);
+    if (!bioBudgetDue(actor.animLodT, interval)) {
+      this.performance.animationSkips++;
+      return null;
+    }
+    const elapsed = Math.min(.25, actor.animLodT);
+    actor.animLodT = 0;
+    this.performance.animationUpdates++;
+    return elapsed;
+  }
+
+  // GoldSrc 图有上千个凸叶，但 GroundNavigation 已按网格建立了局部碰撞表。
+  // 人物每个轴只检查脚下单元附近的几十个候选，判定公式本身完全不变。
+  _nearbyColliders(x, z) {
+    const navigation = this.map?.navigation;
+    if (!navigation?.local || typeof navigation.cell !== 'function') return this.map?.colliders || [];
+    const cell = navigation.cell(x, z);
+    if (cell < 0) return [];
+    const cached = this._localColliderCache.get(cell);
+    if (cached) return cached;
+    // local[cell] 的生成余量是 .6m；人物半径 .45m 再加半个网格可能略超出它。
+    // 合并 3×3 单元可覆盖边界，同时仍远小于整张地图的 1541 个凸叶。
+    const out = [], seen = new Set();
+    const cx = cell % navigation.w, cz = Math.floor(cell / navigation.w);
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = cx + dx, nz = cz + dz;
+      if (nx < 0 || nx >= navigation.w || nz < 0 || nz >= navigation.h) continue;
+      for (const collider of navigation.local[nz * navigation.w + nx] || []) {
+        if (seen.has(collider)) continue;
+        seen.add(collider); out.push(collider);
+      }
+    }
+    this._localColliderCache.set(cell, out);
+    return out;
+  }
+
   _findSpawn(x, y, z) {
     const valid = (px, py, pz) => this._canMove(px, pz, py, .45, null, false) &&
       Math.abs((this.map.navigation?.heightAt(px, pz, py) ?? py) - py) < .7;
@@ -341,8 +432,11 @@ export class BioMode {
   _canMove(x, z, y, radius = .45, self = null, checkActors = true) {
     const b = this.map.bounds;
     if (Math.abs(x) > b.hw - radius || Math.abs(z) > b.hl - radius) return false;
-    return !this.map.colliders.some(c => intersectsBrush(c, x, z, y, radius,
-      this.map.stepHeight ?? .5, 1.78, this.map.colliders)) &&
+    const colliders = this._nearbyColliders(x, z);
+    this.performance.colliderCandidates += colliders.length;
+    return !colliders.some(c => intersectsBrush(c, x, z, y, radius,
+      this.map.stepHeight ?? .5, 1.78, colliders,
+      this.map.navigation?.surfaceAt, this.map.navigation?.blockerAt)) &&
       (!checkActors || !overlapsActors(x, y, z, this._bodies(), self, radius));
   }
 
@@ -384,10 +478,12 @@ export class BioMode {
     if (a.airborne || a.jumpCooldown > 0) return false;
     const p = a.group.position;
     const x = p.x + vx * .7, z = p.z + vz * .7;
-    const obstacle = this.map.colliders.find(c =>
+    const colliders = this._nearbyColliders(x, z);
+    this.performance.colliderCandidates += colliders.length;
+    const obstacle = colliders.find(c =>
       c.h > p.y + (this.map.stepHeight ?? .5) && c.h <= p.y + LEAP_HEIGHT - .08 &&
       intersectsBrush(c, x, z, p.y, .45, this.map.stepHeight ?? .5, 1.78,
-        this.map.colliders));
+        colliders, this.map.navigation?.surfaceAt, this.map.navigation?.blockerAt));
     if (!obstacle) return false;
     // A jump needs room to clear the far side; don't hop in place against a wall.
     const beyond = Math.max(1.7, Math.min(3.7, Math.abs(vx) * obstacle.hx * 2 + Math.abs(vz) * obstacle.hz * 2 + 1));
@@ -473,6 +569,8 @@ export class BioMode {
     z.pursuitKey = null; z.pursuitMemory = 0; z.lastKnown = null;
     z.decisionT = z.commitT = 0;
     z.heardTarget = z.visibleTarget = false;
+    z.senseT = 0; z.senseCache = new Map();
+    z.routeT = 0; z.routeGoalX = z.routeGoalZ = NaN; z.animLodT = 0;
     z.role = zombieRole(this.zombies.indexOf(z), this.director.serial);
     for (const mesh of z.meshes) mesh.userData.enemy = z;
     this._play(z, 'idle');
@@ -514,26 +612,46 @@ export class BioMode {
   }
 
   _chooseMother(player) {
-    const options = this.humans.filter(h => h.alive);
-    // Include the player in the draw, as in classic infection mode. There is
-    // always at least one AI mercenary left to hunt if the player is chosen.
-    const roll = Math.floor(Math.random() * (options.length + 1));
-    if (roll === options.length) {
-      this.playerZombie = true;
-      this.playerMaxHealth = player.hp = ZOMBIE_HEALTH;
-      this.onPlayerInfected?.(true);
-      this.sound?.bio('mother');
-    } else {
-      const h = options[roll];
+    // 玩家与全部佣兵一起进入无放回抽选，一局固定产生 3 名初始幽灵。
+    // 玩家被抽中时只占一个名额，其余名额由 NPC 补齐。
+    const candidates = [
+      ...this.humans.filter(h => h.alive).map(h => ({ human: h })),
+      { player: true },
+    ];
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    for (const chosen of candidates.slice(0, Math.min(BIO_INITIAL_ZOMBIES, candidates.length))) {
+      if (chosen.player) {
+        this.playerZombie = true;
+        this.playerMaxHealth = player.hp = ZOMBIE_HEALTH;
+        this.onPlayerInfected?.(true);
+        continue;
+      }
+      const h = chosen.human;
       h.alive = false;
       this.scene.remove(h.group);
       const p = h.group.position;
       this.spawnZombie(p.x, p.y, p.z, true, h.name);
-      this.sound?.bio('mother', p.x, p.y, p.z);
     }
+    // 初始三变只播一次全局警报，避免同一帧叠三份母体音效造成爆音。
+    this.sound?.bio('mother');
     this.phase = 'live';
     this.timer = ROUND;
     this.onChange?.();
+  }
+
+  recordPlayerDamage(amount) {
+    if (this.phase !== 'live' || this.playerZombie || this.playerOut || !(amount > 0)) return [];
+    const previous = this.playerDamage;
+    this.playerDamage += amount;
+    const crossed = crossedDamageMilestones(previous, this.playerDamage, BIO_DAMAGE_MILESTONE);
+    for (const threshold of crossed) this.onDamageMilestone?.({
+      threshold, total: this.playerDamage, tier: threshold / BIO_DAMAGE_MILESTONE,
+    });
+    this.onChange?.();
+    return crossed;
   }
 
   attackAsZombie(player) {
@@ -560,6 +678,7 @@ export class BioMode {
     const dir = new THREE.Vector3(b.x - a.x, (b.y || 0) - (a.y || 0), b.z - a.z);
     const dist = dir.length();
     if (dist < .01) return true;
+    this.performance.lineOfSightRays++;
     const ray = new THREE.Raycaster(new THREE.Vector3(a.x, (a.y || 0) + 1.2, a.z), dir.normalize(), 0, dist);
     return !ray.intersectObjects(this.map.obstacles, false).length;
   }
@@ -646,14 +765,23 @@ export class BioMode {
   }
 
   _animateHuman(h, dt, motion, aimed) {
+    // 位置/碰撞仍逐帧；把多帧真实位移累积后再推进一次骨骼，步频不会因为 LOD 变慢。
+    const acc = h.animMotion || (h.animMotion = { moved: 0, x: 0, z: 0, aimed: false });
+    acc.moved += motion.moved;
+    acc.x += motion.x;
+    acc.z += motion.z;
+    acc.aimed = aimed;
+    const animDt = this._animationStep(h, dt);
+    if (animDt === null) return;
     const yaw = h.group.rotation.y;
-    const length = Math.max(motion.moved, .0001);
-    const forward = (motion.x * Math.sin(yaw) + motion.z * Math.cos(yaw)) / length;
-    const side = (motion.x * Math.cos(yaw) - motion.z * Math.sin(yaw)) / length;
-    h.rig.animate(dt, { moved: motion.moved, speed: motion.speed,
-      aim: aimed ? 1 : .48, moveForward: forward, moveSide: side,
+    const length = Math.max(acc.moved, .0001);
+    const forward = (acc.x * Math.sin(yaw) + acc.z * Math.cos(yaw)) / length;
+    const side = (acc.x * Math.cos(yaw) - acc.z * Math.sin(yaw)) / length;
+    h.rig.animate(animDt, { moved: acc.moved, speed: acc.moved / Math.max(animDt, .001),
+      aim: acc.aimed ? 1 : .48, moveForward: forward, moveSide: side,
       reload: h.reloadT > 0 ? 1 - h.reloadT / 2.5 : 0,
       turnRate: h.turnRate || 0 });
+    acc.moved = acc.x = acc.z = 0;
   }
 
   _canSee(group, target, range, cone = -.18) {
@@ -705,10 +833,34 @@ export class BioMode {
     return [q.x + dx / len * 3.2, q.y, q.z + dz / len * 3.2];
   }
 
+  _zombieRoute(z, target, dt, directX, directZ) {
+    const navigation = this.map.navigation;
+    if (!navigation) return [directX, directZ];
+    const movedGoal = !Number.isFinite(z.routeGoalX) ||
+      Math.hypot(target.x - z.routeGoalX, target.z - z.routeGoalZ) > 2.4;
+    z.routeT = (z.routeT || 0) - dt;
+    if (movedGoal || z.routeT <= 0) {
+      let route = null;
+      if (!navigation.clear(z.group.position, target)) {
+        navigation.update(target);
+        route = navigation.steer(z.group.position, target);
+      }
+      z.routeX = route?.x ?? directX;
+      z.routeZ = route?.z ?? directZ;
+      z.routeGoalX = target.x;
+      z.routeGoalZ = target.z;
+      z.routeT = BIO_ZOMBIE_ROUTE_INTERVAL +
+        (Math.max(0, this.zombies.indexOf(z)) % 4) * .015;
+      this.performance.navigationRefreshes++;
+    }
+    return [z.routeX, z.routeZ];
+  }
+
   update(dt, player, elapsed = dt) {
     if (this.phase === 'off' || this.phase === 'ended') return;
     const countdownDt = Number.isFinite(elapsed) && elapsed > 0 ? elapsed : dt;
     this.playerRef = player;
+    this._updateViewFrustum();
     this.aiTime += dt;
     this.combatHeat = Math.max(0, this.combatHeat - dt * .075);
     if (this.playerNoise) {
@@ -764,23 +916,37 @@ export class BioMode {
     const profile = directorProfile(this.director);
     const zombieSenses = new Map();
     const packSightings = [];
+    const targetByKey = new Map(targets.map(target => [target.key, target]));
     for (const z of this.zombies) {
       if (z.dead) continue;
-      const sensed = new Map();
-      for (const target of targets) {
-        const d = Math.hypot(target.pos.x-z.group.position.x,target.pos.z-z.group.position.z);
-        const visible = this._canSee(z.group, target.pos,
-          ZOMBIE_SIGHT_RANGE * z.traits.awareness, -.26);
-        const noise = target.human ? target.human.shotNoiseT > 0 :
-          !!this.playerNoise && this.playerNoise.time > 0;
-        const radius = target.human ? ZOMBIE_HEARING_RANGE : (this.playerNoise?.radius || 0);
-        const heard = noise && d < radius && Math.abs(target.pos.y-z.group.position.y) < 5;
-        if (visible || heard) {
-          const perceived = visible ? target.pos : target.human ? target.pos : this.playerNoise;
-          const pos = { x:perceived.x,y:perceived.y,z:perceived.z };
-          sensed.set(target.key, { visible, heard, distance: d, pos });
-          packSightings.push({ target, pos, source: z.group.position, visible, heard });
+      z.senseT = (z.senseT || 0) - dt;
+      if (z.senseT <= 0) {
+        const refreshed = new Map();
+        for (const target of targets) {
+          const d = Math.hypot(target.pos.x-z.group.position.x,target.pos.z-z.group.position.z);
+          const visible = this._canSee(z.group, target.pos,
+            ZOMBIE_SIGHT_RANGE * z.traits.awareness, -.26);
+          const noise = target.human ? target.human.shotNoiseT > 0 :
+            !!this.playerNoise && this.playerNoise.time > 0;
+          const radius = target.human ? ZOMBIE_HEARING_RANGE : (this.playerNoise?.radius || 0);
+          const heard = noise && d < radius && Math.abs(target.pos.y-z.group.position.y) < 5;
+          if (visible || heard) {
+            const perceived = visible ? target.pos : target.human ? target.pos : this.playerNoise;
+            refreshed.set(target.key, { visible, heard, distance: d,
+              pos: { x:perceived.x,y:perceived.y,z:perceived.z } });
+          }
         }
+        z.senseCache = refreshed;
+        z.senseT = BIO_ZOMBIE_SENSE_INTERVAL;
+        this.performance.senseRefreshes++;
+      }
+      const sensed = new Map();
+      for (const [key, entry] of z.senseCache || []) {
+        const target = targetByKey.get(key);
+        if (!target) continue;
+        sensed.set(key, entry);
+        packSightings.push({ target, pos: entry.pos, source: z.group.position,
+          visible: entry.visible, heard: entry.heard });
       }
       zombieSenses.set(z, sensed);
     }
@@ -791,7 +957,8 @@ export class BioMode {
         z.hitAction?.setEffectiveWeight(.42 * Math.pow(z.hitT / HIT_REACT_TIME, .75));
         if (z.hitT === 0) z.hitAction?.stop();
       }
-      z.mixer.update(dt);
+      const zombieAnimDt = this._animationStep(z, dt);
+      if (zombieAnimDt !== null) z.mixer.update(zombieAnimDt);
       if (z.dead) {
         z.deathT -= dt;
         z.respawnT = Math.max(0, z.respawnT - countdownDt);
@@ -934,11 +1101,8 @@ export class BioMode {
         // pathfinder route stalls at a crate, the same leap is a recovery move.
         const raised = q.y > p.y + .55 && q.y - p.y < LEAP_HEIGHT;
         const canLeap = raised && this._tryLeap(z, directX, directZ);
-        if (!z.airborne && !canLeap && this.map.navigation && !this.map.navigation.clear(p, q)) {
-          this.map.navigation.update(q);
-          const steer = this.map.navigation.steer(p, q);
-          if (steer) { vx = steer.x; vz = steer.z; }
-        }
+        if (!z.airborne && !canLeap && this.map.navigation)
+          [vx, vz] = this._zombieRoute(z, q, dt, vx, vz);
         const phasePace = chosen.patrol ? .76 : .86 + profile.aggression * .14;
         const speed = ZOMBIE_RUN_SPEED * phasePace * (z.stagger > 0 ? HIT_MOVE_SCALE : 1);
         // Turn first, then accelerate. The old controller translated directly
@@ -982,32 +1146,41 @@ export class BioMode {
     }
     const humanSenses = new Map();
     const squadSightings = [];
+    const liveZombies = new Set(this.zombies.filter(z => !z.dead));
     for (const h of aliveHumans) {
-      const sensed = [];
-      for (const z of this.zombies) {
-        if (z.dead) continue;
-        const q = z.group.position;
-        const d = Math.hypot(q.x-h.group.position.x,q.z-h.group.position.z);
-        const visible = this._canSee(h.group,q,HUMAN_SIGHT_RANGE,-.22);
-        const noisy = z.attackT > 0 || Math.hypot(z.moveX,z.moveZ) > 2.4 || z.hitT > 0;
-        const heard = noisy && d < (z.attackT > 0 ? HUMAN_HEARING_RANGE : 11.5);
-        if (visible || heard) {
-          const entry = { actor:z,pos:q,visible,heard,isPlayer:false,distance:d };
-          sensed.push(entry);
-          if (visible) squadSightings.push({ source:h.group.position,entry });
+      h.senseT = (h.senseT || 0) - dt;
+      if (h.senseT <= 0) {
+        const refreshed = [];
+        for (const z of this.zombies) {
+          if (z.dead) continue;
+          const q = z.group.position;
+          const d = Math.hypot(q.x-h.group.position.x,q.z-h.group.position.z);
+          const visible = this._canSee(h.group,q,HUMAN_SIGHT_RANGE,-.22);
+          const noisy = z.attackT > 0 || Math.hypot(z.moveX,z.moveZ) > 2.4 || z.hitT > 0;
+          const heard = noisy && d < (z.attackT > 0 ? HUMAN_HEARING_RANGE : 11.5);
+          if (visible || heard) refreshed.push({ actor:z,
+            pos:{x:q.x,y:q.y,z:q.z},visible,heard,isPlayer:false,distance:d });
         }
+        if (this.playerZombie && !this.playerOut) {
+          const q = player.pos;
+          const d = Math.hypot(q.x-h.group.position.x,q.z-h.group.position.z);
+          const visible = this._canSee(h.group,q,HUMAN_SIGHT_RANGE,-.22);
+          const noisy = this._playerAttack > 0 || Math.hypot(player.vel?.x || 0,player.vel?.z || 0) > 3.2;
+          const heard = noisy && d < (this._playerAttack > 0 ? HUMAN_HEARING_RANGE : 10);
+          if (visible || heard) refreshed.push({ actor:null,
+            pos:{x:q.x,y:q.y,z:q.z},visible,heard,isPlayer:true,distance:d });
+        }
+        h.senseCache = refreshed;
+        h.senseT = BIO_HUMAN_SENSE_INTERVAL;
+        this.performance.senseRefreshes++;
       }
-      if (this.playerZombie && !this.playerOut) {
-        const q = player.pos;
-        const d = Math.hypot(q.x-h.group.position.x,q.z-h.group.position.z);
-        const visible = this._canSee(h.group,q,HUMAN_SIGHT_RANGE,-.22);
-        const noisy = this._playerAttack > 0 || Math.hypot(player.vel?.x || 0,player.vel?.z || 0) > 3.2;
-        const heard = noisy && d < (this._playerAttack > 0 ? HUMAN_HEARING_RANGE : 10);
-        if (visible || heard) {
-          const entry = { actor:null,pos:q,visible,heard,isPlayer:true,distance:d };
-          sensed.push(entry);
-          if (visible) squadSightings.push({ source:h.group.position,entry });
-        }
+      // 删除最多保留一个感知周期的死亡/已感染目标；缓存位置本身刻意保持快照，
+      // 这就是 120～140ms 的真人反应延迟，而不是读取全图实时坐标。
+      const sensed = (h.senseCache || []).filter(entry =>
+        entry.isPlayer ? this.playerZombie && !this.playerOut : liveZombies.has(entry.actor));
+      h.senseCache = sensed;
+      for (const entry of sensed) {
+        if (entry.visible) squadSightings.push({ source:h.group.position,entry });
       }
       humanSenses.set(h,sensed);
     }
@@ -1149,12 +1322,24 @@ export class BioMode {
     this.onRoundEnd?.(winner);
   }
 
+  performanceStats() {
+    const totalActors = this.humans.filter(h => h.alive).length +
+      this.zombies.filter(z => !z.dead).length;
+    return { ...this.performance, totalActors,
+      animationSkipRate: this.performance.animationUpdates + this.performance.animationSkips > 0
+        ? this.performance.animationSkips /
+          (this.performance.animationUpdates + this.performance.animationSkips) : 0 };
+  }
+
   status() {
     return { phase: this.phase, time: this.timer, humans: this.humans.filter(h => h.alive).length +
       (!this.playerZombie && !this.playerOut ? 1 : 0),
       zombies: this.zombies.length + (this.playerZombie ? 1 : 0),
       playerZombie: this.playerZombie, kills: this.kills, infections: this.infections,
+      playerDamage: this.playerDamage,
+      nextDamageMilestone: (Math.floor(this.playerDamage / BIO_DAMAGE_MILESTONE) + 1) * BIO_DAMAGE_MILESTONE,
       playerRespawnT: this.playerRespawnT,
-      directorPhase: this.director.phase, directorIntensity: this.director.intensity };
+      directorPhase: this.director.phase, directorIntensity: this.director.intensity,
+      performance: this.performanceStats() };
   }
 }

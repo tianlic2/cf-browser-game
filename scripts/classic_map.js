@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { waterMaps } from './map.js';
+import { configureMapTexture } from './map_texture_quality.js';
 
 const BASE = new URL('../assets/classic/', import.meta.url).href;
 // Imported Transport Ship uses these materials on the actual wooden crate faces.
@@ -35,9 +36,8 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   let texturesDone=0;
   const textureReady=(count=1)=>onProgress(.28+.72*(texturesDone+=count)/textureCount);
   const texture=async(path,repeat=false) => {
-    const t=await loader.loadAsync(BASE+path);t.colorSpace=THREE.SRGBColorSpace;
-    if (repeat) t.wrapS=t.wrapT=THREE.RepeatWrapping;
-    t.anisotropy=8;textureReady();return t;
+    const t=configureMapTexture(await loader.loadAsync(BASE+path), !repeat);
+    textureReady();return t;
   };
   const [light,sky,textures]=await Promise.all([
     texture('transport/lightmap.png'),

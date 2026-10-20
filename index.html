@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="description" content="穿越火线风格的浏览器第一人称射击游戏，基于 HTML + Three.js" />
-    <title>战术突击 · FPS 第一人称射击</title>
+    <title>CrossFire</title>
     <!-- 内联 SVG 准星图标。用 data URI 是为了免掉一次 /favicon.ico 请求
          （没有它，每次打开控制台都会挂一条 404，公开站点上很显眼）。 -->
     <link
@@ -14,8 +14,8 @@
     <!-- 路径一律用「相对当前文档」的写法：本地 http.server 与 GitHub Pages 的项目页
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
-    <link rel="stylesheet" href="./styles/game.css?v=training-mode-1" />
-    <link rel="stylesheet" href="./styles/boot.css" />
+    <link rel="stylesheet" href="./styles/game.css?v=modern-shell-chat-layout-1" />
+    <link rel="stylesheet" href="./styles/boot.css?v=multi-map-loading-1" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
   </head>
@@ -23,13 +23,13 @@
     <div id="bootScreen" class="boot-screen" aria-label="游戏资源加载中">
       <div class="boot-grid" aria-hidden="true"></div>
       <div class="boot-frame">
-        <div class="boot-topline"><span>TACTICAL STRIKE // CF CLASSIC</span><span>LOCAL OPERATIONS SYSTEM</span></div>
+        <div class="boot-topline"><span>CrossFire // DEPLOYMENT</span><span>LOCAL OPERATIONS SYSTEM</span></div>
         <div class="boot-main">
           <div class="boot-emblem" aria-hidden="true"><span class="boot-emblem-core">CF</span></div>
           <div class="boot-copy">
-            <p class="boot-kicker">MULTI-ARENA · TACTICAL / INFECTION</p>
-            <h1>战术<span>突击</span></h1>
-            <p class="boot-subtitle">正在部署作战资源</p>
+            <p class="boot-kicker">MULTI-MAP DEPLOYMENT</p>
+            <h1>正在进入战场</h1>
+            <p class="boot-subtitle">团队竞技 · 经典生化 · 训练模式</p>
           </div>
           <div class="boot-percent" id="bootPercent">0<span>%</span></div>
         </div>
@@ -42,9 +42,20 @@
         <div class="boot-steps" aria-hidden="true">
           <span data-boot-step="map">01 / 地图</span><span data-boot-step="actors">02 / 人物与武器</span><span data-boot-step="audio">03 / 音效</span><span data-boot-step="ready">04 / 就绪</span>
         </div>
-        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>四场景 · 双模式</span></div>
+        <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>多地图 · 三模式</span></div>
       </div>
       <noscript>需要启用 JavaScript 才能加载游戏。</noscript>
+    </div>
+
+    <div id="nicknameGate" class="nickname-gate hidden" role="dialog" aria-modal="true" aria-labelledby="nicknameTitle">
+      <section class="nickname-card">
+        <span class="nickname-kicker">WELCOME TO CrossFire</span>
+        <h2 id="nicknameTitle">设置游戏昵称</h2>
+        <p>昵称只保存在本机，用于大厅、战绩与训练记录。</p>
+        <label for="nicknameInput">玩家昵称</label>
+        <input id="nicknameInput" type="text" maxlength="16" autocomplete="off" spellcheck="false" value="新兵" />
+        <button id="nicknameEnter" type="button">进入大厅</button>
+      </section>
     </div>
     <!-- 3D 渲染画布 -->
     <div id="viewport"></div>
@@ -69,6 +80,15 @@
 
     <!-- HUD 界面 -->
     <div id="hud" class="hud hidden">
+      <div id="hudUtility" class="hud-utility" role="group" aria-label="对局快捷操作">
+        <span class="hud-utility-hint">Esc 显示鼠标</span>
+        <button id="hudMuteBtn" type="button" aria-label="静音" aria-pressed="false" title="静音">◖</button>
+        <button id="hudFullscreenBtn" type="button" aria-label="切换全屏" aria-pressed="false" title="切换全屏">⛶</button>
+        <button id="hudPauseBtn" type="button" aria-label="暂停游戏" aria-pressed="false" title="暂停游戏">Ⅱ</button>
+      </div>
+      <div class="hud-session" id="hudSession">本地 · 单人对局</div>
+      <button class="hud-backpack-action" id="hudBackpackBtn" type="button"><kbd>B</kbd><span>背包 / 仓库</span></button>
+      <button class="hud-chat-action" id="hudChatBtn" type="button"><kbd>↵</kbd><span>Enter 聊天</span></button>
       <div class="crosshair" id="crosshair">
         <span class="x x-top"></span>
         <span class="x x-bottom"></span>
@@ -165,7 +185,7 @@
           </g>
         </svg>
         <div class="hud-vitals">
-          <span class="hud-ace" id="aceBadge" aria-label="当前击杀领先">ACE</span>
+          <span class="hud-ace" id="aceBadge" aria-label="当前击杀领先"><svg class="hud-ace-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.2c.72 5.55 4.53 9.36 10.08 10.08C16.53 12 12.72 15.81 12 21.36 11.28 15.81 7.47 12 1.92 11.28 7.47 10.56 11.28 6.75 12 1.2Z"/></svg><span>ACE</span></span>
           <div class="vital-row armor-row"><span class="vital-label">AC</span><span class="vital-num" id="armorVal">0</span></div>
           <div class="vital-track armor-track" aria-hidden="true"><i></i></div>
           <div class="vital-row hp-row"><span class="vital-label">HP</span><span class="hp-num" id="hpVal">100</span></div>
@@ -197,17 +217,37 @@
       <!-- 提示：换弹中 / 低血量 -->
       <div class="hud-toast" id="toast"></div>
 
-      <!-- 阵亡界面：击杀者 + 武器 + 复活倒计时（死亡视角 3 秒，随后复活回出生点） -->
+      <!-- 阵亡回顾：镜头追踪击杀者，并显示其状态、武器、距离与复活倒计时。 -->
       <div id="deathScreen" class="death hidden">
         <div class="death-vig"></div>
-        <div class="death-body">
-          <div class="death-title">你被击杀</div>
-          <div class="death-line">
-            <span class="death-k" id="deathKiller">敌人</span>
-            <span class="death-w" id="deathWeapon">步枪</span>
+        <div id="deathKillerMarker" class="death-enemy-marker hidden" aria-hidden="true">
+          <span>击杀者</span>
+          <b id="deathMarkerName">敌人</b>
+          <em id="deathMarkerDistance">0.0 m</em>
+        </div>
+        <div class="death-body death-review">
+          <div class="death-review-head">
+            <span class="death-title">你已阵亡 · 追踪击杀者</span>
+            <b id="deathCountdown">3.0 秒后复活</b>
+          </div>
+          <div class="death-killer-card">
+            <div class="death-avatar" aria-hidden="true"><span>BL</span></div>
+            <div class="death-killer-copy">
+              <small>击杀者</small>
+              <strong class="death-k" id="deathKiller">敌人</strong>
+              <span id="deathKillerHealth">剩余生命 100</span>
+            </div>
+          </div>
+          <div class="death-weapon-card">
+            <div class="death-weapon-icon" id="deathWeaponIcon" aria-hidden="true"></div>
+            <div class="death-weapon-copy">
+              <small>使用武器</small>
+              <strong class="death-w" id="deathWeapon">步枪</strong>
+              <span id="deathWeaponMeta">距离 0.0 米</span>
+            </div>
           </div>
           <div class="death-bar"><i id="deathFill"></i></div>
-          <div class="death-tip">正在返回复活点…</div>
+          <div class="death-tip">镜头正在追踪击杀者</div>
         </div>
       </div>
 
@@ -220,7 +260,7 @@
               <span class="sb-tscore" id="sbBlueScore">0</span>
             </div>
             <div class="sb-mid">
-              <div class="sb-title">战术突击</div>
+              <div class="sb-title">CrossFire</div>
               <div class="sb-sub">TRANSPORT SHIP · 团队竞技</div>
               <div class="sb-target">目标击杀 <b id="sbLimit">40</b></div>
             </div>
@@ -253,7 +293,7 @@
     <!-- Esc 对局菜单独立于大厅和 HUD，失去指针锁后仍可操作。 -->
     <div id="gameMenu" class="game-menu hidden" role="dialog" aria-modal="true" aria-labelledby="gameMenuTitle" aria-describedby="gameMenuStatus">
       <section class="game-menu-panel">
-        <header><span>TACTICAL ASSAULT</span><h2 id="gameMenuTitle">游戏菜单</h2></header>
+        <header><span>CrossFire</span><h2 id="gameMenuTitle">游戏菜单</h2></header>
         <p id="gameMenuStatus" role="status">对局进行中</p>
         <div id="gameMenuHome">
         <div class="game-menu-actions">
@@ -324,12 +364,24 @@
     <div id="menu" class="menu lobby" inert>
       <div class="lobby-shell">
       <header class="lobby-top">
-        <div class="lobby-id"><h1 class="lobby-title">战术突击</h1><span class="lobby-brand">游戏房间</span></div>
-        <div class="lobby-chips"><span class="lobby-chip" id="lobbyMapChip">运输船 · 团队竞技</span><span class="lobby-chip" id="lobbyMatchChip">8 人 · 普通</span></div>
+        <div class="lobby-id"><span class="lobby-logo" aria-hidden="true">CF</span><div><h1 class="lobby-title">CrossFire</h1><span class="lobby-brand">现代战术大厅</span></div></div>
+        <nav class="lobby-rail" id="lobbyTabs" role="tablist" aria-label="大厅导航">
+          <button type="button" class="lobby-tab active" data-tab="play" role="tab" aria-selected="true">大厅</button>
+          <button type="button" class="lobby-tab" data-tab="storage" role="tab" aria-selected="false">仓库</button>
+          <button type="button" class="lobby-tab" data-tab="manual" role="tab" aria-selected="false">作战手册</button>
+          <button type="button" class="lobby-tab" data-tab="arsenal" role="tab" aria-selected="false">武器图鉴</button>
+        </nav>
+        <div class="lobby-profile"><span class="lobby-credit">CF点 <b>20,000</b></span><span class="lobby-rank" aria-hidden="true">R</span><span id="lobbyNickname">新兵</span></div>
       </header>
       <div class="lobby-body">
         <section class="lobby-content">
           <div class="lobby-pane" data-pane="play">
+            <div class="modern-room-head">
+              <div><span>TRANSPORT SHIP / LOCAL MATCH</span><h2>匹配对局</h2><p><i></i> 本地房间已就绪 · 低延迟</p></div>
+              <div class="lobby-chips"><span class="lobby-chip" id="lobbyMapChip">运输船 · 团队竞技</span><span class="lobby-chip" id="lobbyMatchChip">8 人 · 普通</span></div>
+            </div>
+            <div class="modern-room-grid">
+              <div class="modern-room-main">
             <div class="room-teams-heading">
               <div class="room-team-title room-bl"><img src="./assets/ui/room-bl.svg" alt="" /><h2>潜伏者</h2><small>BLACK LIST</small></div>
               <span class="room-versus" aria-hidden="true">VS</span>
@@ -342,9 +394,10 @@
             <div class="room-map-select" id="mapSelect" aria-label="选择对战地图">
               <span class="room-map-caption">对战地图 <small>SELECT MAP</small></span>
               <button type="button" class="room-map-option active" data-map="transport" aria-pressed="true"><b>运输船</b><small>集装箱货轮 · 经典对抗</small></button>
-              <button type="button" class="room-map-option" data-map="prison" aria-pressed="false"><b>守望之城</b><small>双倍战场 · 狙击与近战</small></button>
+              <button type="button" class="room-map-option" data-map="prison" aria-pressed="false"><b>守望之城</b><small>源地图尺寸 · 狙击与近战</small></button>
               <button type="button" class="room-map-option" data-map="survivor" aria-pressed="false"><b>雪地求生</b><small>极地基地 · 团队竞技</small></button>
               <button type="button" class="room-map-option" data-map="blacktown" aria-pressed="false"><b>黑色城镇</b><small>巷战城区 · 团队竞技</small></button>
+              <button type="button" class="room-map-option" data-map="lingyin" aria-pressed="false"><b>灵隐寺</b><small>古寺庭院 · 团队竞技</small></button>
               <button type="button" class="room-map-option" data-map="bio" aria-pressed="false"><b>黑色城镇（生化）</b><small>雨夜感染 · 废墟防守</small></button>
             </div>
             <div class="bio-mode-select" id="modeSelect" aria-label="选择游戏模式">
@@ -353,6 +406,14 @@
               <button type="button" data-mode="training" aria-pressed="false">训练模式</button>
             </div>
             <div class="room-match-info"><span>地图 <b id="lobbyMapName">运输船</b></span><span id="lobbyMode">团队竞技</span><span id="lobbyGoal"><b id="lobbyLimit">40</b> 杀</span><span><b id="lobbyTime">10:00</b></span><span class="room-local">本地训练房间</span></div>
+              </div>
+              <aside class="modern-room-side">
+                <header><span>PLAYER LIST</span><b>房间成员</b></header>
+                <div class="modern-player-card"><span class="modern-avatar">R</span><div><b id="modernPlayerName">新兵</b><small>房主 · 准备</small></div><em>你</em></div>
+                <p>当前为本地单人房间。真人联机将在后端阶段接入；本地电脑不占真人席位。</p>
+                <div class="modern-room-state"><span>服务器</span><b>LOCAL</b><span>状态</span><b class="is-ready">READY</b></div>
+              </aside>
+            </div>
             <div class="room-actions">
               <div class="menu-setup">
                 <div class="ml-row"><span class="ml-label">电脑人数</span><div class="ml-stepper"><button class="ml-step-btn" id="enemyMinus" aria-label="减少敌人数量">−</button><span class="ml-step-val" id="enemyCountVal">8</span><button class="ml-step-btn" id="enemyPlus" aria-label="增加敌人数量">+</button></div></div>
@@ -365,12 +426,6 @@
           <div class="lobby-pane hidden" data-pane="arsenal"></div>
           <div class="lobby-pane hidden" data-pane="storage"></div>
         </section>
-        <nav class="lobby-rail" id="lobbyTabs" role="tablist" aria-label="大厅导航">
-          <button type="button" class="lobby-tab active" data-tab="play" role="tab" aria-selected="true">游戏房间</button>
-          <button type="button" class="lobby-tab" data-tab="manual" role="tab" aria-selected="false">作战手册</button>
-          <button type="button" class="lobby-tab" data-tab="arsenal" role="tab" aria-selected="false">武器库</button>
-          <button type="button" class="lobby-tab" data-tab="storage" role="tab" aria-selected="false">个人仓库</button>
-        </nav>
       </div>
       <footer class="room-chat">
         <div class="room-chat-log" id="roomChatLog" role="log" aria-label="房间消息">
@@ -472,6 +527,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-    <script type="module" src="./scripts/main.js?v=melee-multihit-1"></script>
+  <script type="module" src="./scripts/main.js?v=lingyin-hillside-24"></script>
   </body>
 </html>

@@ -58,7 +58,7 @@ for (const id of ['ak', 'm4', 'deagle']) {
 const fire = source.slice(source.indexOf('function fire()'), source.indexOf('// 黄金爆头'));
 assert.match(fire, /bulletImpactSequence\(hits,\s*\{[\s\S]*penetratesEnemies:\s*!!def\.penetratesEnemies/,
   'the live firing path uses the weapon penetration options');
-assert.match(fire, /for \(const h of impacts\)[\s\S]*enemy\.takeDamage/,
+assert.match(fire, /for \(const h of impacts\)[\s\S]*damageEnemyByPlayer\(enemy,dmg,head,dir\)/,
   'the live firing path applies damage to every selected impact');
 
 console.log('PASS: Barrett penetrates distinct aligned enemies once each, walls stop the shot, and every other gun remains first-hit only.');

@@ -26,4 +26,20 @@ assert.deepEqual(chooseCover([wall], { x: 3, y: 0, z: 0 },
   { x: -5, y: 0, z: 0 }, () => true), { x: 1.72, y: 0, z: 0 });
 assert.equal(chooseCover([wall], { x: 3, y: 0, z: 0 },
   { x: -5, y: 0, z: 0 }, () => false), null);
+
+const searcher = makeAwareness(0, 0, 0, .37);
+updateAwareness(searcher, .1, { x: 6, y: 0, z: 4 }, null);
+updateAwareness(searcher, .2, null, null);
+const firstSearch = awarenessGoal(searcher, { x: 0, y: 0, z: 0 });
+updateAwareness(searcher, 1.4, null, null);
+assert.deepEqual(awarenessGoal(searcher, { x: 0, y: 0, z: 0 }), firstSearch,
+  'search waypoint remains committed instead of changing on a timer');
+const arrived = awarenessGoal(searcher, firstSearch);
+assert.deepEqual(arrived, firstSearch, 'arriving at a search point starts a stable observation hold');
+updateAwareness(searcher, .2, null, null);
+assert.deepEqual(awarenessGoal(searcher, firstSearch), firstSearch,
+  'the observation hold does not choose a new heading every frame');
+updateAwareness(searcher, 1, null, null);
+assert.notDeepEqual(awarenessGoal(searcher, firstSearch), firstSearch,
+  'a new waypoint is selected after the observation hold finishes');
 console.log('NPC memory, investigation, patrol and cover selection: OK');

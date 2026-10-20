@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { buildBlacktownMap } from './blacktown_map.js?v=bio-blacktown-1';
+import { buildBlacktownMap } from './blacktown_map.js?v=map-filter-quality-1';
 import { makeGLTFLoader } from './gltf.js';
 import { BIO_BLACKTOWN_LAYOUT } from './bio_blacktown_config.js?v=1';
 
@@ -182,7 +182,7 @@ export async function buildBioMap(scene, onProgress = () => {}) {
       enemy: map.spawns.enemy.map(point => [...point]),
     },
     bio: {
-      humans: map.spawns.player.slice(0, 8).map(point => [...point]),
+      humans: map.spawns.player.slice(0, 12).map(point => [...point]),
       mutants: map.spawns.enemy.slice(0, 8).map(point => [...point]),
       holdPoints: BIO_BLACKTOWN_LAYOUT.holdPoints.map(point => [...point]),
     },

@@ -45,7 +45,7 @@ assert.match(main,/meleeSkin: "dragon"[^\n]+\n\s*\{ primary: "m4", skin: "ironbe
 assert.match(main,/ClassicView\.load\('kukri_dragon'\)/);
 assert.match(main,/KUKRI_CLIP_BY_ATTACK = Object\.freeze\(\{ light: "midslash1", thrust: "midslash2", heavy: "stab" \}\)/);
 assert.match(main,/kind==="heavy"\?"stab_miss":null/,'heavy misses use the authored miss sequence');
-assert.match(main,/enemyHits\.size>0&&meleeSkin==="dragon"&&action\.kind==="heavy"\)action\.sourceClip="stab"/,
+assert.match(main,/enemyHitCount>0&&meleeSkin==="dragon"&&action\.kind==="heavy"\)action\.sourceClip="stab"/,
   'any confirmed heavy enemy hit switches to the authored hit sequence');
 assert.match(main,/heavyStabAt: heavy\.hitStart/,
   'the second heavy sound follows the scaled rightward strike window');
@@ -82,7 +82,7 @@ assert.match(main,/vtKukri\$\{field\.key\[0\]\.toUpperCase\(\)\}\$\{field\.key\.
   'combat tuning values persist in the preview URL');
 assert.match(main,/dmg: kukriCombatLive\[heavy \? "heavyDmg" : "lightDmg"\][\s\S]*?head: kukriCombatLive[\s\S]*?backstab: kukriCombatLive[\s\S]*?arc: THREE\.MathUtils\.degToRad/,
   'live damage and sweep controls feed the actual melee mode');
-assert.match(main,/raycaster\.far=meleeSkin==="dragon"\?kukriCombatLive\.range:KNIFE\.range/,
+assert.match(main,/const range=meleeSkin==="dragon"\?kukriCombatLive\.range:KNIFE\.range/,
   'each melee skin keeps its own real hit reach rather than only the diagram');
 assert.match(main,/drawKukriHitPreview\(hitPreview\)/,
   'the tuner redraws an exact top-down sector preview');
@@ -100,31 +100,43 @@ assert.match(main,/function previewKukriTargetHits\(kind, mode\)[\s\S]*?\.\.\.ku
   'preview hits use the live melee reach and respect nearer world walls');
 assert.match(main,/a\.previewOnly&&!a\.previewTargetChecked&&a\.t>=mode\.hitStart[\s\S]*?previewKukriTargetHits\(a\.kind,mode\)/,
   'preview buttons evaluate targets at the real attack hit window');
-const accumulateStart=main.indexOf('function accumulateMeleeRayHits(');
-const accumulateEnd=main.indexOf('function resolveMeleeSweep(',accumulateStart);
-assert.ok(accumulateStart>=0&&accumulateEnd>accumulateStart,'shared multi-target melee collector exists');
+const broadPhaseStart=main.indexOf('const MELEE_TARGET_RADIUS=');
+const broadPhaseEnd=main.indexOf('function meleeWallImpact(',broadPhaseStart);
+assert.ok(broadPhaseStart>=0&&broadPhaseEnd>broadPhaseStart,'optimized melee broad phase exists');
 const meleeContext={};
 vm.createContext(meleeContext);
-vm.runInContext(`${main.slice(accumulateStart,accumulateEnd)};this.accumulateMeleeRayHits=accumulateMeleeRayHits;`,meleeContext);
-const enemyA={dead:false},enemyB={dead:false},enemyBehindWall={dead:false};
-const bodyA={object:{userData:{enemy:enemyA,part:'body'}},distance:.5};
-const headA={object:{userData:{enemy:enemyA,part:'head'}},distance:.55};
-const bodyB={object:{userData:{enemy:enemyB,part:'body'}},distance:.9};
-const wall={object:{userData:{}},distance:1.1};
-const blocked={object:{userData:{enemy:enemyBehindWall,part:'body'}},distance:1.2};
-const collected=new Map(),direction={ray:'sample'};
-assert.equal(meleeContext.accumulateMeleeRayHits([bodyA,headA,bodyB,wall,blocked],collected,direction),wall,
-  'the first wall is returned as the stopping surface');
-assert.equal(collected.size,2,'all distinct enemies before the wall are collected, including aligned enemies');
-assert.equal(collected.get(enemyA).hit,headA,'one enemy is stored once and a sampled head contact takes precedence');
-assert.equal(collected.get(enemyB).hit,bodyB,'the second aligned enemy is not treated as a bullet blocker');
-assert.equal(collected.has(enemyBehindWall),false,'a solid wall still blocks enemies behind it');
+vm.runInContext(`${main.slice(broadPhaseStart,broadPhaseEnd)};this.meleeCandidateRay=meleeCandidateRay;this.meleeHitIsVisible=meleeHitIsVisible;`,meleeContext);
+const mode={arc:.5,sweepSign:1,pitchArc:.1};
+const origin={x:0,z:0};
+assert.ok(meleeContext.meleeCandidateRay(origin,{x:0,z:-1},0,0,mode,1.45),
+  'an enemy in front and within reach enters the precise narrow phase');
+assert.equal(meleeContext.meleeCandidateRay(origin,{x:-1,z:0},0,0,mode,1.45),null,
+  'an enemy fully outside the swing sector is rejected without raycasting meshes');
+assert.equal(meleeContext.meleeCandidateRay(origin,{x:0,z:-3},0,0,mode,1.45),null,
+  'an enemy beyond surface reach is rejected without raycasting meshes');
+const edgeDistance=1.4,edgeAngle=.6;
+const edge=meleeContext.meleeCandidateRay(origin,
+  {x:-Math.sin(edgeAngle)*edgeDistance,z:-Math.cos(edgeAngle)*edgeDistance},0,0,mode,1.45);
+assert.ok(edge&&Math.abs(edge.yaw-mode.arc)<1e-9,
+  'a body whose radius overlaps the sector edge is rechecked with the boundary ray');
+assert.equal(meleeContext.meleeHitIsVisible({distance:.9},{distance:1.1}),true,
+  'the enemy is hittable when its surface is before the wall');
+assert.equal(meleeContext.meleeHitIsVisible({distance:1.2},{distance:1.1}),false,
+  'the wall still blocks an enemy behind it');
 const sweepBlock=main.slice(main.indexOf('function resolveMeleeSweep('),main.indexOf('function resolveKnifeHit('));
-assert.match(sweepBlock,/const enemyHits=new Map\(\)/,'a swing deduplicates enemies across every sampled ray');
-assert.match(sweepBlock,/const steps=64/,'the complete sweep sector is sampled densely');
-assert.match(sweepBlock,/for\(const \{hit,direction\} of enemyHits\.values\(\)\)resolveKnifeHit/,
-  'every enemy collected in the sector receives one damage resolution');
-assert.match(sweepBlock,/if\(enemyHits\.size===0&&wallImpact\)resolveKnifeHit/,
+assert.doesNotMatch(sweepBlock,/scene\.updateMatrixWorld\(true\)/,
+  'a melee hit no longer forces the entire scene graph to update in one frame');
+assert.doesNotMatch(sweepBlock,/steps=64|intersectObjects\(targets/,
+  'the old 65 full-scene raycasts are gone');
+assert.match(sweepBlock,/for\(const enemy of enemies\)/,
+  'every live enemy is independently broad-phase checked, so aligned enemies remain valid');
+assert.match(sweepBlock,/intersectObjects\(enemy\.meshes,false\)/,
+  'the precise ray traverses only the current candidate actor');
+assert.match(sweepBlock,/intersectObjects\(obstacleFlat,false\)/,
+  'each precise candidate ray retains wall occlusion');
+assert.match(sweepBlock,/resolveKnifeHit\(enemyHit,direction,mode\)/,
+  'every visible candidate receives one damage resolution');
+assert.match(sweepBlock,/if\(enemyHitCount===0&&wallImpact\)resolveKnifeHit/,
   'wall feedback is emitted only when the swing hit no enemy');
 assert.match(main,/resolveMeleeSweep\(a,mode,meleeSkin\)/,
   'both the Phoenix Axe and Kukri use the shared multi-target sweep');
@@ -150,4 +162,4 @@ assert.match(audio,/heavy && stage === "windup"[\s\S]*\? "kukri_dragon_slash2"/,
 assert.match(audio,/heavy \? "kukri_dragon_stab"/,
   'the second heavy stage uses the requested source knife_stab WAV');
 assert.match(audio,/rateJitter: meleeSkin === "dragon" \? 0 : 0\.05/);
-console.log('PASS: 凤凰斧与屠龙会对挥击范围内墙前的所有敌人各结算一次，屠龙仍保留源动作/墙面声并静音敌人接触声。');
+console.log('PASS: 凤凰斧与屠龙用扇形 broad phase + 候选精确射线完成群伤，不再在伤害帧执行 65 次全场射线。');

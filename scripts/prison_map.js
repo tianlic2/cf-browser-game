@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-import { expandPrisonLayout, PRISON_HORIZONTAL_SCALE, PRISON_VERTICAL_SCALE } from './prison_scale.js?v=prison-scale-80-1';
-import { preservePrisonTexelScale } from './prison_uv.js?v=watch-city-tone-1';
+import { configureMapTexture } from './map_texture_quality.js';
+import { expandPrisonLayout, PRISON_HORIZONTAL_SCALE, PRISON_VERTICAL_SCALE } from './prison_scale.js?v=prison-source-scale-1';
 
 const BASE = new URL('../assets/classic/prison/', import.meta.url).href;
 
@@ -58,9 +58,7 @@ export async function buildPrisonMap(scene, onProgress = () => {}) {
   let loaded = 0;
   const textures = new Map(await Promise.all(uniquePaths.map(async path => {
     const tex = await loader.loadAsync(BASE + path);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 8;
-    if (path !== 'lightmap.png') tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    configureMapTexture(tex, path === 'lightmap.png');
     onProgress(.25 + .75 * ++loaded / uniquePaths.length);
     return [path, tex];
   })));
@@ -71,7 +69,6 @@ export async function buildPrisonMap(scene, onProgress = () => {}) {
   const obstacles = [];
   for (const p of data.parts) {
     const vertices = new Float32Array(binary, p.offset, p.count * 7);
-    preservePrisonTexelScale(vertices, PRISON_HORIZONTAL_SCALE, PRISON_VERTICAL_SCALE);
     const buffer = new THREE.InterleavedBuffer(vertices, 7);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.InterleavedBufferAttribute(buffer, 3, 0));
@@ -101,7 +98,8 @@ export async function buildPrisonMap(scene, onProgress = () => {}) {
     visuals: [group], obstacles,
     background: makePrisonSky(),
     navigationMaxHeight: 3.3 * PRISON_VERTICAL_SCALE,
-    navigationStep: .75,
+    // At the original dimensions the narrow upper passages need denser samples.
+    navigationStep: .45,
     stepHeight: .5 * PRISON_VERTICAL_SCALE,
   };
 }

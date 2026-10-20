@@ -122,31 +122,53 @@ export class ClassicSoldierRig extends SoldierRig {
     // Work in the actor's foot coordinate system, independent of enemy yaw and
     // the outer corpse pivot. Preserve the original bone roll during retarget.
     this.root.updateWorldMatrix(true,true);
-    const inv=this.root.matrixWorld.clone().invert();
-    const iq=this.root.getWorldQuaternion(new THREE.Quaternion()).invert();
-    const pos=node=>node.getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
-    const rot=node=>iq.clone().multiply(node.getWorldQuaternion(new THREE.Quaternion()));
+    // Per-actor scratch storage: no per-frame Matrix4/Vector3/Quaternion/Map
+    // allocation. Reuse the already refreshed driver matrices instead of
+    // recursively updating every parent again for each queried joint.
+    const cache=this._retargetScratch ||= {
+      inv:new THREE.Matrix4(),parentInv:new THREE.Matrix4(),identity:new THREE.Matrix4(),
+      iq:new THREE.Quaternion(),pq:new THREE.Quaternion(),worldQ:new THREE.Quaternion(),
+      worldP:new THREE.Vector3(),worldS:new THREE.Vector3(),
+      vectors:Array.from({length:64},()=>new THREE.Vector3()),
+      quaternions:Array.from({length:64},()=>new THREE.Quaternion()),
+      targets:new Map(),
+    };
+    let vi=0,qi=0;
+    const v=()=>cache.vectors[vi++];
+    const q=()=>cache.quaternions[qi++];
+    const inv=cache.inv.copy(this.root.matrixWorld).invert();
+    this.root.matrixWorld.decompose(cache.worldP,cache.iq,cache.worldS);
+    const iq=cache.iq.invert();
+    const pos=node=>v().setFromMatrixPosition(node.matrixWorld).applyMatrix4(inv);
+    const rot=node=>{
+      node.matrixWorld.decompose(cache.worldP,cache.worldQ,cache.worldS);
+      return q().copy(iq).multiply(cache.worldQ);
+    };
     const pelvis=pos(this.pelvis),chest=pos(this.chest),neck=pos(this.neck);
-    const targets=new Map();
-    const set=(i,p,q)=>targets.set(i,{p,q});
+    const targets=cache.targets;
+    const set=(i,p,q)=>{
+      let target=targets.get(i);
+      if(!target){target={p:new THREE.Vector3(),q:new THREE.Quaternion()};targets.set(i,target);}
+      target.p.copy(p);target.q.copy(q);
+    };
     set(0,pelvis,rot(this.pelvis));
     set(9,pos(this.spine),rot(this.spine));
     set(10,pos(this.spine).lerp(chest,.45),rot(this.spine));
     set(11,chest,rot(this.chest));
-    set(12,chest.clone().lerp(neck,.78),rot(this.chest));
+    set(12,v().copy(chest).lerp(neck,.78),rot(this.chest));
     set(13,neck,rot(this.neck));set(14,pos(this.head),rot(this.head));
     const segment=(i,j,a,b)=>{
       const p=pos(a),end=pos(b);
-      const from=this.bindPos[j].clone().sub(this.bindPos[i]).normalize();
-      const to=end.clone().sub(p).normalize();
-      set(i,p,new THREE.Quaternion().setFromUnitVectors(from,to).multiply(this.bindQ[i]));
+      const from=v().copy(this.bindPos[j]).sub(this.bindPos[i]).normalize();
+      const to=v().copy(end).sub(p).normalize();
+      set(i,p,q().setFromUnitVectors(from,to).multiply(this.bindQ[i]));
     };
     for(const [leg,a,b,c] of [[this.legL,1,2,3],[this.legR,5,6,7]]) {
       segment(a,b,leg.hip,leg.knee);segment(b,c,leg.knee,leg.ankle);
       set(c,pos(leg.ankle),rot(leg.ankle).multiply(this.bindQ[c]));
     }
     for(const [arm,cl,a,b,c] of [[this.armL,15,16,17,18],[this.armR,28,29,30,31]]) {
-      set(cl,chest.clone().lerp(neck,.86).lerp(pos(arm.sh),.22),rot(this.chest).multiply(this.bindQ[cl]));
+      set(cl,v().copy(chest).lerp(neck,.86).lerp(pos(arm.sh),.22),rot(this.chest).multiply(this.bindQ[cl]));
       segment(a,b,arm.sh,arm.el);segment(b,c,arm.el,arm.hd);
       set(c,pos(arm.hd),rot(arm.hd).multiply(this.bindQ[c]));
     }
@@ -154,15 +176,15 @@ export class ClassicSoldierRig extends SoldierRig {
       const t=targets.get(i),parent=asset.data.bones[i].parent;
       bone.position.copy(this.rest[i].p);bone.quaternion.copy(this.rest[i].q);
       if(t) {
-        const parentMatrix=parent>=0?this.bones[parent].matrixWorld:new THREE.Matrix4();
-        bone.position.copy(t.p).applyMatrix4(parentMatrix.clone().invert());
-        const pq=new THREE.Quaternion().setFromRotationMatrix(parentMatrix).invert();
+        const parentMatrix=parent>=0?this.bones[parent].matrixWorld:cache.identity;
+        bone.position.copy(t.p).applyMatrix4(cache.parentInv.copy(parentMatrix).invert());
+        const pq=cache.pq.setFromRotationMatrix(parentMatrix).invert();
         // Torso/head targets are rotation deltas, limbs already carry bind roll.
-        const q=t.q.clone();if([0,9,10,11,12,13,14].includes(i))q.multiply(this.bindQ[i]);
-        bone.quaternion.copy(pq).multiply(q);
+        const targetQ=cache.worldQ.copy(t.q);if(i===0||(i>=9&&i<=14))targetQ.multiply(this.bindQ[i]);
+        bone.quaternion.copy(pq).multiply(targetQ);
       }
       bone.updateMatrix();
-      bone.matrixWorld.copy(parent>=0?this.bones[parent].matrixWorld:new THREE.Matrix4()).multiply(bone.matrix);
+      bone.matrixWorld.copy(parent>=0?this.bones[parent].matrixWorld:cache.identity).multiply(bone.matrix);
     });
     // matrices above deliberately use actor coordinates; the scene graph adds
     // enemy/world transforms at render and raycast time.

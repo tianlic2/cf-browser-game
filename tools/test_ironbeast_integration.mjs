@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readJoinedAsset } from './read_chunked_asset.mjs';
@@ -12,10 +13,13 @@ const audio = await read('scripts/audio.js');
 const main = await read('scripts/main.js');
 const skins = await read('scripts/skins.js');
 const enemies = await read('scripts/enemies.js');
-const qc = await read('/Users/chen/Downloads/CrossFire M4A1-S Iron Beast Imperial Gold/compile/v_/sequences.qc');
-const sourceMdl = await readFile('/Users/chen/Downloads/m4a1-s_iron_beast_imperial_gold/models/v_ak47.mdl');
+const sourceQcPath = '/Users/chen/Downloads/CrossFire M4A1-S Iron Beast Imperial Gold/compile/v_/sequences.qc';
+const sourceMdlPath = '/Users/chen/Downloads/m4a1-s_iron_beast_imperial_gold/models/v_ak47.mdl';
+const sourceWavPath = '/Users/chen/Downloads/m4a1-s_iron_beast_imperial_gold/sound/weapons/M4A1-S-Beast_knifeAttack.wav';
+const qc = existsSync(sourceQcPath) ? await readFile(sourceQcPath, 'utf8') : null;
+const sourceMdl = existsSync(sourceMdlPath) ? await readFile(sourceMdlPath) : null;
 const meleeWav = await readFile(new URL('audio/classic/ironbeast/knife_attack.wav', root));
-const sourceMeleeWav = await readFile('/Users/chen/Downloads/m4a1-s_iron_beast_imperial_gold/sound/weapons/M4A1-S-Beast_knifeAttack.wav');
+const sourceMeleeWav = existsSync(sourceWavPath) ? await readFile(sourceWavPath) : null;
 
 assert.equal(view.bones.length, 113, 'Iron Beast source skeleton is retained');
 const weaponParts = view.parts.filter((part) => part.kind === 'weapon');
@@ -46,14 +50,16 @@ assert.match(viewRenderer, /p\.linearAdditive\?THREE\.NoColorSpace:THREE\.SRGBCo
   'direct additive colour sampling is opt-in and cannot alter Iron Beast');
 for (const name of ['idle_0', 'reload', 'select', 'fire', 'prefire', 'postfire'])
   assert.ok(view.clips[name]?.times.length, `source animation ${name} is present`);
-assert.equal(sourceMdl.readInt32LE(164), 7, 'the original MDL contains seven animation sequences');
-const sequenceOffset = sourceMdl.readInt32LE(168);
-const sequenceNames = Array.from({length: sourceMdl.readInt32LE(164)}, (_, index) => {
-  const at = sequenceOffset + index * 176;
-  return sourceMdl.subarray(at, at + 32).toString('utf8').replace(/\0.*$/, '');
-});
-assert.equal(sequenceNames.at(-1), 'knife-attack',
-  'the seventh original sequence is the right-click melee animation');
+if (sourceMdl) {
+  assert.equal(sourceMdl.readInt32LE(164), 7, 'the original MDL contains seven animation sequences');
+  const sequenceOffset = sourceMdl.readInt32LE(168);
+  const sequenceNames = Array.from({length: sourceMdl.readInt32LE(164)}, (_, index) => {
+    const at = sequenceOffset + index * 176;
+    return sourceMdl.subarray(at, at + 32).toString('utf8').replace(/\0.*$/, '');
+  });
+  assert.equal(sequenceNames.at(-1), 'knife-attack',
+    'the seventh original sequence is the right-click melee animation');
+}
 assert.equal(view.clips['knife-attack'].times.length, 267,
   'all 267 source melee samples are imported');
 assert.equal(view.clips['knife-attack'].times.at(-1), .532,
@@ -63,7 +69,8 @@ assert.deepEqual(view.events['knife-attack'], [{
 }], 'the source melee sound event is retained at frame 1');
 assert.equal(meleeWav.subarray(0, 4).toString('ascii'), 'RIFF',
   'the supplied melee WAV is packaged unchanged as a playable WAV');
-assert.ok(meleeWav.equals(sourceMeleeWav), 'the packaged melee WAV is byte-for-byte identical to the source');
+if (sourceMeleeWav) assert.ok(meleeWav.equals(sourceMeleeWav),
+  'the packaged melee WAV is byte-for-byte identical to the source');
 const bonePositionRange = (clipName, boneName, channel = 0) => {
   const clip = view.clips[clipName];
   const bone = view.bones.findIndex((item) => item.name === boneName);
@@ -103,6 +110,46 @@ assert.match(main, /const IRONBEAST_MELEE = Object\.freeze\(\{[\s\S]*duration: 2
   'right-click melee uses the source duration and explicit project hit tuning');
 assert.match(main, /currentId==="m4" && activeSkinId\("m4"\)==="ironbeastgold"[\s\S]*ironbeastMeleeAttack\(\)/,
   'right click routes only the Iron Beast skin into its melee action');
+assert.match(main, /function cancelWeaponReload\(weaponState\)[\s\S]*weaponState\.reloading = false;[\s\S]*weaponState\.reloadT = 0;[\s\S]*sfx\.cancelReload\(\)/,
+  'reload interruption clears its timeline and all pending reload audio');
+assert.match(main, /function ironbeastMeleeAttack\(\)[\s\S]*const interruptingReload = !!WEAPON_STATE\.reloading;[\s\S]*if \(interruptingReload\) cancelWeaponReload\(WEAPON_STATE\);[\s\S]*ironbeastMeleeState=\{t:0,hit:false\}/,
+  'Iron Beast stock attack interrupts reload before starting its authored animation');
+assert.doesNotMatch(main.slice(main.indexOf('function ironbeastMeleeAttack()'), main.indexOf('function updateIronbeastMelee')),
+  /\|\| WEAPON_STATE\.reloading \|\|/,
+  'reload is no longer a hard blocker for the Iron Beast stock attack');
+
+const cancelReloadSource = main.slice(main.indexOf('function cancelWeaponReload('),
+  main.indexOf('// 每帧给小地图喂一份数据', main.indexOf('function cancelWeaponReload(')));
+const meleeAttackSource = main.slice(main.indexOf('function ironbeastMeleeAttack()'),
+  main.indexOf('function updateIronbeastMelee'));
+const interruptedAmmo = { reloading: true, reloadT: 1.25, mag: 12, reserve: 105, boltT: 0, cooldown: .08 };
+const attackCtx = {
+  WEAPON_STATE: interruptedAmmo, currentId: 'm4', state: 'playing', dead: false,
+  skin: 'ironbeastgold', activeSkinId: () => attackCtx.skin, switchBlocking: () => false,
+  ironbeastMeleeState: null, IRONBEAST_MELEE: { duration: .532 }, ironbeastFireT: 0,
+  actedThisLife: false, ironbeastView: { eventTime: () => .002 }, toast: '换弹中', cancelCount: 0,
+  showToast: value => { attackCtx.toast = value; },
+  sfx: { cancelReload() { attackCtx.cancelCount++; }, ironbeastMelee() {} },
+};
+vm.createContext(attackCtx);
+vm.runInContext(cancelReloadSource + meleeAttackSource, attackCtx);
+assert.equal(vm.runInContext('ironbeastMeleeAttack()', attackCtx), true);
+assert.equal(interruptedAmmo.reloading, false);
+assert.equal(interruptedAmmo.reloadT, 0);
+assert.deepEqual({ mag: interruptedAmmo.mag, reserve: interruptedAmmo.reserve }, { mag: 12, reserve: 105 },
+  'interrupted reload neither fills the magazine nor consumes reserve ammunition');
+assert.equal(attackCtx.cancelCount, 1, 'pending reload audio is cancelled exactly once');
+assert.equal(attackCtx.toast, '');
+assert.equal(attackCtx.ironbeastMeleeState.t, 0);
+assert.equal(attackCtx.ironbeastMeleeState.hit, false);
+
+attackCtx.ironbeastMeleeState = null;
+attackCtx.WEAPON_STATE.reloading = true;
+attackCtx.WEAPON_STATE.reloadT = .6;
+attackCtx.skin = 'classic';
+assert.equal(vm.runInContext('ironbeastMeleeAttack()', attackCtx), false);
+assert.equal(attackCtx.WEAPON_STATE.reloading, true,
+  'ordinary M4 right click does not cancel its reload');
 assert.match(ironbeastRender, /const clip=melee\?'knife-attack'/,
   'the authored melee clip has rendering priority while the attack is active');
 assert.match(ironbeastRender, /for\(const effect of ironbeastView\.effects\)effect\.visible=!melee/,
@@ -110,8 +157,10 @@ assert.match(ironbeastRender, /for\(const effect of ironbeastView\.effects\)effe
 assert.match(audio, /ironbeastMelee\(delay = 1 \/ 500\)[\s\S]*id: "ironbeast_knife_attack"[\s\S]*rate: 1, rateJitter: 0, wet: 0/,
   'the original melee WAV plays unpitched and without synthesized replacement');
 
-assert.match(qc, /\$sequence "reload" "reload" fps 122 .*event 5004 115 .*clipin_imperialgold\.wav.*event 5004 206 .*g_mzc_m4a1_clipin\.wav/);
-assert.match(qc, /\$sequence "select" "select" fps 400 \{ event 5004 135 .*g_reload_m4a1\.wav/);
+if (qc) {
+  assert.match(qc, /\$sequence "reload" "reload" fps 122 .*event 5004 115 .*clipin_imperialgold\.wav.*event 5004 206 .*g_mzc_m4a1_clipin\.wav/);
+  assert.match(qc, /\$sequence "select" "select" fps 400 \{ event 5004 135 .*g_reload_m4a1\.wav/);
+}
 assert.match(audio, /frames=\[115,206\],ids=\["ironbeast_clipin_gold","ironbeast_clipin"\]/);
 assert.match(audio, /selectEventDelay\s*=\s*ironbeast\s*\?\s*\(options\.selectDur\s*\|\|\s*0\)\s*\*\s*135\s*\/\s*319/);
 assert.match(main, /skin:ironbeastSkin\?'ironbeastgold':undefined/);

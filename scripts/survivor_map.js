@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { configureMapTexture } from './map_texture_quality.js';
 import { prepareGoldsrcCollision } from './goldsrc_surface.js?v=visible-wall-1';
 import { fetchChunkedMap } from './chunked_asset.js?v=github-publish-1';
 
@@ -90,9 +91,7 @@ export async function buildSurvivorMap(scene, onProgress = () => {}) {
   let loaded = 0;
   const textures = new Map(await Promise.all(uniquePaths.map(async path => {
     const texture = await loader.loadAsync(BASE + path);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 8;
-    if (path !== 'lightmap.png') texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    configureMapTexture(texture, path === 'lightmap.png');
     onProgress(.18 + .65 * ++loaded / uniquePaths.length);
     return [path, texture];
   })));

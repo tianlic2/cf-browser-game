@@ -203,6 +203,7 @@ export class SFX {
     this.ctx = null;
     this.master = null;
     this.enabled = true;
+    this.muted = false;
 
     this.maxVoices = MAX_VOICES;
     this._voices = 0;
@@ -239,7 +240,7 @@ export class SFX {
       if (!AC) return;
       this.ctx = new AC({ latencyHint: "interactive" });
       const out = this.ctx.createGain();
-      out.gain.value = 0.6;
+      out.gain.value = this.muted ? 0 : 0.6;
 
       // master 与 destination 之间插两级：
       //   comp      —— 总线压缩。它的职责是兜住**病态并发**（同一帧十几声这种），
@@ -275,7 +276,7 @@ export class SFX {
 
       // 耳鸣是 4.4kHz 高频，过 700Hz 低通会被削没 —— 单独一条不经过 muffle 的总线
       this.hf = this.ctx.createGain();
-      this.hf.gain.value = 1;
+      this.hf.gain.value = this.muted ? 0 : 1;
       this.hf.connect(this.ctx.destination);
 
       // 小型空间混响（仓库/金属货舱回声）。注意：**录音自带的尾音已经过了空间渲染**，
@@ -474,7 +475,7 @@ export class SFX {
   // 切枪、换弹、拉栓与近战动作不传 synthFn，素材缺失时保持静音。
   _playMapped(method, o, synthFn) {
     o = o || {};
-    const voiceLimit = this.maxVoices + (method === "kill" ? KILL_VOICE_RESERVE : 0);
+    const voiceLimit = this.maxVoices + (["kill", "damageMilestone"].includes(method) ? KILL_VOICE_RESERVE : 0);
     if (this._voices >= voiceLimit) { this._note(method, o, "capped", 0); return false; }
     const h = this._sample(o.sample || o.id, o);
     if (h) { this._note(method, o, "sample", h.dur); return true; }
@@ -611,6 +612,18 @@ export class SFX {
     return this.enabled && this.ctx;
   }
 
+  setMuted(muted) {
+    this.muted = !!muted;
+    if (!this.ctx) {
+      if (!this.muted) this.ensure();
+      return this.muted;
+    }
+    const now = this.ctx.currentTime;
+    this.master?.gain.setTargetAtTime(this.muted ? 0 : 0.6, now, .018);
+    this.hf?.gain.setTargetAtTime(this.muted ? 0 : 1, now, .018);
+    return this.muted;
+  }
+
   // ==========================================================================
   // 采集入口（采样优先）
   // ==========================================================================
@@ -743,6 +756,16 @@ export class SFX {
     this._playMapped("kill", {
       id: "kill_confirm", kind: headshot ? "head" : streak ? "streak" : "normal",
       vol: headshot ? 0.65 : streak ? 0.73 : 1.05,
+      volJitter: 0, rateJitter: 0, wet: 0,
+    }, () => this._killSynth());
+  }
+
+  // 生化模式每累计造成 1000 实际伤害的阶段奖励：直接复用击杀确认原声。
+  // 单独的 method 名让调试可以区分击杀与千伤，但两者享有同一个不被战斗声挤掉的预留声道。
+  damageMilestone() {
+    if (!this.ready()) return;
+    this._playMapped("damageMilestone", {
+      id: "kill_confirm", kind: "bio-1000", vol: 1.05,
       volJitter: 0, rateJitter: 0, wet: 0,
     }, () => this._killSynth());
   }
@@ -1715,6 +1738,7 @@ export class SFX {
     scheduled.sort((a, b) => a.delay - b.delay);
     return {
       ready: !!this.ready(),
+      muted: !!this.muted,
       ctxState: this.ctx ? this.ctx.state : null,
       sampleRate: this.ctx ? this.ctx.sampleRate : (this._decoder ? this._decoder.sampleRate : 0),
       decodeSupported: !!(this.ctx || this._decoder),

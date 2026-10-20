@@ -50,7 +50,7 @@ const KEYBINDS = [
   { keys: ["Esc"], label: "释放鼠标，回到大厅" },
 ];
 
-const TAB_NAMES = { play: "游戏房间", manual: "作战手册", arsenal: "武器库", storage: "个人仓库" };
+const TAB_NAMES = { play: "大厅", manual: "作战手册", arsenal: "武器图鉴", storage: "仓库" };
 
 /** 建一个元素。cls 可省，text 可省（0 与 "" 要能正常写入，所以判的是 null/undefined）。 */
 function el(tag, cls, text) {
@@ -339,7 +339,7 @@ export class Lobby {
 
   /** 房间日志里的系统说明，保留 lobbyTicker 的既有接线。 */
   _renderTicker(text) {
-    const line = typeof text === "string" && text ? text : "战术突击 · 运输船 · 团队竞技";
+    const line = typeof text === "string" && text ? text : "CrossFire · 运输船 · 团队竞技";
     this._tickerEl.textContent = line;
   }
 }

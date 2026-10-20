@@ -1,11 +1,13 @@
 // ===== 敌人系统（CF SWAT 蒙皮 + 点射走位 AI + 倒地尸体 + 对象池）=====
-// ClassicSoldierRig 把既有程序化 IK 重定向到导入骨架，资源失败时回退自建人物。
+// HumanSoldierRig uses one native model/skeleton/animation suite; its classic
+// SWAT base remains a transparent gameplay hitbox and loading-failure fallback.
 import * as THREE from "three";
-import { ClassicSoldierRig as SoldierRig } from "./classic_soldier.js";
+import { HumanSoldierRig as SoldierRig } from "./human_soldier.js?v=enemy-loadouts-4";
 import { makeBlobShadow } from "./blobshadow.js";
 import { intersectsBrush } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";
-import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js";
+import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js?v=stable-search-1";
+import { advanceFacing, angleDelta, separationOffset } from './npc_motion.js';
 
 // 敌人血量恒定：HP 必须固定，否则「AK 3 枪死」的数值不成立 —— 所以难度**不碰血量**，
 // 只缩放下面这份 ENEMY_TUNING 里的乘数。
@@ -87,6 +89,7 @@ export const ENEMY_NAMES = [
 export class Enemy {
   constructor(scene, x, z, opts = {}) {
     this.scene = scene;
+    this.separation = { x: 0, z: 0 };
 
     // 层级：
     //   group  ← 世界坐标 + 朝向（rotation.y，同时就是瞄准方向 = 枪口方向）
@@ -138,7 +141,7 @@ export class Enemy {
     this.name = opts.name || ENEMY_NAMES[0];
     // 枪型/皮肤每局随机（main.js 的 loadoutPicker 抽的），死亡时按这两个字段掉在地上。
     // 枪必须在这里换：敌人是对象池复用的，构造函数只跑一次。
-    if (opts.rifle) this.rig.setRifle(opts.rifle, opts.gunId);
+    this.rig.setRifle(opts.rifle || null, opts.gunId);
     this.gunId = opts.gunId || "ak";
     this.gunSkin = opts.gunSkin || null;
     this.weaponName = opts.weaponName || "步枪";
@@ -169,6 +172,9 @@ export class Enemy {
     this.coverGoal = null;
     this.flankGoal = null;
     this.flankGoalT = 0;
+    this.postKillGoal = null;
+    this.postKillT = 0;
+    this.postKillRole = '';
     this.tacticRole = Math.floor(this.seed * 3) % 3 - 1;
 
     // ---- 每敌性格：全部从 seed **哈希派生** ----
@@ -250,12 +256,14 @@ export class Enemy {
   }
 
   // 玩家死亡时立即丢失目标；复活后从一次新的点射停顿开始。
-  loseTarget() {
+  loseTarget(goal = null, role = '') {
     this.wantShoot = false;
     this.burstLeft = 0;
     this.burstTimer = 0;
     this.burstPause = Math.max(this.burstPause, 0.45);
-    this.vel.set(0, 0, 0);
+    // Keep part of the current momentum. Freezing every velocity component on
+    // the kill frame made the whole enemy team visibly stop like mannequins.
+    this.vel.multiplyScalar(.55);
     this.turnVel = 0;
     this.aimSeeded = false;
     this.awareness.memory = 0;
@@ -265,6 +273,9 @@ export class Enemy {
     this.coverGoal = null;
     this.flankGoal = null;
     this.flankGoalT = 0;
+    this.postKillGoal = goal;
+    this.postKillRole = role;
+    this.postKillT = role === 'killer' ? 1.65 : 2.15;
   }
 
   // peers = EnemyManager 本帧的活体数组（分离力用）。可缺省 —— 缺省时分离力整段跳过，
@@ -328,30 +339,31 @@ export class Enemy {
     this.scanPhase += dt * (0.6 + this.traits.scan * 0.8);
 
     // ---------- ① 转身（限角速度，不再一帧转到位）----------
+    const walkingDist = Math.hypot(walkingTo.x - gp.x, walkingTo.z - gp.z);
+    const route = !blind && walkingDist > .75 && this.navigation?.steer(gp, walkingTo);
     let targetRot = blind
       ? this.group.rotation.y + Math.sin(this.animT * 0.35 + this.seed) * 1.6   // 致盲：乱转
       : Math.atan2(this.aimX - gp.x, this.aimZ - gp.z)   // 本组 +z 就是正面，也是枪口指向
         + Math.sin(this.scanPhase * 0.7 + this.seed) * 0.04;   // 滞后目标上再叠一点慢速游移
-    let diff = targetRot - this.group.rotation.y;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
+    // Reaching an investigation/patrol waypoint is a short observation pause,
+    // not an order to face world yaw 0. atan2(0,0) returns 0 and was the main
+    // source of the conspicuous in-place spinning while the next goal changed.
+    if (!blind && !canSee && walkingDist <= .75) targetRot = this.group.rotation.y;
+    // Follow the next route segment, not a distant point behind a wall.
+    // Visible opponents still own aiming, so combat strafing is preserved.
+    if (!blind && !canSee && walkingDist > .75) targetRot = route
+      ? Math.atan2(route.x, route.z)
+      : Math.atan2(walkingTo.x - gp.x, walkingTo.z - gp.z);
     // 转成角速度再积分（而不是直接写角度）：这样转身有起转/收住的过渡，
     // 直接 min(TURN_RATE*dt, diff*k) 会是「匀速转到停」，看着像机器人原地打转
     const maxTurn = TURN_RATE * this.traits.turn;   // 性格：转身快慢
-    const wantRate = Math.max(-maxTurn, Math.min(maxTurn, diff * 8));
-    this.turnVel += (wantRate - this.turnVel) * k(10);
-    const step = this.turnVel * dt;
-    this.group.rotation.y += step;
-    this.turnRate = this.turnVel;
+    advanceFacing(this, targetRot, dt, maxTurn);
     // 转完后还剩多少没对准 —— 没转正不开火（枪口方向就是身体朝向，转着身子打就成了「歪着扫射」）。
     // **参照系取实时方向（liveYaw），不是上面那个滞后目标**：语义是「枪口还在往你身上摆的时候不开火」。
     // 滞后只贡献一个稳态偏角 δ=ω·τ（7m、玩家横向 5m/s ⇒ ω≈0.71、τ≤0.26 ⇒ δ≤0.18），
     // 对 AIM_TOL 仍有余量；贴脸绕圈时 τ 已被按距离收到 0.35 倍，顶不穿。
     // ⚠️ 别把这里改成拿滞后点当参照 —— 那会让闸门随难度/距离漂移，等于偷偷改杀伤力。
-    let liveDiff = Math.atan2(dx, dz) - this.group.rotation.y;
-    while (liveDiff > Math.PI) liveDiff -= Math.PI * 2;
-    while (liveDiff < -Math.PI) liveDiff += Math.PI * 2;
-    this.aimErr = Math.abs(liveDiff - step);
+    this.aimErr = Math.abs(angleDelta(Math.atan2(dx, dz), this.group.rotation.y));
 
     // ---------- ② 期望速度 → 实际速度（有惯性，不是每帧瞬变）----------
     let wx = 0, wz = 0;
@@ -415,8 +427,6 @@ export class Enemy {
         wz = gd > .75 ? gz / gd : 0;
       }
     }
-    const route=!blind&&Math.hypot(walkingTo.x-gp.x,walkingTo.z-gp.z)>.75&&
-      this.navigation?.steer(gp,walkingTo);
     if(route) { wx=route.x;wz=route.z;this.detourT=0; }
     const wl = Math.hypot(wx, wz);
     const sp = this.speed * (blind ? 0.4 : 1);
@@ -435,33 +445,8 @@ export class Enemy {
     // **不相交** ⇒ 分离力在结构上不可能造成「远离玩家」的假卡死翻转（可证明，非调参）。
     let sepX = 0, sepZ = 0;
     if (peers && !blind && this.detourT <= 0 && dist < this.engageFar + 3) {
-      for (const o of peers) {
-        if (o === this) continue;
-        const ox = o.group.position.x, oz = o.group.position.z;
-        const ddx = gp.x - ox, ddz = gp.z - oz;
-        const d2 = ddx * ddx + ddz * ddz;
-        if (!Number.isFinite(d2) || d2 > SEP_R * SEP_R) continue;    // 邻位非有限一律跳过
-        const d = Math.sqrt(d2) || 1e-3;
-        const w = 1 - d / SEP_R;                                     // 越近推得越狠
-        sepX += (ddx / d) * w;  sepZ += (ddz / d) * w;
-      }
-      const sl = Math.hypot(sepX, sepZ);
-      if (sl < 1e-4) {
-        // 退化：完全重合（8 人同一格）时对称堆的合力会互相抵消成 0，
-        // 用逐具不同的 seed 给一个确定的扇出方向，免得永久焊死。
-        const a = this.seed;
-        sepX = Math.sin(a); sepZ = Math.cos(a);
-      } else {
-        const g = Math.min(1, SEP_PUSH / sl);
-        sepX *= g; sepZ *= g;
-      }
-      // **cap 是这道防线的核心**：分离位移永远只是「一个合法步长的一小部分」，
-      // 所以 avoid()+moveBy() 仍是唯一权威，物理上不可能把人推穿墙或瞬移。
-      const cap = SEP_MAX_FRAC * this.speed * dt;
-      const cl = Math.hypot(sepX, sepZ);
-      const s2 = cl > 1e-6 ? Math.min(1, cap / cl) : 0;
-      sepX *= s2; sepZ *= s2;
-      if (!Number.isFinite(sepX) || !Number.isFinite(sepZ)) { sepX = 0; sepZ = 0; }
+      separationOffset(this, peers, dt, SEP_R, SEP_PUSH, SEP_MAX_FRAC, this.separation);
+      sepX = this.separation.x; sepZ = this.separation.z;
     }
 
     const before = gp.clone();
@@ -571,7 +556,7 @@ export class Enemy {
   }
 
   // 每开一枪：骨架来一下后坐（枪往肩里推 + 枪口上跳），由 main.js 的 enemiesShoot 调
-  recoil() { this.rig.recoil(this.gunId === 'awm' ? 1.35 : this.gunId === 'm4' ? 0.8 : 1); }
+  recoil() { this.rig.recoil(this.gunId === 'barrett' || this.gunId === 'awm' ? 1.35 : this.gunId === 'm4' ? 0.8 : 1); }
 
   onShot() {
     if (this.reloadT > 0 || this.mag <= 0) return false;
@@ -850,9 +835,18 @@ export class Enemy {
         this.group.position.x, this.group.position.z, this.group.position.y
       );
     }
-    const restHeight=(this.deathHeadshot ? this.rig.corpseHeightBack : this.rig.corpseHeight) || .26;
+    const nativeDeath=this.rig.nativeDeath===true;
+    const restHeight=nativeDeath?0:((this.deathHeadshot ? this.rig.corpseHeightBack : this.rig.corpseHeight) || .26);
     let fallEase;
-    if (this.deathHeadshot) {
+    if(nativeDeath){
+      // The imported clip already contains a fully articulated fall. Applying
+      // the old 90° whole-body tilt on top would make the native body fold or
+      // spin twice. Keep the actor foot origin on the floor and only preserve
+      // the existing gameplay knockback above.
+      fallEase=Math.min(this.corpseT/.55,1);
+      this.tilt.rotation.set(0,0,0);this.tilt.position.y=BODY_PIVOT;
+      this.blob.scale.set(BLOB_W*(1-.10*fallEase),1,BLOB_D*(1+.55*fallEase));
+    } else if (this.deathHeadshot) {
       const p = Math.min(this.corpseT / HEADSHOT_FALL, 1);
       const airborne = Math.sin(Math.PI * p);
       fallEase = p * (2 - p);
@@ -873,9 +867,10 @@ export class Enemy {
     }
     this.tilt.rotation.z = 0;
     // 假影留在甲板；只有落地时才随尸体拉长。每帧从基准尺寸重设，避免帧率漂移。
-    this.blob.position.z = (this.deathHeadshot ? -0.30 : 0.30) * fallEase;
+    this.blob.position.z = nativeDeath?0:(this.deathHeadshot ? -0.30 : 0.30) * fallEase;
     if (this.corpseT > CORPSE_HOLD) {
-      this.tilt.position.y -= restHeight * Math.min(1,(this.corpseT-CORPSE_HOLD)/CORPSE_SINK);
+      const sink=nativeDeath?1.2:restHeight;
+      this.tilt.position.y -= sink * Math.min(1,(this.corpseT-CORPSE_HOLD)/CORPSE_SINK);
       // 尸身正沉进甲板，影子必须跟着收掉 —— 否则尸体没了、地上一块黑斑还留着。
       // **只能改 scale**：材质是全敌人共享的（见 blobshadow.js 第三条约束）。
       const k = Math.max(0, 1 - (this.corpseT - CORPSE_HOLD) / CORPSE_SINK);
@@ -907,6 +902,9 @@ export class EnemyManager {
     this.lastNoise = null;
     this.callout = null;
     this.nextCallout = 0;
+    this.postKillSerial = 0;
+    this.lastKiller = null;
+    this.lastPlayerDown = null;
     // 每次刷出抽一份「枪型 + 皮肤」，由 main.js 注入（它才有 WEAPON_DEFS 与 guncatalog）。
     // 返回 { rifle, gunId, gunSkin, weaponName, fireMul }；没注入就退回裸 AK 的旧行为。
     this.loadoutPicker = opts.loadoutPicker || null;
@@ -980,6 +978,44 @@ export class EnemyManager {
       radius, at: this.senseClock };
   }
 
+  _postKillDestination(e, killer = false) {
+    const p = e.group.position;
+    const down = this.lastPlayerDown || p;
+    const arena = this._bounds || { hw: Infinity, hl: Infinity };
+    const valid = (x, z) => Number.isFinite(x) && Number.isFinite(z) &&
+      Math.abs(x) < arena.hw - ENEMY_RADIUS && Math.abs(z) < arena.hl - ENEMY_RADIUS &&
+      !e.blockedAt(x, z) && !e.actorBlockedAt(x, z);
+
+    // The killer first tries to break line-of-sight/reload in nearby cover.
+    // This runs once per player death, not every frame.
+    if (killer) {
+      const cover = chooseCover(this._colliders, p, down, valid);
+      if (cover) return cover;
+    }
+
+    const dx = down.x - p.x, dz = down.z - p.z;
+    const length = Math.hypot(dx, dz) || 1;
+    const towardX = dx / length, towardZ = dz / length;
+    const side = Math.sin(e.seed * 7.13 + this.postKillSerial * 1.91) >= 0 ? 1 : -1;
+    const role = killer ? -0.45 : (e.tacticRole || .35);
+    const candidates = [
+      [side * 4.6, role * 1.4],
+      [-side * 3.7, role * 1.0],
+      [side * 2.8, -1.8],
+    ];
+    for (const [lateral, forward] of candidates) {
+      const x = p.x + (-towardZ * lateral + towardX * forward);
+      const z = p.z + (towardX * lateral + towardZ * forward);
+      if (!valid(x, z)) continue;
+      const y = this.navigation?.heightAt(x, z, p.y) ?? p.y;
+      return { x, y, z };
+    }
+
+    // Geometry can invalidate every local combat move. Fall back to the
+    // persistent patrol waypoint rather than standing on the corpse sightline.
+    return awarenessGoal(e.awareness, p);
+  }
+
   // colliders / bounds 每帧现灌：地图边界与碰撞体只在 init 时定，但敌人是对象池里的，
   // 复用出来的实例也要拿到当前这份（否则新实例的 this.bounds 是 undefined、边界夹紧静默失效）。
   update(dt, player, colliders, bounds, targetAlive = true, senseTarget = null) {
@@ -1017,7 +1053,26 @@ export class EnemyManager {
         }
       }
       for (const e of this.enemies) {
-        if (!targetAlive) { e.update(dt, player, this.enemies, false); continue; }
+        if (!targetAlive) {
+          e.postKillT = Math.max(0, (e.postKillT || 0) - dt);
+          const reached = e.postKillGoal && Math.hypot(
+            e.postKillGoal.x - e.group.position.x,
+            e.postKillGoal.z - e.group.position.z) < .72;
+          if (!e.postKillGoal || reached || e.postKillT <= 0) {
+            e.postKillGoal = this._postKillDestination(e, e === this.lastKiller);
+            e.postKillT = e === this.lastKiller ? 1.65 : 2.15;
+          }
+          const goal = e.postKillGoal || awarenessGoal(e.awareness, e.group.position);
+          this.navigation?.update(goal);
+          // Feed a tactical relocation point, never the dead player's live
+          // transform. canSee=false keeps every weapon safely gated off.
+          e.update(dt, { pos: goal }, this.enemies, true, false, goal);
+          if (this.navigation) e.group.position.y = this.navigation.heightAt(
+            e.group.position.x, e.group.position.z, e.group.position.y);
+          continue;
+        }
+        e.postKillGoal = null;
+        e.postKillRole = '';
         const p = e.group.position, visible = sight.get(e);
         const noise = this.lastNoise && this.senseClock - this.lastNoise.at < .25 &&
           Math.hypot(p.x - this.lastNoise.x, p.z - this.lastNoise.z) < this.lastNoise.radius
@@ -1071,8 +1126,17 @@ export class EnemyManager {
     return { aliveCount: this.enemies.length, allCleared: false };
   }
 
-  loseTarget() {
-    for (const e of this.enemies) e.loseTarget();
+  loseTarget(killer = null, playerPosition = null) {
+    this.postKillSerial = (this.postKillSerial || 0) + 1;
+    this.lastKiller = killer || null;
+    this.lastPlayerDown = playerPosition ? {
+      x: playerPosition.x, y: playerPosition.y, z: playerPosition.z,
+    } : null;
+    for (const e of this.enemies) {
+      const role = e === killer ? 'killer' : 'support';
+      e.loseTarget(null, role);
+      e.postKillGoal = this._postKillDestination(e, e === killer);
+    }
   }
 
   // 供闪光弹使用

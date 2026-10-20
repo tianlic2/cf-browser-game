@@ -31,8 +31,10 @@ const SHIN = 0.40;
 const ANKLE_Y = 0.10;    // 踝关节离地高度（脚掌厚度 + 一点间隙，免得脚掌切进甲板）
 const SPINE_Y = 0.06;    // 骨盆 → 脊椎
 const CHEST_Y = 0.28;    // 脊椎 → 胸腔中心
-const SHOULDER_X = 0.20;
-const SHOULDER_Y = 0.22; // 肩相对胸腔中心 → 离地 1.46
+// CF 第三人称角色的肩线比旧版方正 SWAT 驱动器更窄、更低。肩关节贴近躯干外缘，
+// 避免上臂从护甲外侧横着伸出，形成“耸肩 / 举肘”的积木轮廓。
+const SHOULDER_X = 0.185;
+const SHOULDER_Y = 0.205;
 const NECK_Y = 0.50;     // 脊椎 → 颈
 // 上臂/前臂：真人 1.8m 的肩→肘 ≈0.32、肘→腕 ≈0.29（臂展 0.61）。
 // **这两个值不是纯造型参数，而是 IK 的硬约束**：支撑手要按在护木上，
@@ -379,7 +381,7 @@ const RIFLE_YAW = Math.PI / 2;   // AK 枪口在本体 -x，+90° → 指向本�
 // 更硬的一条约束：左肩(0.20, 0.22, 0) 到护木点的距离必须明显小于**臂展 0.61**
 // （= `UPPER + FORE`，**不是 0.58** —— 旧注释抄错了，引之前现算一遍）。
 // 否则 IK 被迫把支撑臂拉成一条直线，看起来像「枪飘在胸前、手够不着」。
-// 现在的实测负载：低姿 85.4% / 据枪 85.5%（肘弯 ~63°），上限取 90%
+// 现在的支撑臂负载：低姿约 89.1% / 据枪约 85.6%，仍低于 90% 上限；
 // —— 推导与余量见 `MOUNT_CARRY` 那条注释。
 //
 // **按枪型号分开取**：三把枪归一化后都在同一个 0.92 的盒子里、枪口都朝 +z，
@@ -394,21 +396,26 @@ export const RIFLE_ANCHORS = {
 
 // 两个持枪姿态（相对胸腔中心的枪心位置 + 俯仰；俯仰 >0 = 枪口压下）。
 //
-// **`MOUNT_CARRY.z` 是「右手看得见看不见」的唯一旋钮，不是造型参数。**
-// 低姿（pitch 0.30）下 `mount.matrix` 把两个握点送到：
-//     gripTarget = (x_m, y_m − 0.03939, z_m − 0.21107)
-//     hgTarget   = (x_m, y_m − 0.06777, z_m + 0.08371)
-// 旧值 z 0.30 ⇒ 右腕 z = 0.0889，而躯干前表面在 0.125、「前胸板」前表面在 0.135
-// —— 右腕**在胸甲内部**，手网格还沿前臂朝里伸，正面完全看不见（`/tmp/cfhand.mjs` 实测
-// 低姿 0/8 角露出）。**薄化躯干赚不回可见性**：就算护甲薄到 0.11 也只赚 1.5cm，右腕仍在里面
-// 2.1cm。所以只挪挂点，`torso` 保持 0.25 不动（薄化还要连带重排护甲/背包的 tz，收益为负）。
-//
-// z 0.30 → 0.35 让握点前进 5.0cm（越过前胸板），同时 y 0.04 → 0.08 把**左臂**从 89.5%
-// 拉回 85.4% —— 正好与据枪姿态的 85.5% 齐平，这次改动**没让瞄准姿态变差一分**。
-// 左臂负载上限取 **90%**（0.549，肘弯 ≥51°）：留 10% 到硬 clamp `(0.32+0.29)×0.999 = 0.6094`
-// 的余量。95% 只剩 4.8%，后坐/致盲/倒地插值一旦把目标推远就会顶到 clamp、手从枪上脱开。
-const MOUNT_CARRY = { x: 0.00, y: 0.08, z: 0.35, pitch: 0.30 };
-const MOUNT_AIM = { x: -0.02, y: 0.15, z: 0.36, pitch: 0.0 };
+// `MOUNT_CARRY.z` 同时决定枪身是否完整露在胸甲前，以及支撑臂是否会被拉直。
+// 当前低姿 pitch=.14、z=.39 时，右手握点约在胸腔 z=.188（越过胸甲前表面），
+// 左手护木点约在 z=.483；配合收窄后的肩线，左臂负载约 89.1%。据枪姿态约 85.6%。
+// 两者都低于 90%（0.549m）控制线，仍给后坐、致盲和死亡插值留出余量。
+// 所有人类 NPC 共用同一份 CF 第三人称骨骼口径。枪身在胸腹前方完整露出，
+// 肘部自然下沉、站姿有轻微前后脚；这套配置不改变胶囊、AI 或伤害判定。
+export const HUMAN_NPC_POSE = Object.freeze({
+  carryX: -0.01, carryY: 0.105, carryZ: 0.39, carryPitch: 0.14,
+  aimX: -0.02, aimY: 0.15, aimZ: 0.37, aimPitch: 0,
+  idleFootOut: 0.030, idleFootSplit: 0.040,
+  spineLean: 0.018, neckBreath: 0.006,
+});
+const MOUNT_CARRY = Object.freeze({
+  x: HUMAN_NPC_POSE.carryX, y: HUMAN_NPC_POSE.carryY,
+  z: HUMAN_NPC_POSE.carryZ, pitch: HUMAN_NPC_POSE.carryPitch,
+});
+const MOUNT_AIM = Object.freeze({
+  x: HUMAN_NPC_POSE.aimX, y: HUMAN_NPC_POSE.aimY,
+  z: HUMAN_NPC_POSE.aimZ, pitch: HUMAN_NPC_POSE.aimPitch,
+});
 
 // 步频松驰系数：严格「支撑脚世界坐标不动」要求步幅与走过路程严格相等，
 // 而腿长把跨步锁死在 ±0.32m → 3.4m/s 下要 5Hz 的步频，看着像小碎步。
@@ -419,7 +426,9 @@ const HALF_STRIDE_MAX = 0.32;
 // 张望的最大偏头角（rad，约 28°）。**只动 head.rotation.y，不加点头** —— 头部命中盒的
 // AABB 横向半宽 0.125、深度 0.18，绕自身枢轴偏航不改变这两个数（外接半径仍 0.219），
 // 所以爆头盒不会随张望变形。改大这个值之前先跑 /tmp/cfhit.mjs 与 /tmp/cfpivot.mjs。
-const MAX_SCAN = 0.5;
+// 不让非交战 NPC 的头部周期性左右摇摆。目标搜索仍由 AI 与人物整体朝向完成；
+// 这里的纯视觉摆头既不代表真实感知，也会让持枪姿势显得松散、失焦。
+const MAX_SCAN = 0;
 
 // ---------- 临时变量（避免每帧 new）----------
 const DOWN = new THREE.Vector3(0, -1, 0);
@@ -457,8 +466,24 @@ function ik2(root, target, pole, lenUp, lenLo, qUp, qLo) {
 // IK 常量入参：肩点、极向量（肘往哪边顶）、致盲捂脸目标、倒地松手目标
 const _shR = new THREE.Vector3(-SHOULDER_X, SHOULDER_Y, 0);
 const _shL = new THREE.Vector3(SHOULDER_X, SHOULDER_Y, 0);
-const _poleR = new THREE.Vector3(-1.0, -0.75, -0.35).normalize();
-const _poleL = new THREE.Vector3(0.75, -1.0, -0.15).normalize();
+// CF 参考姿态的肘部向下收在身体轮廓内。更强的 -Y 分量让两个 IK 中间关节
+// 下沉；X 仍保留左右极向，避免手肘翻进胸腔。
+const _poleR = new THREE.Vector3(-0.64, -1.24, -0.24).normalize();
+const _poleL = new THREE.Vector3(0.54, -1.30, -0.10).normalize();
+// Optional per-instance preview tuning. Production actors leave poseTuning null,
+// so their established gameplay pose and hit geometry remain byte-for-byte on
+// the original path. The isolated NPC studio uses these semantic offsets to
+// tune the same driver/IK that the game renders instead of rotating imported
+// skin bones behind the driver's back.
+const EMPTY_POSE_TUNING = Object.freeze({
+  torsoLean: 0, torsoYaw: 0, torsoRoll: 0,
+  headPitch: 0, headYaw: 0,
+  shoulderOut: 0, shoulderRaise: 0,
+  elbowOut: 0, elbowDrop: 0,
+  weaponX: 0, weaponY: 0, weaponZ: 0, weaponPitch: 0,
+  supportX: 0, supportY: 0, supportZ: 0,
+  footOut: 0, footSplit: 0, stanceDrop: 0,
+});
 // 致盲捂脸的目标点。**z 必须大于护甲前表面**（前胸板 0.135 / 肩带 0.153）——
 // 旧值 0.16 配老背心够用，现在会被前肩带顶穿 1cm，所以提到 0.20。
 const _faceT = new THREE.Vector3(0.10, SHOULDER_Y + 0.10, 0.20);
@@ -651,8 +676,12 @@ export class SoldierRig {
     this.breath = 0;
     this.deathBlend = 0;
     this.walkW = 0;
+    this.motionSpeed = 0;
     this.motionSide = 0;
     this.motionForward = 1;
+    this.poseTuning = null;
+    this._posePoleR = new THREE.Vector3();
+    this._posePoleL = new THREE.Vector3();
     this.reset();
   }
 
@@ -683,6 +712,7 @@ export class SoldierRig {
     if (this.muzzleFlash) this.muzzleFlash.visible = false;
     this.deathBlend = 0;
     this.walkW = 0;
+    this.motionSpeed = 0;
     this.motionSide = 0;
     this.motionForward = 1;
     this.breath = Math.random() * Math.PI * 2;
@@ -779,8 +809,9 @@ export class SoldierRig {
   // s: { moved, speed, aim, aimPitch, blind, flinch, dead }
   animate(dt, s) {
     this._lastPose = s;
+    const pose = this.poseTuning || EMPTY_POSE_TUNING;
     const moved = Math.max(0, Number.isFinite(s.moved) ? s.moved : 0);
-    const speed = Math.max(0, Number.isFinite(s.speed) ? s.speed : 0);
+    const rawSpeed = Math.max(0, Number.isFinite(s.speed) ? s.speed : 0);
     const aim = clamp01(s.aim || 0);
     const aimPitch = Number.isFinite(s.aimPitch) ? s.aimPitch : 0;   // >0 = 目标更低
     const blind = clamp01(s.blind || 0);
@@ -800,10 +831,17 @@ export class SoldierRig {
     this.aimBlend += (aim - this.aimBlend) * (1 - Math.exp(-dt * 5.5));
     this.deathBlend += ((s.dead ? 1 : 0) - this.deathBlend) * (1 - Math.exp(-dt * 7));
 
-    // ① 步幅跟着速度走，相位跟着「走过的路程」走 —— 支撑脚的脚底才不会打滑
-    const walkW = clamp01((speed - 0.25) / 1.1);
-    this.walkW = walkW;
-    const halfStride = Math.min(HALF_STRIDE_MAX, Math.max(0.06, speed * 0.10));
+    // ① 实际位移仍决定步频，但速度/步态权重必须先做帧率无关的惯性过渡。
+    // 碰墙、寻路换向和抵达掩体时，`moved / dt` 会从奔跑速度瞬间掉到 0；直接把它写进
+    // walkW 会让双腿一帧收回站姿，形成“抽动”。起步略快、停步略慢，脚相位不重置，
+    // 这样不改变导航与碰撞，却保留了真人迈出/收住一步的视觉连续性。
+    const speedRate = rawSpeed > this.motionSpeed ? 9.0 : 5.5;
+    this.motionSpeed += (rawSpeed - this.motionSpeed) * (1 - Math.exp(-dt * speedRate));
+    const targetWalkW = clamp01((this.motionSpeed - 0.25) / 1.1);
+    const locomotionRate = targetWalkW > this.walkW ? 10.0 : 6.0;
+    this.walkW += (targetWalkW - this.walkW) * (1 - Math.exp(-dt * locomotionRate));
+    const walkW = this.walkW;
+    const halfStride = Math.min(HALF_STRIDE_MAX, Math.max(0.06, this.motionSpeed * 0.10));
     this.phase += (Math.PI * moved * CADENCE_SLIP) / (2 * halfStride);
 
     // ② The contact/swing curve comes from a CC0 authored jog clip. Only its
@@ -832,7 +870,8 @@ export class SoldierRig {
     //    用上一帧的骨盆高度会把脚带偏 1~2cm（实测脚掌会切进甲板）。
     const bound = (s) =>
       ANKLE_Y - HIP_DY + s.lift + Math.sqrt(Math.max(0.02, (LEG_REACH * 0.99) ** 2 - s.z * s.z - s.x * s.x));
-    const wantY = Math.min(PELVIS_Y, Math.min(bound(sR), bound(sL))) - 0.012 * walkW;
+    const wantY = Math.min(PELVIS_Y, Math.min(bound(sR), bound(sL))) - 0.012 * walkW
+      - (pose.stanceDrop || 0);
     this.pelvisY += (wantY - this.pelvisY) * (1 - Math.exp(-dt * 15));
     const idleW = 1 - walkW;
     this.pelvis.position.y = this.pelvisY + idleW * Math.sin(this.breath) * 0.008;
@@ -842,8 +881,15 @@ export class SoldierRig {
     // driven cadence. The whole actor still owns actual yaw and hitboxes.
     this.pelvis.rotation.y = THREE.MathUtils.clamp(-(s.turnRate || 0) * .035, -.10, .10) *
       (1 - this.deathBlend);
-    this._fR.v.set(-HIP_X + sR.x, -this.pelvisY + ANKLE_Y + sR.lift, sR.z);
-    this._fL.v.set(HIP_X + sL.x, -this.pelvisY + ANKLE_Y + sL.lift, sL.z);
+    const stance = idleW;
+    // 静止时双脚略宽于髋并前后错开，而不是完全重合在一条横线上；进入移动后
+    // 偏移自动归零，步态和地形脚底 IK 仍沿用原来的真实位移轨迹。
+    const footOut = HUMAN_NPC_POSE.idleFootOut + (pose.footOut || 0);
+    const footSplit = HUMAN_NPC_POSE.idleFootSplit + (pose.footSplit || 0);
+    this._fR.v.set(-HIP_X - footOut * stance + sR.x,
+      -this.pelvisY + ANKLE_Y + sR.lift, sR.z - footSplit * stance);
+    this._fL.v.set(HIP_X + footOut * stance + sL.x,
+      -this.pelvisY + ANKLE_Y + sL.lift, sL.z + footSplit * stance);
     const fR = this._fR, fL = this._fL;
 
     // ④ 腿：前后方向解析 IK，侧移加小幅髋部外展，脚掌保持水平。
@@ -868,17 +914,19 @@ export class SoldierRig {
 
     // ⑤ Upper body is an aiming platform: gait phase and travel direction do
     // not rotate it. Flash, hit and recoil are intentional one-shot reactions.
-    this.spine.rotation.x = 0.05 + 0.05 * blind - flinch * 0.26;
-    this.spine.rotation.y = -flinch * 0.14;
-    this.spine.rotation.z = blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06);
+    this.spine.rotation.x = HUMAN_NPC_POSE.spineLean + (pose.torsoLean || 0)
+      + 0.05 * blind - flinch * 0.26;
+    this.spine.rotation.y = (pose.torsoYaw || 0) - flinch * 0.14;
+    this.spine.rotation.z = (pose.torsoRoll || 0)
+      + blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06);
     this.chest.rotation.x = -this.kick * 0.04 * (1 - this.deathBlend);
 
     // ⑥ 头：跑动时抬起来一点、致盲时低头乱晃、受击时向后甩
-    this.neck.rotation.x = Math.sin(this.breath * 0.9) * 0.02
-      + blind * 0.20 - flinch * 0.30;
+    this.neck.rotation.x = Math.sin(this.breath * 0.9) * HUMAN_NPC_POSE.neckBreath
+      + (pose.headPitch || 0) + blind * 0.20 - flinch * 0.30;
     this.neck.rotation.y = blind
       ? Math.sin(this.breath * 2.3) * 0.45
-      : Math.sin(this.breath * 0.7) * 0.06;
+      : (pose.headYaw || 0);
     // 张望：幅度由 enemies.js 门控（交战距离内 s.scan=0，只有 22m 外才东张西望），
     // 这里只管把相位映成偏头角。**只动 rotation.y、不加点头** —— 把头部 AABB 的
     // 横向占用压在既有的 sqrt(0.125²+0.18²)=0.219 半径内，否则爆头盒会随张望变形。
@@ -892,13 +940,16 @@ export class SoldierRig {
     const k = this.aimBlend;
     const kick = this.kick;
     const db = this.deathBlend;
+    const carry = MOUNT_CARRY;
+    const aimed = MOUNT_AIM;
     this.mountPos.set(
-      MOUNT_CARRY.x + (MOUNT_AIM.x - MOUNT_CARRY.x) * k,
-      MOUNT_CARRY.y + (MOUNT_AIM.y - MOUNT_CARRY.y) * k - kick * 0.012,
-      MOUNT_CARRY.z + (MOUNT_AIM.z - MOUNT_CARRY.z) * k - kick * 0.035
+      carry.x + (aimed.x - carry.x) * k + (pose.weaponX || 0),
+      carry.y + (aimed.y - carry.y) * k + (pose.weaponY || 0) - kick * 0.012,
+      carry.z + (aimed.z - carry.z) * k + (pose.weaponZ || 0) - kick * 0.035
     );
-    this.mountPitch = MOUNT_CARRY.pitch + (MOUNT_AIM.pitch - MOUNT_CARRY.pitch) * k
-      - kick * 0.10 - aimPitch * (0.35 + 0.65 * k) + blind * 0.30;   // 注意是**减**：↑符号约定见文件头，负 pitch = 抬枪口
+    this.mountPitch = carry.pitch + (aimed.pitch - carry.pitch) * k
+      + (pose.weaponPitch || 0) - kick * 0.10
+      - aimPitch * (0.35 + 0.65 * k) + blind * 0.30;   // 注意是**减**：↑符号约定见文件头，负 pitch = 抬枪口
     // 致命伤时持枪节点已隐藏；仍更新挂点姿势，让双臂的 IK 顺畅过渡到松手状态。
     if (db > 0.001) {
       this.mountPos.lerp(_mountDeadP, db);
@@ -930,8 +981,20 @@ export class SoldierRig {
       _gripT.lerp(_dropR, this.deathBlend);
       _hgT.lerp(_dropL, this.deathBlend);
     }
-    ik2(_shR, _gripT, _poleR, UPPER, FORE, this.armR.sh.quaternion, this.armR.el.quaternion);
-    ik2(_shL, _hgT, _poleL, UPPER, FORE, this.armL.sh.quaternion, this.armL.el.quaternion);
+    const shoulderOut = pose.shoulderOut || 0;
+    const shoulderRaise = pose.shoulderRaise || 0;
+    this.armR.sh.position.set(-SHOULDER_X - shoulderOut, SHOULDER_Y + shoulderRaise, 0);
+    this.armL.sh.position.set(SHOULDER_X + shoulderOut, SHOULDER_Y + shoulderRaise, 0);
+    if (reload <= 0 || reload >= 1) _hgT.add(_reloadReturn.set(
+      pose.supportX || 0, pose.supportY || 0, pose.supportZ || 0));
+    this._posePoleR.set(_poleR.x - (pose.elbowOut || 0),
+      _poleR.y - (pose.elbowDrop || 0), _poleR.z).normalize();
+    this._posePoleL.set(_poleL.x + (pose.elbowOut || 0),
+      _poleL.y - (pose.elbowDrop || 0), _poleL.z).normalize();
+    ik2(this.armR.sh.position, _gripT, this._posePoleR, UPPER, FORE,
+      this.armR.sh.quaternion, this.armR.el.quaternion);
+    ik2(this.armL.sh.position, _hgT, this._posePoleL, UPPER, FORE,
+      this.armL.sh.quaternion, this.armL.el.quaternion);
     this.armR.hd.rotation.set(0.3, 0, 0);
     this.armL.hd.rotation.set(0.3, 0, 0);
 

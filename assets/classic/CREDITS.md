@@ -23,7 +23,7 @@
 - 来源：[CF Prison](https://gamebanana.com/mods/119449)，下载文件 `cf_prison_fixed.rar`，GameBanana 文件编号 `288675`；下载包 MD5 `85a39a78351e992d760cf4e4585daf02`。
 - 本地使用包内 `maps/cf_prison.bsp` 的 Source BSP v20 世界几何、光照、实体出生点和凸体碰撞，以及包内 `materials/` 的贴图。转换器为 `tools/import_cf_prison.py`，输出 `prison/map.json`、`map.bin`、`lightmap.png` 和 PNG 贴图。
 - 该移植包依赖的少数 CS:S 基础材质并未随包提供；`fallback_*.png` 是本项目生成的中性色替代纹理。天空使用本项目程序生成的冷灰色云层。原地图比例按 Source 英寸换算到场景米，并将长轴对齐游戏的 Z 轴；出生点和碰撞同步转换。
-- 游戏加载时将 X/Z 水平方向放大 2 倍、Y 垂直方向放大 1.3 倍（`scripts/prison_scale.js`）；人物高度和重力不变。碰撞平面系数、雷达轮廓、出生点及地图边界同步变换，避免画面与可通行空间错位。`scripts/prison_uv.js` 按各轴实际伸展程度重算漫反射贴图坐标，避免砖块和地砖随非等比缩放变形；烘焙光照坐标不变。
+- 游戏加载时不再额外拉伸地图：`scripts/prison_scale.js` 的 X/Z/Y 均为 `1`，保留源 BSP 英寸转米后的几何、碰撞、出生点、雷达和边界。漫反射 UV 与烘焙光照 UV 直接使用源转换产物。源包未包含的 CS:S 基础材质仍使用上述中性色替代贴图，天空仍是本项目生成的冷灰云层；这两项不是源文件的逐字节还原。
 - 这是一份社区移植素材，不属于本项目原创或 CC0。来源页的移植或下载许可不等于原游戏权利人授予本项目再分发、商用或公开部署许可。
 
 ## 雪地求生（用户提供 GoldSrc `de_survivor` 包）
@@ -143,3 +143,21 @@
 
 - [Quaternius Universal Animation Library 1 Standard](https://quaternius.com/packs/universalanimationlibrary.html)，作者 Quaternius，下载包 `License.txt` 标注 CC0 1.0。使用免费包中的 `Jog_Fwd_Loop`，由 `tools/extract_npc_gait.py` 在 32 个等距时刻提取左脚相对于骨盆的前后位移与抬脚高度，并归一化为 `scripts/npc_gait.js`。
 - 游戏仍使用原 SWAT 模型、持枪 IK 和地形脚部 IK；新数据只决定步态的接地／摆腿节奏，根位移仍由碰撞与寻路控制。免费 Standard 包没有步枪专用动作或完整八方向片段，因此没有把手枪动画硬套到步枪上；换弹与转身的双臂／髋部动作由本项目补充。
+
+## 灵隐寺建筑表面贴图（2026-10-20）
+
+- 「靈隱寺」与「大雄寶殿」牌匾的两张金色底纹由本项目根据用户提供的风格参考重新生成，没有复制参考截图像素；`tools/generate_lingyin_plaques.py` 用准确繁体字按传统从右至左顺序合成最终 WebP。书法字形使用 [MasaFont 正風毛筆](https://github.com/max32002/masafont) 的 Medium 字重离线栅格化；该字体由作者以 SIL Open Font License 1.1 发布，游戏运行时不加载字体文件。
+
+- [Poly Haven — Plaster Stone Wall 01](https://polyhaven.com/a/plaster_stone_wall_01)：灰泥墙颜色、OpenGL 法线、粗糙度源图。
+- [Poly Haven — Rock Pitted Mossy](https://polyhaven.com/a/rock_pitted_mossy)：石阶、石栏及石基的颜色、OpenGL 法线、粗糙度源图；颜色转为灰石色。
+- [Poly Haven — Fine Grained Wood](https://polyhaven.com/a/fine_grained_wood)：柱梁与木构件的颜色、OpenGL 法线、粗糙度源图；颜色还派生出红漆和青绿斗拱两种变体。
+- [Poly Haven — Large Grey Tiles](https://polyhaven.com/a/large_grey_tiles)：庭院连续铺地的实拍石板颜色、OpenGL 法线和粗糙度源图；用贴图中的真实缝隙替代原先悬浮的独立方板。
+- [Poly Haven — Grey Roof Tiles](https://polyhaven.com/a/grey_roof_tiles)：厅堂屋顶的旧灰瓦颜色和 OpenGL 法线源图，色彩经降低饱和度和亮度处理以匹配寺庙屋面。
+- 上述源贴图均为作者在 Poly Haven 以 CC0 发布的材质。本地只保留 1K WebP 游戏变体，共用材质并按世界尺寸铺贴；不含原站模型。
+
+## 灵隐寺林地与树叶贴图（2026-10-20）
+
+- [Poly Haven — Forest Ground 01](https://polyhaven.com/a/forrest_ground_01)：林地落叶、枝条和泥土的 1K 漫反射与 OpenGL 法线照片，按约 2.8 米重复铺贴于寺庙外侧地形；地形原有顶点颜色仍控制林地、坡面和小径的明暗分区。
+- [Poly Haven — Pine Tree 01](https://polyhaven.com/a/pine_tree_01)：只使用 1K 松针枝条的漫反射和透明遮罩，裁进现有树叶图集；未导入原站数百万面的树模型。
+- [Poly Haven — Tree Small 02](https://polyhaven.com/a/tree_small_02)：只使用 1K 阔叶的漫反射和透明遮罩，并从同一照片派生秋叶色，裁进现有树叶图集；未导入原站高面数树模型。
+- 三项源素材均为 Poly Haven 的 CC0 资源。运行时松针、阔叶和秋叶仍共用原本的一张 1024² 树叶纹理；树木位置、碰撞、导航和游戏规则未变。

@@ -10,8 +10,8 @@ const css = text('styles/game.css');
 const readme = text('README.md');
 
 const mapIds = Array.from(index.matchAll(/data-map="([^"]+)"/g), match => match[1]);
-assert.deepEqual(mapIds, ['transport', 'prison', 'survivor', 'blacktown', 'bio'],
-  'the lobby exposes the five supported maps');
+assert.deepEqual(mapIds, ['transport', 'prison', 'survivor', 'blacktown', 'lingyin', 'bio'],
+  'the lobby exposes the six supported maps');
 
 for (const path of [
   'assets/palace/',
@@ -31,6 +31,7 @@ assert.match(main, /mapCatalog\.transport = mapData/, 'transport remains registe
 assert.match(main, /mapCatalog\.prison = await buildPrisonMap/, 'Watch City remains registered');
 assert.match(main, /mapCatalog\.survivor = await buildSurvivorMap/, 'Snow Survivor is registered');
 assert.match(main, /mapCatalog\.blacktown = await buildBlacktownMap/, 'Black Town is registered');
+assert.match(main, /mapCatalog\.lingyin = await buildLingyinMap/, 'Lingyin Temple is registered');
 assert.match(main, /mapCatalog\.bio = await buildBioMap/, 'Bio Black Town remains registered');
 
-console.log('PASS: retired maps stay removed while all five supported maps remain registered.');
+console.log('PASS: retired maps stay removed while all six supported maps remain registered.');

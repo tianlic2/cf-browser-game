@@ -2,16 +2,19 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { GroundNavigation } from '../scripts/navigation.js';
-import { brushSupport, brushTop } from '../scripts/brush_collision.js';
+import { brushSupport, brushTop, intersectsBrush } from '../scripts/brush_collision.js';
 import { expandPrisonLayout } from '../scripts/prison_scale.js';
 import { preservePrisonTexelScale } from '../scripts/prison_uv.js';
 
 const base = new URL('../assets/classic/prison/', import.meta.url);
 const source = JSON.parse(readFileSync(new URL('map.json', base)));
 const map = expandPrisonLayout(source);
-const HORIZONTAL = 1.6;
-const VERTICAL = 1.04;
+const runtime = readFileSync(new URL('../scripts/prison_map.js', import.meta.url), 'utf8');
+const HORIZONTAL = 1;
+const VERTICAL = 1;
 const binary = readFileSync(new URL('map.bin', base));
+assert.match(runtime, /navigationStep:\s*\.45\b/, 'runtime uses a grid fine enough for source-width passages');
+assert.doesNotMatch(runtime, /preservePrisonTexelScale/, 'runtime renders source texture coordinates unchanged');
 assert.equal(map.horizontalScale, HORIZONTAL);
 assert.equal(map.verticalScale, VERTICAL);
 assert.equal(map.bounds.hw, source.bounds.hw * HORIZONTAL);
@@ -60,10 +63,7 @@ for (const part of map.parts) {
   const values = new Float32Array(binary.buffer, binary.byteOffset + part.offset, part.count * 7);
   assert.ok(values.every(Number.isFinite), 'map positions and UVs are finite');
   const adjusted = preservePrisonTexelScale(new Float32Array(values), HORIZONTAL, VERTICAL);
-  assert.ok(adjusted.every(Number.isFinite), 'stretched texture UVs remain finite');
-  for (let i = 0; i < values.length; i++)
-    if (i % 7 !== 3 && i % 7 !== 4)
-      assert.equal(adjusted[i], values[i], 'texture scaling leaves positions and baked lightmap UVs intact');
+  assert.deepEqual(adjusted, values, 'source dimensions leave position, diffuse UVs and lightmap UVs unchanged');
 }
 const wallUv = new Float32Array([
   0, 0, 0, 0, 0, .1, .2,
@@ -71,20 +71,20 @@ const wallUv = new Float32Array([
   0, 1, 0, 0, 1, .1, .4,
 ]);
 preservePrisonTexelScale(wallUv, HORIZONTAL, VERTICAL);
-assert.ok(Math.abs(wallUv[10] - HORIZONTAL) < 1e-6,
-  'horizontal brick repeat follows the 1.6x stretch');
-assert.ok(Math.abs(wallUv[18] - VERTICAL) < 1e-6,
-  'vertical brick repeat follows the 1.04x stretch');
+assert.equal(wallUv[10], 1, 'source-width bricks retain source UVs');
+assert.equal(wallUv[18], 1, 'source-height bricks retain source UVs');
 for (const [team, points] of Object.entries(map.spawns)) {
   for (const [x, y, z] of points) {
     const support = Math.max(...map.colliders.map(c => brushSupport(c, x, z))
       .filter(h => h <= y + .5));
     assert.ok(Math.abs(support - y) <= .5, `${team} spawn has floor support`);
+    assert.ok(!map.colliders.some(c => intersectsBrush(c, x, z, y, .45, .5, 1.78, map.colliders)),
+      `${team} spawn remains clear for a full-size player capsule`);
   }
 }
 const nav = new GroundNavigation(map.colliders, map.bounds,
-  { maxHeight: 3.3 * map.verticalScale, step: .75, climb: .5 * map.verticalScale });
-assert.equal(nav.climb, .52, 'vertical stair reach scales with geometry');
+  { maxHeight: 3.3 * map.verticalScale, step: .45, climb: .5 * map.verticalScale });
+assert.equal(nav.climb, .5, 'stairs retain the source-size climb threshold');
 for (const goal of [map.spawns.player[0], map.spawns.enemy[0]]) {
   nav.update({ x: goal[0], y: goal[1], z: goal[2] });
   for (const [team, points] of Object.entries(map.spawns)) {
@@ -92,7 +92,7 @@ for (const goal of [map.spawns.player[0], map.spawns.enemy[0]]) {
       assert.ok(nav.distance[nav.nearest(x, z, y)] >= 0,
         `${team} spawn can route to the opposite end`);
   }
-  assert.ok(nav.points.some((point, i) => point.y > 3.3 * (VERTICAL / 1.3) && nav.distance[i] >= 0),
-    'upper-level floor remains reachable after the vertical stretch');
+  assert.ok(nav.points.some((point, i) => point.y > 3 && nav.distance[i] >= 0),
+    'source upper-level floor remains reachable');
 }
-console.log('PASS: 1.6x horizontal and 1.04x vertical CF Prison layout (80% of prior scale), lightmap UVs, 24 supported spawns and cross-map navigation');
+console.log('PASS: original CF Prison dimensions and UVs, 24 supported spawns, cross-map and upper-level navigation');

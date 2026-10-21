@@ -70,10 +70,10 @@ assert.doesNotMatch(bioMap, /setPower|defenseLights|powerLight|statusMaterial/,
   'the decorative power box has no lighting or gameplay controller');
 assert.doesNotMatch(bioMap, /bio-pyramid|factoryBlock|overhead-crane/,
   'the retired procedural bio arena is no longer built');
-assert.match(main, /mapCatalog\.blacktown = await buildBlacktownMap/,
-  'TDM Black Town remains registered independently');
-assert.match(main, /mapCatalog\.bio = await buildBioMap/,
-  'bio Black Town remains registered as the mode-specific map');
+assert.match(main, /blacktown: \(\) => import\('\.\/blacktown_map\.js/,
+  'TDM Black Town remains available for deferred loading');
+assert.match(main, /bio: \(\) => import\('\.\/bio_map\.js/,
+  'bio Black Town remains available as the mode-specific map');
 assert.doesNotMatch(main, /repairPower|bioObjective|onPowerRestored/,
   'the main loop exposes no power interaction, objective HUD, or restore callback');
 assert.doesNotMatch(lobby, /配电箱旁恢复照明|keys:\s*\["E"\]/,

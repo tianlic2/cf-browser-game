@@ -4,19 +4,12 @@ import { makeGLTFLoader } from "./gltf.js";
 import { SFX } from "./audio.js?v=bio-damage-milestone-1";
 import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=enemy-loadouts-1";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
-import { buildMap } from "./map.js?v=wood-penetration-1";
 import { ClassicView } from "./classic_view.js?v=kukri-scoped-vfx-1";
 import { loadAuthoredViews } from "./authored_view.js?v=orient3";
 import { KNIFE, knifePose } from "./melee.js?v=axe-speed-1";
 import { GRENADE, advanceGrenade, sweepGrenade, grenadePose } from "./grenades.js";
-import { buildClassicMap } from "./classic_map.js?v=map-filter-quality-1";
-import { buildBioMap } from "./bio_map.js?v=map-filter-quality-1";
 import { BioMode } from "./bio_mode.js?v=enemy-loadouts-1";
 import { BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT, refillTwoMagazines } from "./bio_rules.js?v=bio-population-damage-1";
-import { buildPrisonMap } from "./prison_map.js?v=prison-source-scale-1";
-import { buildSurvivorMap } from "./survivor_map.js?v=map-filter-quality-1";
-import { buildBlacktownMap } from "./blacktown_map.js?v=map-filter-quality-1";
-import { buildLingyinMap } from "./lingyin_map.js?v=27";
 import { HUMAN_RUN_SPEED, weaponMoveScale } from "./move_speed.js?v=bio-arena-1";
 import { ImpactVfx } from "./impact_vfx.js";
 import { loadHumanSoldier } from "./human_soldier.js?v=enemy-loadouts-4";
@@ -102,9 +95,9 @@ nicknameInput?.addEventListener("keydown", (event) => {
   event.stopPropagation();
   if (event.code === "Enter") { event.preventDefault(); confirmNickname(); }
 });
-const bootWeights = { map: .28, assets: .42, skins: .11, audio: .16, ready: .03 };
-const bootParts = { map: 0, assets: 0, skins: 0, audio: 0, ready: 0 };
-let bootStage = "map";
+const bootWeights = { assets: .59, skins: .15, audio: .22, ready: .04 };
+const bootParts = { assets: 0, skins: 0, audio: 0, ready: 0 };
+let bootStage = "actors";
 function bootPart(part, fraction) {
   if (!bootScreen || bootScreen.classList.contains("is-error") || !Object.hasOwn(bootParts, part)) return;
   bootParts[part] = Math.max(bootParts[part], Math.min(1, Math.max(0, fraction)));
@@ -119,7 +112,7 @@ function bootPhase(stage, status, detail = "") {
   bootStage = stage;
   bootStatus.textContent = status;
   bootDetail.textContent = detail;
-  const order = ["map", "actors", "audio", "ready"];
+  const order = ["actors", "audio", "ready"];
   const active = order.indexOf(stage);
   for (const el of bootScreen.querySelectorAll("[data-boot-step]")) {
     const index = order.indexOf(el.dataset.bootStep);
@@ -129,7 +122,7 @@ function bootPhase(stage, status, detail = "") {
 }
 function bootFinish() {
   if (!bootScreen || bootScreen.classList.contains("is-error")) return;
-  bootPhase("ready", "部署完成，即将进入游戏房间", "全部资源已就绪");
+  bootPhase("ready", "基础资源就绪，即将进入大厅", "地图将在开局时加载");
   bootParts.ready = 1;
   bootPercent.firstChild.nodeValue = "100";
   bootFill.style.width = "100%";
@@ -403,9 +396,141 @@ scene.add(sun);
 let gameReady = false;
 let mapData = null;
 const mapCatalog = {};
+const MAP_META = {
+  transport: { name: '运输船', poster: './assets/map-posters/transport.jpg' },
+  prison: { name: '守望之城', poster: './assets/map-posters/prison.jpg' },
+  survivor: { name: '雪地求生', poster: './assets/map-posters/survivor.jpg' },
+  blacktown: { name: '黑色城镇', poster: './assets/map-posters/blacktown.jpg' },
+  lingyin: { name: '灵隐寺', poster: './assets/map-posters/lingyin.jpg' },
+  bio: { name: '黑色城镇（生化）', poster: './assets/map-posters/blacktown.jpg' },
+};
 let selectedMapId = "transport";
 let selectedModeId = "tdm";
 let bioMode = null;
+let pendingMapStart = false;
+let mapLoading = false;
+const mapLoadScreen = document.getElementById('mapLoadScreen');
+const mapLoadStatus = document.getElementById('mapLoadStatus');
+const mapLoadDetail = document.getElementById('mapLoadDetail');
+const mapLoadPercent = document.getElementById('mapLoadPercent');
+const mapLoadFill = document.getElementById('mapLoadFill');
+const mapLoadBar = document.getElementById('mapLoadProgress');
+function mapLoadProgress(fraction, status, detail = '') {
+  const percent = Math.max(0, Math.min(100, Math.floor(fraction * 100)));
+  mapLoadPercent.firstChild.nodeValue = String(percent);
+  mapLoadFill.style.width = percent + '%';
+  mapLoadBar.setAttribute('aria-valuenow', String(percent));
+  mapLoadStatus.textContent = status;
+  mapLoadDetail.textContent = detail;
+}
+async function ensureMapLoaded(id, onProgress = () => {}) {
+  if (mapCatalog[id]) { onProgress(1); return mapCatalog[id]; }
+  const loaders = {
+    transport: () => import('./classic_map.js?v=map-filter-quality-1').then(m => m.buildClassicMap),
+    prison: () => import('./prison_map.js?v=prison-source-scale-1').then(m => m.buildPrisonMap),
+    survivor: () => import('./survivor_map.js?v=map-filter-quality-1').then(m => m.buildSurvivorMap),
+    blacktown: () => import('./blacktown_map.js?v=map-filter-quality-1').then(m => m.buildBlacktownMap),
+    bio: () => import('./bio_map.js?v=map-filter-quality-1').then(m => m.buildBioMap),
+    lingyin: () => import('./lingyin_map.js?v=27').then(m => m.buildLingyinMap),
+  };
+  if (!loaders[id]) throw new Error('未知地图：' + id);
+  onProgress(.06);
+  const beforeMap = new Set(scene.children);
+  try {
+    const build = await loaders[id]();
+    onProgress(.12);
+    const result = await build(scene, fraction => onProgress(.12 + fraction * .83));
+    if (id === 'transport') {
+      result.name = MAP_META.transport.name;
+      result.background = scene.background;
+    }
+    mapCatalog[id] = result;
+    onProgress(1);
+    return result;
+  } catch (error) {
+    for (const child of scene.children) if (!beforeMap.has(child)) scene.remove(child);
+    if (id !== 'transport') throw error;
+    console.warn('经典地图加载失败，使用内置场景：', error);
+    const { buildMap } = await import('./map.js?v=wood-penetration-1');
+    const result = await buildMap(scene);
+    result.visuals = scene.children.filter(child => !beforeMap.has(child));
+    result.name = MAP_META.transport.name;
+    result.background = scene.background;
+    mapCatalog[id] = result;
+    onProgress(1);
+    return result;
+  }
+}
+async function prepareSelectedMap(id, report = () => {}) {
+  await ensureMapLoaded(id, report);
+  if (id === 'bio' && bioMode && !bioMode.loaded) {
+    await bioMode.load();
+    bioSkin.map = bioMode.skinTexture;
+    bioSkin.normalMap = bioMode.skinNormal;
+    bioSkin.color.setHex(0xaaaaaa);
+    bioSkin.needsUpdate = true;
+    bioMode.loaded = true;
+  }
+  if (!activateMap(id)) throw new Error('地图无法启用：' + MAP_META[id].name);
+  vmScene.environment = scene.environment;
+  tameWorldEnv(scene);
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  for (const root of [scene, vmScene]) root.traverse(object => {
+    const materials = object.material ? (Array.isArray(object.material) ? object.material : [object.material]) : [];
+    for (const material of materials) for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap']) {
+      if (material[key] && material[key].anisotropy !== maxAniso) {
+        material[key].anisotropy = maxAniso;
+        material[key].needsUpdate = true;
+        anisoCountTotal++;
+      }
+    }
+  });
+  renderer.shadowMap.needsUpdate = true;
+}
+async function startSelectedMap() {
+  if (mapLoading || state === 'playing') return;
+  const id = selectedMapId;
+  mapLoading = true;
+  pendingMapStart = true;
+  const startButton = document.getElementById('startBtn');
+  startButton.disabled = true;
+  mapLoadScreen.dataset.map = id;
+  mapLoadScreen.style.setProperty('--map-poster', `url("${new URL(MAP_META[id].poster, location.href).href}")`);
+  document.getElementById('mapLoadName').textContent = MAP_META[id].name;
+  mapLoadScreen.classList.remove('hidden', 'is-error');
+  mapLoadProgress(0, '正在准备地图', MAP_META[id].name);
+  viewport.style.visibility = 'visible';
+  requestLock();
+  try {
+    const image = new Image();
+    image.src = MAP_META[id].poster;
+    await image.decode();
+    mapLoadProgress(.08, '正在读取地图文件', MAP_META[id].name);
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await prepareSelectedMap(id, fraction => mapLoadProgress(.08 + fraction * .87, '正在构建场景', MAP_META[id].name));
+    mapLoadProgress(1, '地图已就绪', '正在进入战场');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    pendingMapStart = false;
+    mapLoadScreen.classList.add('hidden');
+    if (locked) gameStart();
+    else {
+      menu.classList.remove('hidden');
+      viewport.style.visibility = 'hidden';
+    }
+  } catch (error) {
+    console.error('地图加载失败', error);
+    pendingMapStart = false;
+    mapLoadScreen.classList.add('is-error');
+    mapLoadProgress(0, '地图加载失败', String(error?.message || error));
+    document.getElementById('mapLoadRetry').hidden = false;
+    if (document.pointerLockElement === viewport) document.exitPointerLock();
+    menu.classList.remove('hidden');
+    viewport.style.visibility = 'hidden';
+  } finally {
+    mapLoading = false;
+    startButton.disabled = false;
+  }
+}
 const bioCountdown = document.getElementById('bioCountdown');
 const bioCountdownNumber = document.getElementById('bioCountdownNumber');
 const bioCountdownFill = document.getElementById('bioCountdownFill');
@@ -429,7 +554,7 @@ let colliders = [];
 let bounds = { hw: 28, hl: 70 };
 
 // ---------- 小地图（左上角 CF 式雷达）----------
-// 构造在 init() 里（要等 mapData.topdown 就位）。节点缺失时 Minimap 内部整体转静默禁用。
+// 大厅构造空雷达，所选地图加载完成后才由 activateMap() 写入布局。
 let minimap = null;
 // 复用的 view 对象：每帧只改字段、不新建 —— 主循环里每帧分配一个对象是 GC 压力的来源，
 // 而这里的字段全是数字与已存在的数组引用。
@@ -3357,9 +3482,9 @@ function buildMenuMatch() {
 }
 
 function updateMapChoiceUi() {
-  const name = mapData?.name || "运输船";
+  const name = MAP_META[selectedMapId]?.name || "运输船";
   document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
-    const available = !!mapCatalog[button.dataset.map] && (trainingMatch()
+    const available = !!MAP_META[button.dataset.map] && (trainingMatch()
       ? button.dataset.map === 'blacktown'
       : bioMatch() ? button.dataset.map === 'bio' : button.dataset.map !== 'bio');
     button.disabled = !available || state === "playing";
@@ -3367,13 +3492,14 @@ function updateMapChoiceUi() {
     button.setAttribute("aria-pressed", button.dataset.map === selectedMapId ? "true" : "false");
   });
   document.querySelectorAll('#modeSelect [data-mode]').forEach(button => {
-    button.disabled = (button.dataset.mode === 'bio' && !mapCatalog.bio) ||
-      (button.dataset.mode === 'training' && !mapCatalog.blacktown);
+    button.disabled = false;
     button.classList.toggle('active', button.dataset.mode === selectedModeId);
     button.setAttribute('aria-pressed', String(button.dataset.mode === selectedModeId));
   });
   const label = document.getElementById("lobbyMapName");
   if (label) label.textContent = name;
+  const eyebrow = document.getElementById('lobbyMapEyebrow');
+  if (eyebrow) eyebrow.textContent = name + ' / LOCAL MATCH';
   const chip = document.getElementById("lobbyMapChip");
   const modeLabel = trainingMatch() ? '训练模式' : bioMatch() ? '经典生化' : '团队竞技';
   if (chip) chip.textContent = name + ' · ' + modeLabel;
@@ -3423,7 +3549,8 @@ function activateMap(id) {
   sun.color.setHex(id === 'lingyin' ? 0xffd8ae : 0xfff4e0);
   sun.intensity = id === "lingyin" ? 2.45 : id === "prison" ? 2.15 : id === 'bio' ? 1.5 : id === 'survivor' ? 1.8 : id === 'blacktown' ? 1.9 : 3.05;
   renderer.toneMappingExposure = id === "lingyin" ? 1.1 : id === "prison" ? 1.12 : id === 'bio' ? 1.4 : id === 'survivor' ? 1.08 : id === 'blacktown' ? 1.1 : 1.18;
-  scene.environment = Object.hasOwn(mapData,'environment') ? mapData.environment : mapCatalog.transport?.environment;
+  scene.environment = Object.hasOwn(mapData, 'environment') ? mapData.environment :
+    (mapData.background?.isTexture ? mapData.background : mapCatalog.transport?.environment);
   colliders = mapData.colliders;
   obstacleMeshes = mapData.obstacles;
   obstacleFlat = [];
@@ -3446,10 +3573,10 @@ function activateMap(id) {
 }
 
 function selectMode(id) {
-  if (state === 'playing' || !['tdm', 'bio', 'training'].includes(id) ||
-      (id === 'bio' && !mapCatalog.bio) || (id === 'training' && !mapCatalog.blacktown)) return false;
+  if (state === 'playing' || mapLoading || !['tdm', 'bio', 'training'].includes(id)) return false;
   selectedModeId = id;
-  activateMap(id === 'bio' ? 'bio' : id === 'training' ? 'blacktown' : 'transport');
+  selectedMapId = id === 'bio' ? 'bio' : id === 'training' ? 'blacktown' : 'transport';
+  updateMapChoiceUi();
   buildMenuMatch();
   if (lobby) lobby.refresh();
   return true;
@@ -3541,7 +3668,7 @@ function lobbyData() {
       ? '训练模式 · 黑色城镇 · 按 N 在准心落点放置不死 NPC · 按 B 随时更换背包 · 右侧面板记录伤害'
       : bioMatch()
       ? `经典生化 · 黑色城镇（雨夜） · ${BIO_NPC_COUNT} 名 NPC / ${BIO_INITIAL_ZOMBIES} 名初始幽灵 · 坚守 3 分钟 · 按 Enter 打开战场聊天`
-      : "团队竞技 · " + (mapData?.name || "运输船") + " · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
+      : "团队竞技 · " + MAP_META[selectedMapId].name + " · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
         Math.round(TDM_TIME / 60) + " 分钟 · 按 Enter 打开战场聊天",
     arsenal: lobbyArsenalRows(),
     storage: lobbyStorageRows(),
@@ -5137,6 +5264,7 @@ function quitMatchToLobby() {
   renderTrainingPanel();
   hud.classList.add("hidden"); gameover.classList.add("hidden");
   menu.classList.remove("hidden"); viewport.classList.remove("active");
+  viewport.style.visibility = 'hidden';
   if (lobby) { lobby.setResume(false); lobby.refresh(); }
   if (document.pointerLockElement === viewport) document.exitPointerLock();
 }
@@ -5161,7 +5289,18 @@ document.addEventListener("pointerlockerror", () => {
   if (!locked && !backpackOpen()) showUnlockedMenu();
 });
 document.getElementById("startBtn").addEventListener("click", () => {
-  sfx.ensure(); sfx.ui("click"); mapData?.resumeAudio?.(); requestLock();
+  sfx.ensure(); sfx.ui("click");
+  if (mapData === mapCatalog[selectedMapId] && mapData) {
+    viewport.style.visibility = 'visible';
+    mapData.resumeAudio?.();
+    requestLock();
+  }
+  else startSelectedMap();
+});
+document.getElementById('mapLoadRetry')?.addEventListener('click', () => {
+  mapLoadScreen.classList.add('hidden');
+  document.getElementById('mapLoadRetry').hidden = true;
+  startSelectedMap();
 });
 document.getElementById("restartBtn").addEventListener("click", () => {
   sfx.ensure(); sfx.ui("click"); mapData?.resumeAudio?.(); requestLock();
@@ -5216,7 +5355,10 @@ function showUnlockedMenu() {
   clearBackpackInput();
   viewport.classList.remove("active");
   if (state === "playing") openGameMenu();
-  else hud.classList.add("hidden");
+  else {
+    hud.classList.add("hidden");
+    if (state === 'menu' && !mapLoading) viewport.style.visibility = 'hidden';
+  }
 }
 
 document.addEventListener("pointerlockchange", () => {
@@ -5232,7 +5374,7 @@ document.addEventListener("pointerlockchange", () => {
     menu.classList.add("hidden");
     gameover.classList.add("hidden");
     viewport.classList.add("active");
-    if (state !== "playing") gameStart();
+    if (state !== "playing" && !pendingMapStart) gameStart();
     if (lobby) lobby.setResume(false);
     return;
   }
@@ -5333,6 +5475,8 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- 开始 / 结束 ----------
 function gameStart() {
+  if (!mapData) throw new Error('地图尚未加载，无法开始对局');
+  viewport.style.visibility = 'visible';
   bioMode?.clear();
   clearTrainingTargets(true);
   resetTrainingStats();
@@ -6377,7 +6521,8 @@ function update(dt, rawDt) {
   if (state === "playing" && matchPaused) return;
   time += dt;
   cross.classList.toggle("hit", time < crosshairHitUntil);
-  if (mapData && mapData.update) mapData.update(time, dt, camera); // 地图环境动画
+  if (mapData && !mapLoading && menu.classList.contains('hidden') && mapData.update)
+    mapData.update(time, dt, camera); // 大厅不推进已缓存地图的环境动画
   updateSmokes(dt);
   updateFlash(dt);
   updatePool(dt);
@@ -6530,58 +6675,6 @@ function update(dt, rawDt) {
   enemiesShoot();
 }
 
-// ---------- 大厅机位（首页透出实景用的那个电影感机位）----------
-// 只在 `state === "menu"` 时生效，也就是**还没开过第一局**的那一段。
-// **刻意不看「大厅是否可见」**：中途按 Esc 回大厅时 `state` 仍是 `"playing"`，
-// 那时必须保留玩家自己的视角（否则一松手鼠标画面就飞到船外，点回来视角全乱）。
-// 结算画面（`state === "over"`）同理不受影响。
-//
-// 太阳在 `(-34, 78, 30)`，受光的是**舷侧与船尾**那一侧，所以要从 `-x / +z` 这个
-// 象限看过去 —— 从对面看整条船是一块剪影（改灯的位置就得同步改这里）。
-//
-// **绝不写 `player.yaw` / `player.pitch`** —— 与 recoilPitch / deathCam 同一套
-// 「只叠不改源」的纪律。这里每帧重写 `camera.position` / `camera.rotation` 不会和谁
-// 打架：`update()` 里写 `camera.rotation` 的那句在 `if (state !== "playing") return;`
-// **之后**，`state === "menu"` 时它根本走不到。玩家的真实朝向原地不动，
-// 点「进入战场」的第一帧就是他自己的视角。
-//
-// 摆动全部走 `time`（`update()` 的第一句 `time += dt`，早于所有早退）—— 所以
-// `__tactical.pause()` 会把它一起冻住，无头截图才拍得到确定的机位。
-const LOBBY_CAM = {
-  pos: [-34, 22, 50],   // 世界坐标，受光那一象限
-  target: [0, 3, 0],    // 看向甲板中部
-  yawAmp: 0.055,        // 绕目标点左右摆的幅度（弧度 ≈ ±3.2°）
-  yawRate: 0.075,       // 角频率 rad/s → 周期 ≈ 84s（"几乎察觉不到在动"的量级）
-  riseAmp: 0.9,         // 上下浮动（米）
-  riseRate: 0.33,       // → 周期 ≈ 19s
-  rollAmp: 0.006,       // 极轻微的滚转，免得画面像一张静止贴图
-};
-const _lcTarget = new THREE.Vector3();
-const _lcPos = new THREE.Vector3();
-
-function applyLobbyCamera(t) {
-  const spec = LOBBY_CAM;
-  const yaw = Math.sin(t * spec.yawRate) * spec.yawAmp;
-  const [px, py, pz] = spec.pos;
-  const [tx, ty, tz] = spec.target;
-  // 绕目标点做水平摆动：取「目标 → 机位」的水平偏移，转 yaw，再加回去。
-  const ox = px - tx;
-  const oz = pz - tz;
-  const c = Math.cos(yaw);
-  const s = Math.sin(yaw);
-  _lcPos.set(
-    tx + ox * c - oz * s,
-    py + Math.sin(t * spec.riseRate) * spec.riseAmp,
-    tz + ox * s + oz * c
-  );
-  _lcTarget.set(tx, ty, tz);
-  camera.position.copy(_lcPos);
-  camera.lookAt(_lcTarget);
-  // lookAt 会把 rotation 整个重算（order 是 YXZ），滚转必须叠在它**之后**。
-  // 相机看向自身 -z，所以 rotation.z 就是绕视轴的滚转。
-  camera.rotation.z += Math.sin(t * spec.yawRate * 1.7) * spec.rollAmp;
-}
-
 let lastT = performance.now();
 let rid = 0;
 let frameCount = 0;
@@ -6617,10 +6710,8 @@ function loop(now) {
   // 眼高只由蹲伏驱动；落地缓冲走独立的 viewDip、上台阶滞后走 stepLift，三者互不干扰
   const targetEye = player.crouching ? CROUCH_EYE : EYE;
   if (!matchPaused) player.eyeH += (targetEye - player.eyeH) * Math.min(1, 22 * dt);
-  // 还没开过局时用大厅机位，其余一律用玩家视角（见 applyLobbyCamera 上方那段）。
-  if (state === "menu") {
-    applyLobbyCamera(time);
-  } else {
+  // 大厅不渲染地图；对局与结算沿用玩家视角。
+  if (state !== "menu") {
     camera.position.set(
       player.pos.x,
       player.pos.y + player.eyeH - player.viewDip * 0.11 + player.stepLift,
@@ -6665,8 +6756,11 @@ function loop(now) {
     // 显式清屏：renderer.autoClear 已关，而纹理背景走的是 boxMesh 路径
     // （depthWrite:false），它只重绘颜色、**不清深度**。不显式清，上一帧的深度会
     // 把这一帧挡住，画面看起来是凝固的。
-    renderer.clear();
-    renderer.render(scene, camera);
+    const lobbyCover = !!(menu && !menu.classList.contains("hidden"));
+    if (!lobbyCover && !mapLoading) {
+      renderer.clear();
+      renderer.render(scene, camera);
+    }
     // 清深度但**不清颜色**：视模从此在「深度归零」的画布上重画一遍，
     // 于是枪和手永远压在世界之上 —— 这就是防穿墙的全部机制。
     //
@@ -6678,7 +6772,6 @@ function loop(now) {
     // `state` 仍是 `"playing"`、失锁分支不会重设任何可见性 —— 打标记必然留下
     // 「复活后枪不见了」的残留。跳过渲染是每帧重新求值的无状态做法。
     // 代价：`vmState().renders` 在大厅里不涨（这是**正确**语义，不是回归）。
-    const lobbyCover = !!(menu && !menu.classList.contains("hidden"));
     // 大厅背景音乐：**大厅盖住实景时放，进战场自动淡出**。
     //   · 判据与下一行的视模跳过**同源**（都读 menu 的 hidden 类），所以「画面里有没有实景」
     //     与「听不听得到 BGM」永远一致。**绝不能用 `state`** —— `state` 永远不会回到 "menu"
@@ -6689,7 +6782,7 @@ function loop(now) {
     //     等 `ensure()` 或 preload 完成时补触发 —— 见 audio.js 里那两句。
     // 注意方向：lobbyCover 为真是「大厅在遮挡」，那时**要**音乐，所以直接传它，别取反。
     sfx.setMusic(lobbyCover);
-    if (!lobbyCover && !dead) {
+    if (!lobbyCover && !mapLoading && !dead) {
       renderer.clearDepth();
       renderer.render(vmScene, vmCamera);
       vmFrames++;
@@ -6721,9 +6814,9 @@ function syncVmLighting() {
 
 // ---------- 初始化 ----------
 async function init() {
-  // 音效与地图/模型并行加载；只有所有文件都完成（成功或已明确降级）才放行首页。
+  // 大厅只预装共用人物、武器与音效；地图在玩家点击进入后才请求。
   // preload() 幂等且永不 reject；切枪/换弹/近战动作素材失败时静音，其余音效按各自策略降级。
-  bootPhase("map", "正在装载全部作战地图", "地图 1 / 6 · 运输船");
+  bootPhase("actors", "正在部署人物与武器", "地图将在进入对局时加载");
   const audioLoad = sfx.preload();
   const updateAudioProgress = () => {
     const state = sfx.audioState();
@@ -6761,59 +6854,16 @@ async function init() {
   vmCamera.aspect = camera.aspect;
   vmCamera.updateProjectionMatrix();
 
-  // All arenas share the same renderer and combat systems. The transport map
-  // remains the default; the lobby can switch only between matches.
-  const beforeMap = new Set(scene.children);
-  try { mapData = await buildClassicMap(scene, (fraction) => bootPart("map", fraction * .45)); }
-  catch (error) {
-    console.warn('经典地图加载失败，使用内置场景：', error);
-    mapData = await buildMap(scene);
-    mapData.visuals = scene.children.filter((child) => !beforeMap.has(child));
-  }
-  mapData.name = "运输船";
-  mapData.background = scene.background;
-  mapCatalog.transport = mapData;
-  bootPhase("map", "正在装载全部作战地图", "地图 2 / 6 · 守望之城");
-  try {
-    mapCatalog.prison = await buildPrisonMap(scene,
-      (fraction) => bootPart("map", .45 + fraction * .13));
-  } catch (error) {
-    console.warn('守望之城地图加载失败，保留其他地图：', error);
-  }
-  bootPhase("map", "正在装载全部作战地图", "地图 3 / 6 · 雪地求生");
-  try {
-    mapCatalog.survivor = await buildSurvivorMap(scene,
-      (fraction) => bootPart('map', .58 + fraction * .17));
-  } catch (error) {
-    console.warn('雪地求生地图加载失败，保留其他地图：', error);
-  }
-  bootPhase("map", "正在装载全部作战地图", "地图 4 / 6 · 黑色城镇");
-  try {
-    mapCatalog.blacktown = await buildBlacktownMap(scene,
-      (fraction) => bootPart('map', .75 + fraction * .17));
-  } catch (error) {
-    console.warn('黑色城镇地图加载失败，保留其他地图：', error);
-  }
-  bootPhase("map", "正在装载全部作战地图", "地图 5 / 6 · 黑色城镇（生化）");
-  try {
-    mapCatalog.bio = await buildBioMap(scene,
-      (fraction) => bootPart('map', .92 + fraction * .05));
-  } catch (error) {
-    console.warn('生化黑色城镇加载失败：', error);
-  }
-  bootPhase("map", "正在装载全部作战地图", "地图 6 / 6 · 灵隐寺");
-  try {
-    mapCatalog.lingyin = await buildLingyinMap(scene,
-      (fraction) => bootPart('map', .97 + fraction * .03));
-  } catch (error) {
-    console.warn('灵隐寺地图加载失败，保留其他地图：', error);
-  }
-  activateMap("transport");
+  viewport.style.visibility = 'hidden';
+  updateMapChoiceUi();
   document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (state === "playing" || !mapCatalog[button.dataset.map]) return;
+      if (state === "playing" || mapLoading || !MAP_META[button.dataset.map]) return;
       sfx.ui("click");
-      activateMap(button.dataset.map);
+      selectedMapId = button.dataset.map;
+      updateMapChoiceUi();
+      buildMenuMatch();
+      lobby?.refresh();
     });
   });
   document.querySelectorAll('#modeSelect [data-mode]').forEach(button => {
@@ -6827,27 +6877,19 @@ async function init() {
   const debugParams = new URLSearchParams(location.search);
   const debugMap = debugParams.get('debugMap');
   const debugMode = debugParams.get('debugMode');
-  if (debugMode === 'training' && mapCatalog.blacktown) {
+  if (debugMode === 'training') {
     selectedModeId = 'training';
-    activateMap('blacktown');
+    selectedMapId = 'blacktown';
   }
-  if (debugMap && mapCatalog[debugMap]) {
+  if (debugMap && MAP_META[debugMap]) {
     if (debugMap === 'bio') selectedModeId = 'bio';
     else if (debugMode !== 'training') selectedModeId = 'tdm';
-    activateMap(debugMap);
+    selectedMapId = debugMap;
   }
-  bootPart("map", 1);
+  updateMapChoiceUi();
   bootPhase("actors", "正在部署人物与武器", "加载第一人称视模、敌人和枪械");
-  // 小地图：布局来自 map.js 的 topdown（构建期顺手推入的大件，**不是从 colliders 反推**）。
-  // 尺寸不在这里给 —— Minimap 每帧从 canvas 的 clientWidth 现读，`#hud` 在菜单里隐藏时
-  // 那一读为 0、它会跳过烘图并保留上次的底图，进入战场第一帧自动补上。
+  // 雷达在大厅只建 UI，地图的 topdown 布局由 activateMap() 在开局前按需写入。
   minimap = new Minimap(document.getElementById("mmCanvas"));
-  minimap.setLayout(mapData.topdown, bounds);
-  // 视模场景自己不带 background（那会在视模通道里铺一张全屏天空，把世界整个抹掉），
-  // 但**环境贴图必须共用** —— AWM 金皮(metalness 0.78)、匕首金皮(0.85) 这类高金属度
-  // 表面的着色基本全靠 IBL，漏了这句它们会渲成两块黑铁，而且不报任何错。
-  vmScene.environment = scene.environment;
-  tameWorldEnv(scene);
   limitVal.textContent = TDM_LIMIT;
   document.getElementById("goLimit").textContent = TDM_LIMIT;
   // 大厅「战况简报」里的目标击杀与时限。时限用与 HUD 同一个格式化口径
@@ -6863,7 +6905,7 @@ async function init() {
   let assetsDone = 0;
   const trackAsset = async (promise) => {
     try { return await promise; }
-    finally { bootPart("assets", ++assetsDone / 21); }
+    finally { bootPart("assets", ++assetsDone / 20); }
   };
   const requiredWeapon = async (id) => {
     if (!await loadWeapon(WEAPON_DEFS[id])) throw new Error("武器模型加载失败：" + id);
@@ -6990,19 +7032,6 @@ async function init() {
     onDamageMilestone: showBioDamageMilestone,
     onChange: () => updateBioHud(),
   });
-  bootPhase('actors', '正在部署生化幽灵', '装载角色模型、蒙皮与动作');
-  try {
-    await trackAsset(bioMode.load());
-    bioSkin.map = bioMode.skinTexture;
-    bioSkin.normalMap = bioMode.skinNormal;
-    bioSkin.color.setHex(0xaaaaaa);
-    bioSkin.needsUpdate = true;
-  }
-  catch (error) {
-    console.warn('生化幽灵加载失败，生化模式不可选：', error);
-    mapCatalog.bio = null;
-    updateMapChoiceUi();
-  }
   WEAPON_STATE = owned.ak.state;
   owned.ak.group.visible = true;
   // 可见枪 = AK。**这一行不能省**：switchVisible 是「屏幕上挂着哪把枪」的唯一真相，
@@ -7012,30 +7041,8 @@ async function init() {
   attachMuzzleTo("ak"); // 首帧就要挂好，否则第一条命的枪口火光在世界原点
   viewArms.attach(owned.ak.group, "ak"); // 首帧就得有手，不能等第一次切枪
 
-  // 各向异性过滤：**必须在首帧渲染之前设**（它在纹理首次上传时生效，之后再改要逐个
-  // `needsUpdate`）。实测 `getMaxAnisotropy()` = 16，而全仓库此前一次都没设过 ——
-  // 甲板、走道这类大面积的掠射角表面因此糊成一片。viewarms.js 里那句
-  // 「稍后会设各向异性」的注释也一并在这里兑现。
-  const maxAniso = renderer.capabilities.getMaxAnisotropy();
-  let anisoCount = 0;
-  for (const root of [scene, vmScene]) {
-    root.traverse((o) => {
-      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
-      for (const m of mats) {
-        for (const k of ["map", "normalMap", "roughnessMap", "metalnessMap", "emissiveMap"]) {
-          if (m[k] && m[k].anisotropy !== maxAniso) { m[k].anisotropy = maxAniso; anisoCount++; }
-        }
-      }
-    });
-  }
-  anisoCountTotal = anisoCount;
-
-  // 静态阴影冻结：地图全部构件就位之后，让阴影贴图只烘一次。
-  // 实测阴影通道独占 378 次绘制/帧（占 1453 的 26%），而场上除了吊装集装箱之外
-  // **没有一个会动的投影体**（敌人 `castShadow` 恒为 false，见 enemy_model.js；
-  // 海浪/烟/海鸥从未设过 castShadow）。耗时那块见 AGENTS.md 的「阴影」一节。
-  renderer.shadowMap.needsUpdate = true; // 先烘一次……
-  renderer.shadowMap.autoUpdate = false; // ……然后关掉每帧重算（three 烘完会自己清 needsUpdate）
+  // 地图贴图各向异性与静态阴影在 prepareSelectedMap() 中按需配置。
+  renderer.shadowMap.autoUpdate = false;
 
   bootPhase("audio", "正在检查战斗音效", "等待音效下载与解码完成");
   await audioLoad;
@@ -7063,8 +7070,8 @@ async function init() {
       flashState:()=>({intensity:flashIntensity,duration:flashDur}),clearFlash,
       grenadeExposure, detonateFlash, classicNades,
       ready: () => gameReady,
-      mapState: () => ({ id: selectedMapId, name: mapData?.name,
-        available: Object.keys(mapCatalog), bounds: { ...bounds },
+      mapState: () => ({ id: selectedMapId, name: MAP_META[selectedMapId]?.name,
+        available: Object.keys(MAP_META), loaded: Object.keys(mapCatalog), bounds: { ...bounds },
         colliders: colliders.length, obstacles: obstacleFlat.length,
         navNodes: enemyManager.navigation?.points?.length || 0,
         spawns: mapData?.spawns }),
@@ -7930,10 +7937,14 @@ async function init() {
     };
   }
   if (VIEWMODEL_TUNER_ACTIVE) {
+    await prepareSelectedMap(selectedMapId);
+    viewport.style.visibility = 'visible';
     gameStart();
     mountViewmodelTuner();
   }
   if (!VIEWMODEL_TUNER_ACTIVE && debugParams.get('debugAutoStart') === '1') {
+    await prepareSelectedMap(selectedMapId);
+    viewport.style.visibility = 'visible';
     gameStart();
     // Visual QA can start at a specific authored prop without changing normal
     // spawn logic. Format: debugPlayer=x,y,z,yaw,pitch (angles in radians).
@@ -7968,7 +7979,11 @@ async function init() {
   // 只在显式调试参数下生成固定结算页，供不同窗口尺寸做视觉回归；正常入口不会经过这里。
   const resultPreview = new URLSearchParams(location.search).get("resultPreview");
   if (["win", "lose", "draw"].includes(resultPreview)) {
-    if (state !== "playing") gameStart();
+    if (state !== "playing") {
+      await prepareSelectedMap(selectedMapId);
+      viewport.style.visibility = 'visible';
+      gameStart();
+    }
     endTDM(resultPreview);
   }
   bootPhase("ready", "正在进入游戏房间", "完成首帧渲染");

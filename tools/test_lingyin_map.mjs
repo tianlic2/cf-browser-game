@@ -40,8 +40,8 @@ for(const spawn of [map.spawns.player[0],map.spawns.enemy[0]]) {
 }
 const main = readFileSync(new URL('../scripts/main.js',import.meta.url),'utf8');
 const html = readFileSync(new URL('../index.html',import.meta.url),'utf8');
-assert.match(main,/mapCatalog\.lingyin = await buildLingyinMap/);
-assert.match(main,/地图 6 \/ 6 · 灵隐寺/);
+assert.match(main,/lingyin: \{ name: '灵隐寺', poster:/);
+assert.match(main,/lingyin: \(\) => import\('\.\/lingyin_map\.js\?v=27'\)/);
 assert.match(html,/data-map="lingyin"/);
 assert.ok(statSync(new URL('../scripts/lingyin_world.js',import.meta.url)).size>50000);
 assert.ok(statSync(new URL('../assets/lingyin/lotus-mural.jpg',import.meta.url)).size>100000,

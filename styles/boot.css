@@ -107,10 +107,10 @@
   place-items: stretch;
   padding: 0;
   background:
-    linear-gradient(90deg, rgba(5, 14, 22, .18), rgba(5, 14, 22, .03) 48%, rgba(5, 14, 22, .22)),
-    linear-gradient(0deg, rgba(5, 12, 18, .82) 0 26%, transparent 54%),
-    url("../assets/classic/transport/sky_ft.png") center / cover no-repeat,
-    #b8d4e1;
+    linear-gradient(90deg, rgba(4, 10, 17, .28), rgba(4, 10, 17, .07) 58%, rgba(4, 10, 17, .32)),
+    linear-gradient(0deg, rgba(4, 10, 17, .88) 0 26%, transparent 68%),
+    url("../assets/map-posters/system.jpg") center / cover no-repeat,
+    #0d1820;
 }
 .boot-grid {
   opacity: .2;
@@ -163,6 +163,34 @@
 .boot-steps span.is-active { color: #ead39a; background: none; box-shadow: none; }
 .boot-steps span.is-done { color: rgba(255,255,255,.72); }
 .boot-foot { display: none; }
+.boot-steps { width: min(500px, 58vw); }
+.map-load-screen { z-index: 110; background:
+  linear-gradient(90deg, rgba(3, 10, 16, .16), rgba(3, 10, 16, .04) 55%, rgba(3, 10, 16, .30)),
+  linear-gradient(0deg, rgba(3, 9, 15, .88) 0 24%, transparent 65%),
+  var(--map-poster) center / cover no-repeat,
+  #15232b;
+}
+.map-load-screen.hidden { display: none; }
+.map-load-screen[data-map="bio"] { background:
+  linear-gradient(90deg, rgba(19, 8, 11, .32), rgba(8, 16, 21, .26) 55%, rgba(18, 3, 8, .48)),
+  linear-gradient(0deg, rgba(8, 3, 8, .91) 0 24%, transparent 65%),
+  var(--map-poster) center / cover no-repeat,
+  #151b21;
+}
+.map-load-screen .boot-copy h1 { font-size: clamp(58px, 8vw, 112px); }
+.map-load-screen .boot-retry {
+  position: absolute; left: 6vw; bottom: 13vh; z-index: 1; margin: 0;
+  background: rgba(26, 34, 36, .9);
+}
+.map-load-screen.is-error .boot-status-dot { background: #f38465; animation: none; }
+.map-load-screen .boot-main { padding-bottom: 15vh; }
+.map-load-screen .boot-status { width: min(700px, 65vw); }
+.map-load-screen .boot-status #mapLoadDetail { margin-left: auto; color: rgba(255,255,255,.7); font-size: 12px; }
+@media (max-width: 620px) {
+  .map-load-screen .boot-main { padding-bottom: 24vh; }
+  .map-load-screen .boot-retry { left: 22px; bottom: 19vh; }
+  .map-load-screen .boot-status { width: calc(100% - 44px); }
+}
 @media (max-width: 620px) {
   .boot-frame { padding: 0 22px; }
   .boot-main { padding-bottom: 22vh; }

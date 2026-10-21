@@ -27,11 +27,9 @@ for (const [name, source] of Object.entries({ index, main, css, readme })) {
     `${name} has no retired-map reference`);
 }
 
-assert.match(main, /mapCatalog\.transport = mapData/, 'transport remains registered');
-assert.match(main, /mapCatalog\.prison = await buildPrisonMap/, 'Watch City remains registered');
-assert.match(main, /mapCatalog\.survivor = await buildSurvivorMap/, 'Snow Survivor is registered');
-assert.match(main, /mapCatalog\.blacktown = await buildBlacktownMap/, 'Black Town is registered');
-assert.match(main, /mapCatalog\.lingyin = await buildLingyinMap/, 'Lingyin Temple is registered');
-assert.match(main, /mapCatalog\.bio = await buildBioMap/, 'Bio Black Town remains registered');
+for (const id of ['transport', 'prison', 'survivor', 'blacktown', 'lingyin', 'bio']) {
+  assert.match(main, new RegExp(`${id}: \\{ name: '[^']+', poster:`), `${id} remains selectable`);
+  assert.match(main, new RegExp(`${id}: \\n?\\s*\\(\\) => import\\(`), `${id} has a deferred loader`);
+}
 
 console.log('PASS: retired maps stay removed while all six supported maps remain registered.');

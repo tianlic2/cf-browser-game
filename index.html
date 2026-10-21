@@ -15,7 +15,7 @@
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
     <link rel="stylesheet" href="./styles/game.css?v=modern-shell-chat-layout-1" />
-    <link rel="stylesheet" href="./styles/boot.css?v=multi-map-loading-1" />
+    <link rel="stylesheet" href="./styles/boot.css?v=deferred-map-loading-1" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
   </head>
@@ -27,8 +27,8 @@
         <div class="boot-main">
           <div class="boot-emblem" aria-hidden="true"><span class="boot-emblem-core">CF</span></div>
           <div class="boot-copy">
-            <p class="boot-kicker">MULTI-MAP DEPLOYMENT</p>
-            <h1>正在进入战场</h1>
+            <p class="boot-kicker">SYSTEM DEPLOYMENT</p>
+            <h1>正在进入大厅</h1>
             <p class="boot-subtitle">团队竞技 · 经典生化 · 训练模式</p>
           </div>
           <div class="boot-percent" id="bootPercent">0<span>%</span></div>
@@ -40,11 +40,31 @@
         <div class="boot-status" role="status" aria-live="polite"><span class="boot-status-dot" aria-hidden="true"></span><span id="bootStatus">正在连接作战系统</span><span id="bootDetail">准备加载清单</span></div>
         <button id="bootRetry" class="boot-retry" type="button" hidden>重新加载</button>
         <div class="boot-steps" aria-hidden="true">
-          <span data-boot-step="map">01 / 地图</span><span data-boot-step="actors">02 / 人物与武器</span><span data-boot-step="audio">03 / 音效</span><span data-boot-step="ready">04 / 就绪</span>
+          <span data-boot-step="actors">01 / 人物与武器</span><span data-boot-step="audio">02 / 音效</span><span data-boot-step="ready">03 / 就绪</span>
         </div>
         <div class="boot-foot"><span>GLOBAL RISK // MISSION BRIEFING</span><span>多地图 · 三模式</span></div>
       </div>
       <noscript>需要启用 JavaScript 才能加载游戏。</noscript>
+    </div>
+
+    <div id="mapLoadScreen" class="boot-screen map-load-screen hidden" aria-label="所选地图加载中" role="dialog" aria-modal="true">
+      <div class="boot-grid" aria-hidden="true"></div>
+      <div class="boot-frame">
+        <div class="boot-topline"><span>CrossFire // MAP DEPLOYMENT</span><span>LOCAL OPERATIONS SYSTEM</span></div>
+        <div class="boot-main">
+          <div class="boot-copy">
+            <p class="boot-kicker">SELECTED BATTLEFIELD</p>
+            <h1 id="mapLoadName">运输船</h1>
+            <p class="boot-subtitle">正在部署所选作战地图</p>
+          </div>
+          <div class="boot-percent" id="mapLoadPercent">0<span>%</span></div>
+        </div>
+        <div class="boot-progress" id="mapLoadProgress" role="progressbar" aria-label="地图加载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="boot-progress-fill" id="mapLoadFill"></div>
+        </div>
+        <div class="boot-status" role="status" aria-live="polite"><span class="boot-status-dot" aria-hidden="true"></span><span id="mapLoadStatus">正在准备地图</span><span id="mapLoadDetail"></span></div>
+        <button id="mapLoadRetry" class="boot-retry" type="button" hidden>重试加载</button>
+      </div>
     </div>
 
     <div id="nicknameGate" class="nickname-gate hidden" role="dialog" aria-modal="true" aria-labelledby="nicknameTitle">
@@ -377,7 +397,7 @@
         <section class="lobby-content">
           <div class="lobby-pane" data-pane="play">
             <div class="modern-room-head">
-              <div><span>TRANSPORT SHIP / LOCAL MATCH</span><h2>匹配对局</h2><p><i></i> 本地房间已就绪 · 低延迟</p></div>
+              <div><span id="lobbyMapEyebrow">运输船 / LOCAL MATCH</span><h2>匹配对局</h2><p><i></i> 本地房间已就绪 · 低延迟</p></div>
               <div class="lobby-chips"><span class="lobby-chip" id="lobbyMapChip">运输船 · 团队竞技</span><span class="lobby-chip" id="lobbyMatchChip">8 人 · 普通</span></div>
             </div>
             <div class="modern-room-grid">

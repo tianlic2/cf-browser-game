@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { merge, textTexture } from './geom';
 import { heightAt, terrainRenderedHeightAt, WORLD } from './heightfield';
-import { stoneMaterial, woodMaterial } from './materials';
+import { gateApproachPavingMaterial, stoneMaterial, woodMaterial } from './materials';
 import { RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_SURFACE_LIFT, RIDGE_TRAILS,
   ridgeGuardSections, ridgeRouteFrames } from '../../../scripts/lingyin_hillside_route.js';
 
@@ -26,19 +26,35 @@ export class HillsideTrail {
     const pathPositions: number[]=[];
     const pathUvs: number[]=[];
     const pathIndices: number[]=[];
+    const approachPositions: number[]=[];
+    const approachUvs: number[]=[];
+    const approachColors: number[]=[];
     const guard: THREE.BufferGeometry[]=[];
     const curbs: THREE.BufferGeometry[]=[];
     const roadY=(x:number,z:number)=>
       Math.max(heightAt(x,z)+RIDGE_SURFACE_LIFT,terrainRenderedHeightAt(x,z)+.055);
-    for(const route of RIDGE_TRAILS) {
+    for(const [routeIndex,route] of RIDGE_TRAILS.entries()) {
       const frames=ridgeRouteFrames(route);
       const base=pathPositions.length/3;
       for(const [j,frame] of frames.entries()) {
         for(const side of [-1,0,1]) {
           const x=frame.x+frame.nx*RIDGE_HALF_WIDTH*side;
           const z=frame.z+frame.nz*RIDGE_HALF_WIDTH*side;
-          pathPositions.push(x,roadY(x,z),z);
+          const y=roadY(x,z);
+          pathPositions.push(x,y,z);
           pathUvs.push(frame.along/2.2,(side+1)*1.1);
+          // The first metres immediately outside the main gate share the
+          // exact walkable trail geometry. A 2 cm offset keeps its scanned
+          // stone surface above the older rock shader without a second road
+          // cutting across the terrain or collision path.
+          if(routeIndex===0&&frame.along<=11.7) {
+            approachPositions.push(x,y+.024,z);
+            // About one-metre stones read correctly from walking height;
+            // the main court keeps its broader paving scale.
+            approachUvs.push(x/30,-z/20);
+            const edge=side===0?1:.86;
+            approachColors.push(edge,edge*.994,edge*.982);
+          }
         }
         if(j<frames.length-1) {
           const k=base+j*3;
@@ -86,6 +102,23 @@ export class HillsideTrail {
     paving.name='graded-mountain-stone-path';
     paving.receiveShadow=true;
     this.group.add(paving);
+
+    const approach=new THREE.BufferGeometry();
+    approach.setAttribute('position',new THREE.Float32BufferAttribute(approachPositions,3));
+    approach.setAttribute('uv',new THREE.Float32BufferAttribute(approachUvs,2));
+    approach.setAttribute('color',new THREE.Float32BufferAttribute(approachColors,3));
+    const approachIndices:number[]=[];
+    for(let j=0;j<approachPositions.length/9-1;j++) {
+      const k=j*3;
+      approachIndices.push(k,k+1,k+3,k+1,k+4,k+3,
+        k+1,k+2,k+4,k+2,k+5,k+4);
+    }
+    approach.setIndex(approachIndices);
+    approach.computeVertexNormals();
+    const gateRoad=new THREE.Mesh(approach,gateApproachPavingMaterial());
+    gateRoad.name='front-gate-stone-approach';
+    gateRoad.receiveShadow=true;
+    this.group.add(gateRoad);
 
     // Two rests offer different decisions: the lower terrace has a broad
     // courtyard sightline; the upper ridge reveals the roofs and skyline.

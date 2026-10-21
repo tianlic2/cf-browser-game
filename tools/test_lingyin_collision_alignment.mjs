@@ -19,6 +19,22 @@ assert.ok(blocked(-35.5,14),'west perimeter stays solid outside the new gate');
 assert.equal(blocked(0, 42.9, 1.05), false, 'gate room centre remains open');
 assert.equal(blocked(.35, 42.9, 1.05), false,
   'gate front must not have the former invisible wide wall stubs');
+for (let z=48;z>32;z-=.25) {
+  const here=map.surfaceAt(-2,z,20);
+  const next=map.surfaceAt(-2,z-.25,20);
+  assert.ok(Number.isFinite(here)&&Number.isFinite(next),
+    `replacement gate and mountain approach have continuous footing at z=${z}`);
+  assert.ok(canMoveThroughBrushes(map.colliders,-2,z,-2,z-.25,
+    here,.45,.52,1.78,map.surfaceAt),
+    `player can descend through the replacement gate at z=${z}`);
+  assert.ok(canMoveThroughBrushes(map.colliders,-2,z-.25,-2,z,
+    next,.45,.52,1.78,map.surfaceAt),
+    `player can climb back through the replacement gate at z=${z}`);
+}
+assert.ok(blocked(-6.3,42,1.05)&&blocked(2.3,42,1.05),
+  'closed timber side bays have matching collision');
+assert.ok(blocked(-10.5,47,.38)&&blocked(7.5,45.5,.64),
+  'new tree trunks are physical obstacles beside the open stair');
 
 // Visible props are solid where they are drawn, without their old phantom
 // blockers near the main-hall steps and the middle of the courtyard.
@@ -46,5 +62,11 @@ assert.equal(blocked(-2, -2.05, .88), false,
 assert.ok(blocked(-10, -2.05), 'main-hall side rail is solid');
 assert.ok(blocked(-14.5, -3), 'main-hall perimeter column is solid');
 assert.ok(blocked(-14.8, -10, 1.05), 'main-hall side wall is solid');
+assert.equal(blocked(-2,-10.25,1.35),false,
+  'the removed Buddha must leave no invisible block in the centre aisle');
+assert.ok(blocked(-2,-13.7,1.35),
+  'the new altar has a matching solid combat proxy');
+assert.ok(blocked(-2,-16.7,1.35),
+  'the three-figure dais has a matching solid combat proxy');
 
 console.log(`Lingyin alignment: ${map.colliders.length} visible-matched brushes, exits and rooms checked`);

@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
 const [catalog, rig, enemies, main, bio] = await Promise.all([
-  read('scripts/guncatalog.js'), read('scripts/human_soldier.js'),
+  read('scripts/guncatalog.js'), read('scripts/enemy_model.js'),
   read('scripts/enemies.js'), read('scripts/main.js'), read('scripts/bio_mode.js'),
 ]);
 
@@ -43,13 +43,13 @@ assert.match(main, /r\.id === "barrett" \? \(sniperOnly \? d\.stats\.interval : 
   'a Barrett in an ordinary match still uses single-shot bolt cadence');
 assert.match(main, /sfx\.enemyShoot\(mz\.x, mz\.y, mz\.z, e\.gunId\)/,
   'shot audio follows the equipped gun');
-assert.match(rig, /holder\.add\(template\.clone\(true\)\);this\.nativeWeaponSocket\.add\(holder\)/,
-  'the real catalog weapon is drawn in the animated right hand');
-assert.match(rig, /this\.visualWeapon\.visible=!this\.nativeLoadout/,
-  'the fixed authored rifle disappears when a real loadout is attached');
-assert.match(rig, /this\.nativeLoadout\.localToWorld\(out\)/,
-  'gunfire position follows the visible gun barrel');
+assert.match(rig, /setRifle\(template, gunId\)/,
+  'the procedural rig accepts each respawn loadout');
+assert.match(rig, /this\.mount\.add\(this\.rifle\)/,
+  'the equipped weapon is mounted on the classic actor');
+assert.match(rig, /muzzleBody\(out\)/,
+  'gunfire position follows the classic weapon mount');
 assert.match(bio, /guncatalog\.js\?v=enemy-loadouts-1/,
   'biochemical NPCs share the same prebuilt world catalog');
 
-console.log('PASS: enemy respawn loadouts span AK/M4/Barrett, sniper rules persist, and native hands/audio show the equipped gun.');
+console.log('PASS: enemy respawn loadouts span AK/M4/Barrett, sniper rules persist, and classic hands/audio show the equipped gun.');

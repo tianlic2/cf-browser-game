@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## 2026-10-21 NPC 恢复经典奥摩
+- 用户要求团队竞技敌人、训练靶与生化佣兵的外形和动作退回经典奥摩。正式游戏统一使用 `ClassicSoldierRig`，启动时只调用 `loadClassicSoldier()`；不再导入 `HumanSoldierRig` 或加载 Human Soldier 动作包。本条覆盖下方 2026-10-19 Human Soldier 正式接入记录。
+- 经典奥摩继续使用 `models/swat_bl.glb`、对应蒙皮权重和 `enemy_model.js` 的程序化骨架动作。原有 AI、枪械配装、伤害、碰撞与复活逻辑不因本次回退改变。
+- 已删除不再被引用的 17 个 Human Soldier 动作 FBX 与旧运行时模块。仅保留 `preview/npc-motion.html` 和 `preview/unity-skin-motion.html` 共用的 8 段隔离预览动作、模型与步枪；这些素材不得重新自动接入正式游戏。`tools/test_human_npc_skeleton.mjs` 和 `tools/test_npc_motion_preview.mjs` 锁定此界线。
+
 ## 2026-10-21 地图按需加载与双阶段加载页
 - 首次启动只加载共用人物、视模、武器、音效和大厅 UI；不得在进入大厅前构建运输船或其他任何地图，也不得用地图模型作为大厅背景。此条覆盖下方“多地图启动加载页”要求预装全部地图的历史规则。
 - 大厅地图按钮只更改所选地图与文案，不发起地图 JS/贴图/GLB 请求；点击开始后展示该地图静态图片与真实进度，再动态导入、构建、激活该地图。生化模型也只在选择生化并开局后加载。调试自动开局可在首次加载页下按需加载目标地图。

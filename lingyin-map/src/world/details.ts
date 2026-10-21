@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { archWallGeometry, box, cyl, merge, projectedTempleUV, textTexture } from './geom';
 import { Rng } from '../core/math';
 import { heightAt, WATER_POND, WORLD } from './heightfield';
-import { bronzeMaterial, courtyardPavingMaterial, goldMaterial, roofMaterial, stoneMaterial, woodMaterial, weatheredFloorMaterial, tintFloorSlab } from './materials';
+import { bronzeMaterial, courtyardPavingMaterial, goldMaterial, roofMaterial, stoneMaterial, woodMaterial } from './materials';
 
 export class Details {
   readonly group = new THREE.Group();
@@ -33,19 +33,6 @@ export class Details {
     court.receiveShadow = true;
     court.name = 'courtyard-photographic-paving';
     this.group.add(court);
-
-    const stone = weatheredFloorMaterial();
-    const geos: THREE.BufferGeometry[] = [];
-    const rng = new Rng('paving');
-    // processional path from the gate to the bridge
-    for (let z = 46; z < 58; z += 1.3) {
-      for (let x = -4; x < 4; x += 1.9) {
-        geos.push(tintFloorSlab(box(1.7, 0.09, 1.15, x, heightAt(x, z) + 0.02, z),.81+rng.range(0,.23)));
-      }
-    }
-    const m = new THREE.Mesh(merge(geos), stone);
-    m.receiveShadow = true;
-    this.group.add(m);
   }
 
   private puddles() {

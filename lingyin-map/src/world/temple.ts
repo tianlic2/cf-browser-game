@@ -3,7 +3,7 @@ import { box, cyl, lattice, merge, projectedTempleUV, roofGeometry, ringRoofGeom
 import { WORLD } from './heightfield';
 import { bronzeMaterial, dougongMaterial, goldMaterial, lanternMaterial, ricePaperTexture, roofMaterial, stoneMaterial, wallMaterial, windowMaterial, woodMaterial, weatheredFloorMaterial, tintFloorSlab, templePlaqueTexture } from './materials';
 
-type Role = 'stone' | 'floor' | 'wall' | 'paper' | 'wood' | 'woodDark' | 'dougong' | 'roof' | 'gold' | 'bronze' | 'lattice' | 'lantern' | 'dark' | 'window';
+type Role = 'stone' | 'floor' | 'wall' | 'paper' | 'gatePlaster' | 'wood' | 'woodDark' | 'dougong' | 'roof' | 'mainRoof' | 'gateRoof' | 'gold' | 'bronze' | 'lattice' | 'lantern' | 'dark' | 'window';
 
 type HallSpec = {
   x: number;
@@ -18,12 +18,21 @@ type HallSpec = {
   name?: string;
   openFront?: boolean;
   plaque?: string;
+  studyFacade?: boolean;
 };
 
 export type TempleAnchors = {
   burner: THREE.Vector3;
   door: THREE.Vector3;
   eaves: THREE.Vector3[];
+};
+
+export type TempleOptions = {
+  onlyMainHall?: boolean;
+  omitGateVisual?: boolean;
+  omitMainHallShrine?: boolean;
+  studyHallEave?: number;
+  studyFacade?: boolean;
 };
 
 export class Temple {
@@ -35,11 +44,11 @@ export class Temple {
     eaves: [],
   };
   private roles: Record<Role, THREE.BufferGeometry[]> = {
-    stone: [], floor: [], wall: [], paper: [], wood: [], woodDark: [], dougong: [], roof: [], gold: [], bronze: [], lattice: [], lantern: [], dark: [], window: [],
+    stone: [], floor: [], wall: [], paper: [], gatePlaster: [], wood: [], woodDark: [], dougong: [], roof: [], mainRoof: [], gateRoof: [], gold: [], bronze: [], lattice: [], lantern: [], dark: [], window: [],
   };
 
-  constructor() {
-    this.group.name = 'temple';
+  constructor(options: TempleOptions = {}) {
+    this.group.name = options.onlyMainHall ? 'temple-main-hall-only' : 'temple';
     const plat = WORLD.platform.y;
     this.materials = {
       stone: stoneMaterial(0.2),
@@ -47,10 +56,14 @@ export class Temple {
       wall: wallMaterial(),
       paper: new THREE.MeshStandardMaterial({color:0xc5bba4,map:ricePaperTexture(),
         bumpMap:ricePaperTexture(),bumpScale:.009,roughness:.96,metalness:0,side:THREE.DoubleSide}),
+      gatePlaster: new THREE.MeshStandardMaterial({color:0xc58d62,map:ricePaperTexture(),
+        roughness:.96,metalness:0,emissive:0x4e2a14,emissiveIntensity:.16}),
       wood: woodMaterial(false),
       woodDark: woodMaterial(true),
       dougong: dougongMaterial(),
       roof: roofMaterial(),
+      mainRoof: roofMaterial(),
+      gateRoof: roofMaterial(),
       gold: goldMaterial(),
       bronze: bronzeMaterial(),
       lattice: woodMaterial(true),
@@ -58,16 +71,22 @@ export class Temple {
       window: windowMaterial(),
       dark: new THREE.MeshStandardMaterial({ color: 0x120f0c, roughness: 1 }),
     };
+    (this.materials.gateRoof as THREE.MeshStandardMaterial).color.set('#aab89a');
 
-    this.buildPlatform(plat);
-    this.buildHall({ x: -2, z: 40, w: 15, d: 8.5, eave: 5.4, rise: 2.9, plinth: 0.8, name: 'gate', openFront: true, plaque: '靈隱寺' });
-    this.buildHall({ x: -2, z: -12, w: 27, d: 17, eave: 8.0, rise: 5.0, plinth: 1.1, double: true, name: 'main', plaque: '大雄寶殿' });
-    this.buildHall({ x: -25.5, z: 7, w: 9, d: 16, eave: 5.0, rise: 2.5, plinth: 0.7, rotY: Math.PI / 2, name: 'west' });
-    this.buildHall({ x: 19, z: 7, w: 9, d: 16, eave: 5.0, rise: 2.5, plinth: 0.7, rotY: -Math.PI / 2, name: 'east' });
-    this.buildHall({ x: -2, z: -38, w: 17, d: 10, eave: 6.4, rise: 3.5, plinth: 0.9, name: 'rear', plaque: '法堂' });
-    this.buildPagoda(-31, 33, plat);
-    this.buildEnclosure(plat);
-    this.buildBuddha(plat);
+    if (!options.onlyMainHall) {
+      this.buildPlatform(plat);
+      if (!options.omitGateVisual)
+        this.buildHall({ x: -2, z: 40, w: 15, d: 8.5, eave: 6.6, rise: 2.9, plinth: 0.8, name: 'gate', openFront: true, plaque: '靈隱寺' });
+    }
+    this.buildHall({ x: -2, z: -12, w: 27, d: 17, eave: options.studyHallEave ?? 8.0, rise: 5.0, plinth: 1.1, double: true, name: 'main', plaque: '大雄寶殿', studyFacade: options.studyFacade });
+    if (!options.onlyMainHall) {
+      this.buildHall({ x: -25.5, z: 7, w: 9, d: 16, eave: 5.0, rise: 2.5, plinth: 0.7, rotY: Math.PI / 2, name: 'west' });
+      this.buildHall({ x: 19, z: 7, w: 9, d: 16, eave: 5.0, rise: 2.5, plinth: 0.7, rotY: -Math.PI / 2, name: 'east' });
+      this.buildHall({ x: -2, z: -38, w: 17, d: 10, eave: 6.4, rise: 3.5, plinth: 0.9, name: 'rear', plaque: '法堂' });
+      this.buildPagoda(-31, 33, plat);
+      this.buildEnclosure(plat);
+    }
+    if (!options.omitMainHallShrine) this.buildBuddha(plat);
     this.finalize();
   }
 
@@ -98,17 +117,11 @@ export class Temple {
     for (let i = 0; i < 5; i++) {
       this.add('stone', box(0.55, 0.2, 5.2, P.x1 + 0.4 + i * 0.5, y - 0.2 - i * 0.2, 28));
     }
-    // balustrade along the south edge, leaving the processional opening
-    for (const side of [-1, 1]) {
-      const x0 = side < 0 ? P.x0 + 1 : 6;
-      const x1 = side < 0 ? -8 : P.x1 - 1;
-      this.balustrade(x0, x1, P.z1 - 0.3, y + 0.1, 'x');
-    }
-    // The central bay now leads to the climb behind the mountain gate.
-    this.balustrade(-8, -5, P.z1 - 0.3, y + 0.1, 'x');
-    this.balustrade(1, 6, P.z1 - 0.3, y + 0.1, 'x');
-    for(const x of [-5,1])
-      this.add('stone',box(.55,1.22,.55,x,y+.62,P.z1-.3));
+    // Keep the outer terrace's stone rail. The section flanking the north
+    // gate is supplied by the new timber fence, with the same six-metre
+    // processional opening and existing collision line.
+    this.balustrade(P.x0 + 1, -14, P.z1 - 0.3, y + 0.1, 'x');
+    this.balustrade(10, P.x1 - 1, P.z1 - 0.3, y + 0.1, 'x');
   }
 
   private balustrade(a: number, b: number, c: number, y: number, axis: 'x' | 'z', _vertical = false) {
@@ -136,11 +149,12 @@ export class Temple {
 
   // ------------------------------------------------------------------ halls
   private buildHall(s: HallSpec) {
+    const isGate = s.name === 'gate';
     const colH = s.eave - s.plinth;
     const hw = s.w / 2;
     const hd = s.d / 2;
     const geos: Record<Role, THREE.BufferGeometry[]> = {
-      stone: [], floor: [], wall: [], paper: [], wood: [], woodDark: [], dougong: [], roof: [], gold: [], bronze: [], lattice: [], lantern: [], dark: [], window: [],
+      stone: [], floor: [], wall: [], paper: [], gatePlaster: [], wood: [], woodDark: [], dougong: [], roof: [], mainRoof: [], gateRoof: [], gold: [], bronze: [], lattice: [], lantern: [], dark: [], window: [],
     };
     const push = (role: Role, geo: THREE.BufferGeometry) => geos[role].push(geo);
 
@@ -162,18 +176,18 @@ export class Temple {
         const x = -hw + 1.0 + ((s.w - 2.0) * i) / colsX;
         if ((s.name === 'main' && zs === 1 && Math.abs(x) < 1.6) ||
             (s.name === 'gate' && Math.abs(x) < 1.0)) continue;
-        this.column(geos, x, 0.25, zs * (hd - 0.9), colHt);
+        this.column(geos, x, 0.25, zs * (hd - 0.9), isGate && Math.abs(x) > 4 ? 3.7 : colHt);
       }
     }
     for (const xs of [-1, 1]) {
       for (let i = 1; i < colsZ; i++) {
         const z = -hd + 1.0 + ((s.d - 2.0) * i) / colsZ;
-        this.column(geos, xs * (hw - 0.9), 0.25, z, colHt);
+        this.column(geos, xs * (hw - 0.9), 0.25, z, isGate ? 3.7 : colHt);
       }
     }
 
     // walls, inset behind the colonnade
-    const wallH = colHt - 0.4;
+    const wallH = isGate ? 3.55 : colHt - 0.4;
     const wallT = 0.3;
     const wy = 0.25 + wallH / 2;
     const wallInset = 1.35;
@@ -186,13 +200,17 @@ export class Temple {
       push('wall', box(segW, wallH, wallT, gap / 2 + segW / 2, wy, hd - wallInset));
       foot(segW, wallT, -(gap / 2 + segW / 2), hd - wallInset);
       foot(segW, wallT, gap / 2 + segW / 2, hd - wallInset);
-      push('wood', box(gap + .3, 0.35, wallT + 0.1, 0, 0.25 + wallH, hd - wallInset));
+      // The study facade has its own upper framing; the old lintel cuts
+      // horizontally through the now-taller central entrance.
+      if (!(s.name === 'main' && s.studyFacade))
+        push('wood', box(gap + .3, 0.35, wallT + 0.1, 0, 0.25 + wallH, hd - wallInset));
     } else {
       // gate: two flanking wall stubs, open central bay
-      push('wall', box(2.4, wallH, wallT, -hw + 1.0 + 1.2, wy, hd - wallInset));
-      push('wall', box(2.4, wallH, wallT, hw - 1.0 - 1.2, wy, hd - wallInset));
-      foot(2.4, wallT, -hw + 2.2, hd - wallInset);
-      foot(2.4, wallT, hw - 2.2, hd - wallInset);
+      const wingFrontX = hw - 2.05;
+      for (const side of [-1, 1]) {
+        push('wall', box(3.8, wallH, wallT, side * wingFrontX, wy, hd - wallInset));
+        foot(3.8, wallT, side * wingFrontX, hd - wallInset);
+      }
       // Keep the processional bay open all the way through the gate.
     }
     if (s.openFront || s.name === 'west') {
@@ -236,7 +254,8 @@ export class Temple {
           // the central bay stands open: a warm interior and the Buddha read through it
           push('gold', box(0.16, doorH, 0.2, x - doorW / 2 - 0.1, 0.25 + doorH / 2, hd - wallInset + 0.2));
           push('gold', box(0.16, doorH, 0.2, x + doorW / 2 + 0.1, 0.25 + doorH / 2, hd - wallInset + 0.2));
-          push('gold', box(doorW + 0.2, 0.18, 0.2, x, 0.25 + doorH + 0.12, hd - wallInset + 0.2));
+          if (!(s.name === 'main' && s.studyFacade))
+            push('gold', box(doorW + 0.2, 0.18, 0.2, x, 0.25 + doorH + 0.12, hd - wallInset + 0.2));
           continue;
         }
         const lat = lattice(doorW, doorH, 0.17, 0.055, hd - wallInset + 0.18);
@@ -326,7 +345,7 @@ export class Temple {
       }
     }
     const beamY = Math.max(floorTop + 2.9, colH - .35);
-    for (let iz = 0; iz < Math.max(2, Math.floor(roomD / 3.4)); iz++) {
+    for (let iz = 0; !isGate && iz < Math.max(2, Math.floor(roomD / 3.4)); iz++) {
       const z = -roomD / 2 + (iz + .5) * roomD / Math.max(2, Math.floor(roomD / 3.4));
       push('wood', box(roomW + .2, .2, .24, 0, beamY, z));
       for (const x of [-roomW / 3, roomW / 3])
@@ -360,6 +379,7 @@ export class Temple {
       }
     }
 
+    if (!isGate) {
     // architrave + eave beams
     push('wood', box(s.w + 0.4, 0.42, 0.42, 0, colH - 0.2, hd - 0.9));
     push('wood', box(s.w + 0.4, 0.42, 0.42, 0, colH - 0.2, -hd + 0.9));
@@ -425,13 +445,60 @@ export class Temple {
       push('gold', cyl(0.012, 0.012, 0.55, 4, lx, ly + 0.6, lz));
     }
 
+    }
+
     // roof
-    if (s.double) {
+    if (isGate) {
+      // The real mountain gate is a high, open central portal flanked by
+      // lower gatehouses. Avoid stacking a tower on top of a full-width roof.
+      const centralW = 9.1;
+      const centralEave = colH + .16;
+      push('gateRoof', roofGeometry({ w: centralW, d: s.d,
+        eaveY: centralEave, rise: 3.05, cornerLift: .88,
+        overhang: 1.25, nu: 34, nv: 14 }));
+      this.ridgeAndTips(geos, centralW, s.d, centralEave + 3.05, centralEave);
+      // A hip roof surface alone is hollow from below. Close the processional
+      // bay with a timber soffit so players never see the sky through its
+      // middle, then expose a modest beam rhythm under the boards.
+      push('wood', box(8.9, .14, s.d + .35, 0, colH - .1, 0));
+      for (const z of [-3.45, -1.72, 0, 1.72, 3.45])
+        push('woodDark', box(8.9, .2, .24, 0, colH - .28, z));
+      for (const x of [-3.65, 3.65])
+        push('woodDark', box(.22, .2, s.d + .35, x, colH - .28, 0));
+      // The rear doorway has a lower lintel than the front. Fill the tall
+      // spandrel above it; otherwise a sky slit remains below the soffit.
+      push('woodDark', box(8.9, 2.1, .32,
+        0, colH - 1.07, -hd + 1.35));
+      for (const side of [-1, 1]) {
+        const wing = roofGeometry({ w: 5.6, d: s.d,
+          eaveY: 3.84, rise: 1.45, cornerLift: .52,
+          overhang: 1.1, nu: 24, nv: 11 });
+        wing.translate(side * 5.15, 0, 0);
+        push('gateRoof', wing);
+        push('woodDark', box(6.1, .28, .42,
+          side * 5.15, 3.62, hd - .25));
+        push('woodDark', box(6.1, .28, .42,
+          side * 5.15, 3.62, -hd + .25));
+      }
+      // The portal and plaque are carried by the red-brown timber frame.
+      for (const side of [-1, 1]) {
+        for (const z of [-hd + .82, hd - .82])
+          push('woodDark', box(.62, colH - .35, .7,
+            side * 3.22, (colH - .35) / 2 + .25, z));
+        push('dougong', box(1.22, .29, 1.55,
+          side * 3.22, colH - .25, hd - .25));
+      }
+      push('woodDark', box(8.9, .7, .7, 0, colH - .63, hd - .35));
+      push('wood', box(9.5, .3, .62, 0, colH + .02, hd - .3));
+      push('wood', box(9.5, .3, .62, 0, colH + .02, -hd + .3));
+      push('bronze', box(8.75, .05, .75, 0, colH - .27, hd - .35));
+    } else if (s.double) {
+      const roofRole: Role = s.studyFacade ? 'mainRoof' : 'roof';
       const lower = ringRoofGeometry({
         wOuter: s.w + 3.4, dOuter: s.d + 3.4, wInner: s.w - 1.2, dInner: s.d - 1.2,
         eaveY: colH + 0.1, rise: 1.15, cornerLift: 0.55, nu: 34, nv: 8,
       });
-      push('roof', lower);
+      push(roofRole, lower);
       // upper storey
       const upEave = colH + 3.0;
       push('wall', box(s.w - 2.2, 3.0, s.d - 2.2, 0, colH + 1.5, 0));
@@ -454,34 +521,75 @@ export class Temple {
       push('wood', box(s.w + 0.6, 0.35, 0.5, 0, upEave, hd - 0.7));
       push('wood', box(s.w + 0.6, 0.35, 0.5, 0, upEave, -hd + 0.7));
       const upper = roofGeometry({ w: s.w - 1.4, d: s.d - 1.4, eaveY: upEave + 0.2, rise: s.rise + 0.4, cornerLift: 0.95, overhang: 1.45, nu: 38, nv: 16 });
-      push('roof', upper);
-      this.ridgeAndTips(geos, s.w - 1.4, s.d - 1.4, upEave + 0.2 + s.rise + 0.4, upEave + 0.2);
+      push(roofRole, upper);
+      this.ridgeAndTips(geos, s.w - 1.4, s.d - 1.4, upEave + 0.2 + s.rise + 0.4, upEave + 0.2, roofRole);
     } else {
-      const roof = roofGeometry({ w: s.w, d: s.d, eaveY: colH + 0.15, rise: s.rise, cornerLift: 0.9, overhang: 1.25, nu: 36, nv: 15 });
+      const roof = roofGeometry({ w: s.w, d: s.d, eaveY: colH + 0.15,
+        rise: s.rise, cornerLift: .9, overhang: 1.25,
+        nu: 36, nv: 15 });
       push('roof', roof);
       this.ridgeAndTips(geos, s.w, s.d, colH + 0.15 + s.rise, colH + 0.15);
     }
 
-    // eave tile ends along the front and back
-    const eaveY0 = s.double ? colH + 2.1 : colH + 0.15;
-    const eaveHW = s.w / 2 + 1.1;
-    const nEnds = Math.round((eaveHW * 2) / 0.34);
-    for (let i = 0; i <= nEnds; i++) {
-      const x = -eaveHW + (2 * eaveHW * i) / nEnds;
-      for (const zs of [-1, 1]) {
-        const g = new THREE.CylinderGeometry(0.075, 0.075, 0.05, 8);
-        g.rotateX(Math.PI / 2);
-        g.translate(x, eaveY0 - 0.06, zs * (s.d / 2 + 1.1));
-        push('roof', g);
+    if (isGate) {
+      // Closely spaced exposed tile noses are characteristic of the photo.
+      for (const part of [
+        { x: 0, half: 5.75, y: colH + .12, z: hd + 1.25 },
+        { x: -5.15, half: 3.9, y: 3.81, z: hd + 1.1 },
+        { x: 5.15, half: 3.9, y: 3.81, z: hd + 1.1 },
+      ]) {
+        const count = Math.round(part.half * 2 / .32);
+        for (let i = 0; i <= count; i++) {
+          const x = part.x - part.half + 2 * part.half * i / count;
+          const end = new THREE.CylinderGeometry(.065, .065, .075, 8);
+          end.rotateX(Math.PI / 2);
+          end.translate(x, part.y, part.z);
+          push('gateRoof', end);
+        }
+      }
+    } else if (!s.studyFacade) {
+      // eave tile ends along the front and back
+      const eaveY0 = s.double ? colH + 2.1 : colH + 0.15;
+      const eaveHW = s.w / 2 + 1.1;
+      const nEnds = Math.round((eaveHW * 2) / 0.34);
+      for (let i = 0; i <= nEnds; i++) {
+        const x = -eaveHW + (2 * eaveHW * i) / nEnds;
+        for (const zs of [-1, 1]) {
+          const g = new THREE.CylinderGeometry(0.075, 0.075, 0.05, 8);
+          g.rotateX(Math.PI / 2);
+          g.translate(x, eaveY0 - 0.06, zs * (s.d / 2 + 1.1));
+          push('roof', g);
+        }
       }
     }
 
     // corner bells
-    for (const xs of [-1, 1]) {
+    for (const xs of isGate ? [] : [-1, 1]) {
       for (const zs of [-1, 1]) {
-        push('bronze', cyl(0.14, 0.2, 0.5, 8, xs * (hw + 1.15), colH - 0.55, zs * (hd + 1.15)));
-        push('bronze', new THREE.SphereGeometry(0.09, 8, 6).translate(xs * (hw + 1.15), colH - 0.85, zs * (hd + 1.15)));
+        const corner = 1.15;
+        push('bronze', cyl(0.14, 0.2, 0.5, 8, xs * (hw + corner), colH - 0.55, zs * (hd + corner)));
+        push('bronze', new THREE.SphereGeometry(0.09, 8, 6).translate(xs * (hw + corner), colH - 0.85, zs * (hd + corner)));
       }
+    }
+
+    if (isGate) {
+      // Shallow, warm plaster side rooms and black lattice windows flank the
+      // unobstructed portal. Their visible faces coincide with existing walls.
+      for (const side of [-1, 1]) {
+        const x = side * (hw - 2.2);
+        const front = hd - wallInset + .23;
+        push('gatePlaster', box(2.42, 2.57, .045, x, 2.02, front - .08));
+        const panel = lattice(1.64, 1.67, .21, .065, front + .05);
+        panel.bars.translate(x, 1.25, 0);
+        panel.backing.translate(x, 1.25, 0);
+        push('lattice', panel.bars);
+        push('woodDark', panel.backing);
+        for (const dx of [-1.23, 1.23])
+          push('woodDark', box(.13, 2.72, .16, x + dx, 1.98, front + .025));
+        for (const y of [.63, 3.34])
+          push('woodDark', box(2.58, .13, .16, x, y, front + .025));
+      }
+      push('woodDark', box(8.9, .5, .22, 0, colH - 1.06, hd + .3));
     }
 
     // plaque
@@ -493,15 +601,36 @@ export class Temple {
       const mat = featuredTex
         ? new THREE.MeshStandardMaterial({ name: `lingyin-${s.name}-gilded-plaque`, map: tex, roughness: 0.86, metalness: 0.02, side: THREE.DoubleSide })
         : new THREE.MeshStandardMaterial({ map: tex, roughness: 0.55, metalness: 0.15, emissive: new THREE.Color('#3a2a12'), emissiveIntensity: 0.18 });
-      const plaqueLift = s.name === 'gate' ? 0.15 : 1.45;
-      const plaqueY = WORLD.platform.y + 0.25 + Math.min(wallH - 0.55, 3.5) + plaqueLift;
-      const plaque = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.2), mat);
-      plaque.position.set(s.x, plaqueY, s.z + hd - 0.35);
+      const studyMain = s.name === 'main' && s.studyFacade;
+      // In the isolated proposal the sign belongs in the second-storey bay,
+      // between the lower and upper roof, as in the supplied facade reference.
+      // The regular game building keeps its existing plaque placement.
+      const plaqueLift = s.name === 'gate' ? 1.18 : 1.45;
+      const plaqueYLocal = studyMain ? colH + 2.03
+        : 0.25 + Math.min(wallH - 0.55, 3.5) + plaqueLift;
+      const plaqueZLocal = studyMain ? hd - .71
+        : hd + (s.name === 'gate' ? .62 : -.35);
+      const plaqueW = studyMain ? 5.5 : 4.2;
+      const plaqueH = studyMain ? 1.52 : 1.2;
+      const plaque = new THREE.Mesh(new THREE.PlaneGeometry(plaqueW, plaqueH), mat);
+      plaque.position.set(s.x, WORLD.platform.y + plaqueYLocal, s.z + plaqueZLocal);
       plaque.castShadow = false;
       // keep the plaque as its own small object on the group
       plaque.name = `plaque-${s.name}`;
       this.group.add(plaque);
-      push('gold', box(4.5, 1.45, 0.16, 0, 0.25 + Math.min(wallH - 0.55, 3.5) + plaqueLift, hd - 0.48));
+      if (studyMain) {
+        push('woodDark', box(plaqueW + .36, plaqueH + .3, .17, 0,
+          plaqueYLocal, plaqueZLocal - .16));
+        for (const side of [-1, 1]) {
+          push('gold', box(plaqueW + .34, .055, .05, 0,
+            plaqueYLocal + side * (plaqueH / 2 + .11), plaqueZLocal - .055));
+          push('gold', box(.055, plaqueH + .22, .05,
+            side * (plaqueW / 2 + .12), plaqueYLocal, plaqueZLocal - .055));
+        }
+      } else {
+        push('gold', box(4.5, 1.45, 0.16, 0,
+          plaqueYLocal, hd + (s.name === 'gate' ? .48 : -.48)));
+      }
     }
 
     // transform everything into place
@@ -515,9 +644,10 @@ export class Temple {
         this.roles[role].push(g);
       }
     }
-    const lamp = new THREE.PointLight(0xffb777, s.name === 'main' ? 6 : 2.8,
-      s.name === 'main' ? 18 : 10, 2);
-    lamp.position.set(s.x, WORLD.platform.y + Math.max(3.2, s.plinth + 2.3), s.z);
+    const lamp = new THREE.PointLight(0xffb777,
+      s.name === 'main' ? 6 : isGate ? 4.4 : 2.8,
+      s.name === 'main' ? 18 : isGate ? 12 : 10, 2);
+    lamp.position.set(s.x, WORLD.platform.y + (isGate ? 4.1 : Math.max(3.2, s.plinth + 2.3)), s.z);
     this.group.add(lamp);
     // anchors
     this.anchors.eaves.push(new THREE.Vector3(s.x + sin * (hd + 1), WORLD.platform.y + colH, s.z + cos * (hd + 1)));
@@ -545,15 +675,15 @@ export class Temple {
     return merge(geos);
   }
 
-  private ridgeAndTips(geos: Record<Role, THREE.BufferGeometry[]>, w: number, d: number, ridgeY: number, eaveY: number) {
+  private ridgeAndTips(geos: Record<Role, THREE.BufferGeometry[]>, w: number, d: number, ridgeY: number, eaveY: number, role: 'roof' | 'mainRoof' = 'roof') {
     const rl = (w * 0.52) / 2;
-    geos.roof.push(box(rl * 2 + 0.6, 0.42, 0.42, 0, ridgeY + 0.18, 0));
+    geos[role].push(box(rl * 2 + 0.6, 0.42, 0.42, 0, ridgeY + 0.18, 0));
     for (const xs of [-1, 1]) {
       // upturned ridge-end ornament (chiwen), abstracted as two tilted slabs
-      geos.roof.push(box(0.34, 1.15, 0.4, xs * (rl + 0.35), ridgeY + 0.55, 0));
+      geos[role].push(box(0.34, 1.15, 0.4, xs * (rl + 0.35), ridgeY + 0.55, 0));
       const tail = box(0.28, 0.9, 0.34, xs * (rl + 0.55), ridgeY + 1.05, 0.1);
       tail.rotateZ(-xs * 0.35);
-      geos.roof.push(tail);
+      geos[role].push(tail);
     }
     // hip ridges from the ridge ends down to the four eave corners
     const hw0 = w / 2 + 1.15;
@@ -569,7 +699,7 @@ export class Temple {
         const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
         g.applyQuaternion(q);
         g.translate(a.x, a.y, a.z);
-        geos.roof.push(g);
+        geos[role].push(g);
       }
     }
     // eave corner tips
@@ -581,7 +711,7 @@ export class Temple {
         tip.rotateZ(-xs * 0.55);
         tip.rotateX(zs * 0.3);
         tip.translate(xs * hw, eaveY + 0.45, zs * hd);
-        geos.roof.push(tip);
+        geos[role].push(tip);
         geos.gold.push(new THREE.SphereGeometry(0.11, 8, 6).translate(xs * hw, eaveY + 0.95, zs * hd));
       }
     }
@@ -737,7 +867,7 @@ export class Temple {
       const geo = tileSize[role] ? projectedTempleUV(merged, tileSize[role]!) : merged;
       const mesh = new THREE.Mesh(geo, this.materials[role]);
       mesh.name = `temple-${role}`;
-      mesh.castShadow = role === 'stone' || role === 'wall' || role === 'roof' || role === 'wood' || role === 'dougong' || role === 'bronze';
+      mesh.castShadow = role === 'stone' || role === 'wall' || role === 'roof' || role === 'mainRoof' || role === 'wood' || role === 'dougong' || role === 'bronze';
       mesh.receiveShadow = true;
       this.group.add(mesh);
       geos.length = 0;

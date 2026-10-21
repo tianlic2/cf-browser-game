@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { makeGLTFLoader } from './gltf.js';
-import { ATMO, Sky, Backdrop, Terrain, HillsideTrail, Temple, buddhaMaterial, preloadTempleTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Crag, Mist } from './lingyin_world.js?v=29';
-import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=hillside-12';
+import { ATMO, Sky, Backdrop, Terrain, HillsideTrail, Temple, ForestGate, GateFramingTrees, createMainHallInterior, preloadTempleTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Crag, Mist } from './lingyin_world.js?v=43';
+import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=forest-gate-1';
+import { triangulatedWalkSurface } from './lingyin_walk_surface.js';
 
 // The imported procedural scene has its own editable visual sources. Keep
 // detailed art separate from these lightweight combat proxies.
@@ -41,47 +42,50 @@ export async function buildLingyinMap(scene, onProgress = () => {}) {
   onProgress(.50);
   await attach(Crag,.54);
   const hillside = await attach(HillsideTrail,.60);
-  await attach(Temple,.69);
-  // The hall's focal statue is a reduced real-world clay scan. Its original
-  // Z-up coordinates are stood upright and aligned with the existing throne.
+  // The reviewed two-tier facade replaces only the old main hall. Other
+  // temple buildings and their gameplay footprint stay in the same place.
+  const temple = await attach(Temple,.69,{
+    omitMainHallShrine:true, omitGateVisual:true,
+    studyHallEave:11, studyFacade:true,
+  });
+  // Place the authored gate and its four framing trees into the existing
+  // courtyard. Only their visuals come from the study; gameplay uses matching
+  // lightweight brushes in lingyin_layout.js.
+  const forestGate = new ForestGate();
+  forestGate.group.name = 'lingyin-forest-gate';
+  forestGate.group.position.set(-2,LINGYIN_PLATFORM_Y+.68,40);
+  world.add(forestGate.group);
+  const gateTrees = new GateFramingTrees({framingOnly:true});
+  gateTrees.group.name = 'lingyin-gate-framing-trees';
+  gateTrees.group.position.set(-2,LINGYIN_PLATFORM_Y,40);
+  world.add(gateTrees.group);
   const draco = new DRACOLoader();
   draco.setDecoderPath(new URL('../vendor/three/examples/jsm/libs/draco/', import.meta.url).href);
   const buddhaGltf = makeGLTFLoader().setDRACOLoader(draco);
-  const [buddha, buddhaFar] = await Promise.all([
+  const textureLoader = new THREE.TextureLoader();
+  const hallTexture = name => textureLoader.loadAsync(
+    new URL(`../assets/lingyin/hall-preview/${name}.webp`, import.meta.url).href);
+  const [buddha, buddhaFar, coffer, paintedBeam, redLacquer,
+    stoneFloor, carvedAltar, redRoof] = await Promise.all([
     buddhaGltf.loadAsync(new URL('../assets/lingyin/buddha-clay-scan.glb', import.meta.url).href),
     buddhaGltf.loadAsync(new URL('../assets/lingyin/buddha-clay-scan-lod.glb', import.meta.url).href),
+    hallTexture('dragon-coffer'), hallTexture('painted-beam'),
+    hallTexture('worn-red-lacquer'), hallTexture('aged-stone-floor'),
+    hallTexture('carved-altar'), hallTexture('red-ceramic-roof'),
   ]);
   draco.dispose();
-  const statue = new THREE.Group();
-  statue.name = 'lingyin-buddha-scan';
-  // The scan is 0.826 m deep at this scale; the rear face now sits roughly
-  // 2 cm in front of the mural plane at z=-11.28.
-  statue.position.set(-2,LINGYIN_PLATFORM_Y+1.78,-10.85);
-  const agedGilt = buddhaMaterial();
-  const prepareStatue = root => {
-    root.rotation.x = Math.PI / 2;
-    root.scale.setScalar(.027);
-    root.position.set(-1.607,0,-.413);
-    root.traverse(object => {
-      if (!object.isMesh) return;
-      object.material = agedGilt;
-      object.castShadow = true;
-      object.receiveShadow = true;
-    });
-    return root;
-  };
-  const statueLOD = new THREE.LOD();
-  statueLOD.addLevel(prepareStatue(buddha.scene),0);
-  statueLOD.addLevel(prepareStatue(buddhaFar.scene),14);
-  statue.add(statueLOD);
-  world.add(statue);
-  // Two unobtrusive votive lights reveal the carved face and robe folds from
-  // the entrance; they do not cast dynamic shadows in the combat renderer.
-  const keyLight = new THREE.PointLight(0xffd39a, 21, 10, 2);
-  keyLight.position.set(-5,LINGYIN_PLATFORM_Y+4.7,-6.0);
-  const fillLight = new THREE.PointLight(0xffe8c5, 11, 8, 2);
-  fillLight.position.set(.3,LINGYIN_PLATFORM_Y+4.0,-6.8);
-  world.add(keyLight,fillLight);
+  for(const texture of [coffer,paintedBeam,redLacquer,stoneFloor,carvedAltar,redRoof]){
+    texture.colorSpace=THREE.SRGBColorSpace;
+    texture.anisotropy=8;
+  }
+  redLacquer.wrapS=redLacquer.wrapT=THREE.RepeatWrapping;
+  redRoof.wrapS=redRoof.wrapT=THREE.RepeatWrapping;
+  redRoof.repeat.set(.2,.2);
+  redRoof.needsUpdate=true;
+  temple.group.add(createMainHallInterior(temple,{
+    coffer,paintedBeam,redLacquer,stoneFloor,carvedAltar,redRoof,
+    buddhaScan:buddha.scene,buddhaSideLod:buddhaFar.scene,
+  }));
   onProgress(.72);
   const muralTexture = await new THREE.TextureLoader().loadAsync(
     new URL('../assets/lingyin/lotus-mural.jpg', import.meta.url).href);
@@ -94,7 +98,6 @@ export async function buildLingyinMap(scene, onProgress = () => {}) {
   const muralGroup = new THREE.Group();
   muralGroup.name='lingyin-interior-murals';
   const murals=[
-    {x:-2,z:-12,rot:0,localZ:.72,y:4.1,w:6.5,h:4.2},
     {x:19,z:7,rot:-Math.PI/2,localZ:-5.9,y:3.3,w:4.6,h:2.5},
     {x:-2,z:-38,rot:0,localZ:-2.9,y:3.5,w:5.2,h:2.5},
   ];
@@ -120,13 +123,23 @@ export async function buildLingyinMap(scene, onProgress = () => {}) {
     // A brush's `h` is its absolute top, not its height. The old proxy
     // extended from y0 to y0+h, creating invisible bullet/LOS slabs above
     // doors and walls even though character movement used the correct top.
-    const proxy = new THREE.Mesh(new THREE.BoxGeometry(c.hx*2,c.h-c.y0,c.hz*2),invisible);
-    proxy.position.set(c.x,(c.y0+c.h)/2,c.z);
+    const proxy = new THREE.Mesh(
+      c.rail ? new THREE.BoxGeometry(.16,.14,Math.hypot(
+        c.rail.b.x-c.rail.a.x,c.rail.b.y-c.rail.a.y,c.rail.b.z-c.rail.a.z))
+        : new THREE.BoxGeometry(c.hx*2,c.h-c.y0,c.hz*2),invisible);
+    if (c.rail) {
+      const {a,b,height}=c.rail;
+      const direction=new THREE.Vector3(b.x-a.x,b.y-a.y,b.z-a.z);
+      proxy.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),direction.normalize());
+      proxy.position.set((a.x+b.x)/2,(a.y+b.y)/2+height,(a.z+b.z)/2);
+    } else proxy.position.set(c.x,(c.y0+c.h)/2,c.z);
     proxy.visible = false;
     proxies.add(proxy);
   }
   const trailPath = hillside.group.getObjectByName('graded-mountain-stone-path');
   if (trailPath?.geometry) {
+    layout.setTrailSurface(triangulatedWalkSurface(
+      trailPath.geometry, -LINGYIN_PLATFORM_Y));
     const trailProxy = new THREE.Mesh(
       trailPath.geometry.clone().translate(0,-LINGYIN_PLATFORM_Y,0),invisible);
     trailProxy.visible = false;
@@ -167,6 +180,7 @@ export async function buildLingyinMap(scene, onProgress = () => {}) {
     update(time,dt,camera){
       if(!active)return;
       ATMO.time.value=time;
+      gateTrees.update(time);
       water.update(dt);
       vegetation.update(camera);
       if(camera)mist.update(time,camera);

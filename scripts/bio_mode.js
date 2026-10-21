@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
-import { HumanSoldierRig } from './human_soldier.js?v=enemy-loadouts-4';
+import { ClassicSoldierRig } from './classic_soldier.js?v=omoh-return-1';
 import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
 import { enemyModel } from './guncatalog.js?v=enemy-loadouts-1';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';
@@ -213,7 +213,7 @@ export class BioMode {
       const spot = this._findSpawn(x, y, z);
       if (!spot) continue;
       const group = new THREE.Group();
-      const rig = new HumanSoldierRig(enemyModel('m4'));
+      const rig = new ClassicSoldierRig(enemyModel('m4'));
       group.add(rig.root);
       group.position.fromArray(spot);
       group.rotation.y = Math.PI;

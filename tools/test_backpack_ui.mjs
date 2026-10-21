@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 // Exercise real handlers against deterministic DOM/pointer-lock event doubles.
 const source=readFileSync(new URL('../scripts/main.js',import.meta.url),'utf8');
 class Element {
- constructor(){this.children=[];this.dataset={};this.attrs={};this.classes=new Set();this.classList={add:(x)=>this.classes.add(x),remove:(x)=>this.classes.delete(x),contains:(x)=>this.classes.has(x),toggle:(x,b)=>b===undefined?(this.classes.has(x)?this.classes.delete(x):this.classes.add(x)):(b?this.classes.add(x):this.classes.delete(x))};}
+ constructor(){this.children=[];this.dataset={};this.style={};this.attrs={};this.classes=new Set();this.classList={add:(x)=>this.classes.add(x),remove:(x)=>this.classes.delete(x),contains:(x)=>this.classes.has(x),toggle:(x,b)=>b===undefined?(this.classes.has(x)?this.classes.delete(x):this.classes.add(x)):(b?this.classes.add(x):this.classes.delete(x))};}
  set className(v){this.classes=new Set(v.split(' '))}get className(){return [...this.classes].join(' ')}
  append(...v){this.children.push(...v)}appendChild(v){this.append(v)}replaceChildren(){this.children=[]}setAttribute(k,v){this.attrs[k]=v}addEventListener(){}blur(){}focus(){document.activeElement=this}getClientRects(){return [this]}
 }
@@ -23,6 +23,10 @@ ctx.bioMatch=()=>false;
 ctx.trainingMatch=()=>false;
 ctx.tdmMatch=()=>true;
 ctx.placePlayerAtClearSpawn=noop;
+ctx.selectPlayerSpawnIndex=()=>0;
+ctx.rememberPlayerSpawn=noop;
+ctx.mapLoading=false;
+ctx.pendingMapStart=false;
 ctx.bioMode=null;
 document.body=new Element();
 ctx.menu.classList.add('hidden');vm.createContext(ctx);
@@ -101,7 +105,7 @@ console.log('PASS: native cursor mode, hover without equipping, accurate empty s
 
 // Esc menu regressions share the same real keyboard and pointer-lock handlers.
 ctx.toggleMatchPause();assert.equal(ctx.matchPaused,true);
-run(source.slice(source.indexOf('function update(dt, rawDt)'),source.indexOf('// ---------- 大厅机位')));
+run(source.slice(source.indexOf('function update(dt, rawDt)'),source.indexOf('const _sunDir =')));
 ctx.time=50;ctx.timeLeft=120;ctx.deathT=2;ctx.grenadePool=[{remaining:3}];
 ctx.update(30,30);assert.equal(ctx.time,50);assert.equal(ctx.timeLeft,120);assert.equal(ctx.deathT,2);assert.equal(ctx.grenadePool[0].remaining,3);
 // Failed Continue keeps the pause and usable dialog; success resumes this match.

@@ -16,25 +16,25 @@ type TempleTextureName =
   | 'plaque-gate' | 'plaque-main';
 let templeTextures: Partial<Record<TempleTextureName, THREE.Texture>> = {};
 let templeTexturesLoading: Promise<void> | null = null;
+const textureLoads = new Map<TempleTextureName, Promise<void>>();
+const allTempleTextureNames: TempleTextureName[] = [
+  'courtyard-albedo', 'courtyard-normal', 'courtyard-roughness',
+  'roof-albedo', 'roof-normal',
+  'plaster-albedo', 'plaster-normal', 'plaster-roughness',
+  'stone-albedo', 'stone-normal', 'stone-roughness',
+  'wood-albedo', 'wood-red-albedo', 'wood-teal-albedo',
+  'wood-normal', 'wood-roughness',
+  'plaque-gate', 'plaque-main',
+];
+const mainHallTextureNames = allTempleTextureNames.filter(name =>
+  !name.startsWith('courtyard-') && name !== 'plaque-gate');
 
-// All maps are reused across the entire temple rather than allocating
-// per beam, wall or stair. Loading is awaited by the FPS map builder.
-export function preloadTempleTextures() {
-  if (templeTexturesLoading) return templeTexturesLoading;
-  const names: TempleTextureName[] = [
-    'courtyard-albedo', 'courtyard-normal', 'courtyard-roughness',
-    'roof-albedo', 'roof-normal',
-    'plaster-albedo', 'plaster-normal', 'plaster-roughness',
-    'stone-albedo', 'stone-normal', 'stone-roughness',
-    'wood-albedo', 'wood-red-albedo', 'wood-teal-albedo',
-    'wood-normal', 'wood-roughness',
-    'plaque-gate', 'plaque-main',
-  ];
-  const loader = new THREE.TextureLoader();
-  templeTexturesLoading = Promise.all(names.map(async name => {
-    const url = new URL(`./assets/lingyin/temple-textures/${name}.webp`, document.baseURI).href
-      + '?v=3';
-    const texture = await loader.loadAsync(url);
+function loadTempleTexture(name: TempleTextureName) {
+  const pending = textureLoads.get(name);
+  if (pending) return pending;
+  const url = new URL(`./assets/lingyin/temple-textures/${name}.webp`, document.baseURI).href
+    + '?v=3';
+  const task = new THREE.TextureLoader().loadAsync(url).then(texture => {
     texture.name = `lingyin-${name}`;
     texture.colorSpace = name.endsWith('albedo') || name.startsWith('plaque-')
       ? THREE.SRGBColorSpace : THREE.NoColorSpace;
@@ -44,8 +44,22 @@ export function preloadTempleTextures() {
     texture.magFilter = THREE.LinearFilter;
     texture.anisotropy = 8;
     templeTextures[name] = texture;
-  })).then(() => {});
+  });
+  textureLoads.set(name, task);
+  return task;
+}
+
+// All maps are reused across the entire temple rather than allocating
+// per beam, wall or stair. Loading is awaited by the FPS map builder.
+export function preloadTempleTextures() {
+  if (templeTexturesLoading) return templeTexturesLoading;
+  templeTexturesLoading = Promise.all(allTempleTextureNames.map(loadTempleTexture)).then(() => {});
   return templeTexturesLoading;
+}
+
+// Isolated hall review avoids the courtyard maps and mountain-gate plaque.
+export function preloadMainHallTextures() {
+  return Promise.all(mainHallTextureNames.map(loadTempleTexture)).then(() => {});
 }
 
 export function templePlaqueTexture(name: 'gate' | 'main') {
@@ -55,6 +69,7 @@ export function templePlaqueTexture(name: 'gate' | 'main') {
 }
 
 let courtyardMaterial: THREE.MeshStandardMaterial | null = null;
+let gateApproachMaterial: THREE.MeshStandardMaterial | null = null;
 export function courtyardPavingMaterial() {
   if (courtyardMaterial) return courtyardMaterial;
   const albedo = templeTextures['courtyard-albedo'];
@@ -73,6 +88,19 @@ export function courtyardPavingMaterial() {
     roughness: 1, metalness: 0,
   });
   return courtyardMaterial;
+}
+
+// The gate road shares the court's scanned stone maps and GPU textures. Its
+// world-space UVs are denser so joints read at walking height on the slope.
+export function gateApproachPavingMaterial() {
+  if (gateApproachMaterial) return gateApproachMaterial;
+  gateApproachMaterial = courtyardPavingMaterial().clone();
+  gateApproachMaterial.name = 'gate-approach-aged-stone';
+  gateApproachMaterial.color.set(0xf5ecdf);
+  gateApproachMaterial.vertexColors = true;
+  gateApproachMaterial.normalScale.set(.38, .38);
+  gateApproachMaterial.roughness = .88;
+  return gateApproachMaterial;
 }
 
 function texturedTempleMaterial(

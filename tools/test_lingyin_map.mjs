@@ -1,28 +1,32 @@
 import assert from 'node:assert/strict';
 import { readFileSync, statSync } from 'node:fs';
 import { GroundNavigation } from '../scripts/navigation.js';
+import { intersectsBrush } from '../scripts/brush_collision.js';
 import { lingyinLayout } from '../scripts/lingyin_layout.js';
 
 const map = lingyinLayout();
-assert.equal(map.spawns.player.length,8);
-assert.equal(map.spawns.enemy.length,8);
+assert.equal(map.spawns.player.length,36);
+assert.equal(map.spawns.enemy.length,36);
+assert.ok(new Set(map.spawns.player.map(p=>p[3])).size>=12,
+  'respawns cover courtyards, halls, mountain routes and lookouts');
 for (const spawn of [...map.spawns.player,...map.spawns.enemy]) {
-  assert.equal(map.surfaceAt(spawn[0],spawn[2],.5),0,'spawn has ground');
-  assert.equal(map.colliders.some(c =>
-    spawn[0] > c.x-c.hx-.48 && spawn[0] < c.x+c.hx+.48 &&
-    spawn[2] > c.z-c.hz-.48 && spawn[2] < c.z+c.hz+.48 &&
-    c.y0 < 1.8 && c.y0+c.h > .05),false,'spawn must clear authored obstacles');
+  assert.ok(Math.abs(map.surfaceAt(spawn[0],spawn[2],spawn[1]+.05)-spawn[1])<.02,
+    `spawn has visible ground at ${spawn}`);
+  assert.equal(map.colliders.some(c => intersectsBrush(c,spawn[0],spawn[2],spawn[1],
+    .45,map.stepHeight,1.78,map.colliders,map.surfaceAt)),false,
+    `spawn must clear authored obstacles at ${spawn}`);
 }
 const nav = new GroundNavigation(map.colliders,map.bounds,{
   maxHeight:map.navigationMaxHeight,step:map.navigationStep,climb:map.stepHeight,
   surfaceAt:map.surfaceAt,surfacesAt:map.surfacesAt,
 });
 assert.ok(nav.points.length>3000);
-for (const target of [map.spawns.enemy[0],map.spawns.enemy[4]]) {
+for (const target of [map.spawns.enemy[0],map.spawns.enemy[14]]) {
   nav.update({x:target[0],y:target[1],z:target[2]});
-  for (const spawn of map.spawns.player) {
+  for (const spawn of [...map.spawns.player,...map.spawns.enemy]) {
     const index = nav.nearest(spawn[0],spawn[2],spawn[1]);
-    assert.ok(index>=0 && nav.distance[index]>0,'all player spawns connect to enemy side');
+    assert.ok(index>=0 && Math.abs(nav.point(index).y-spawn[1])<.52 &&
+      nav.distance[index]>=0,`all distributed spawns connect at ${spawn}`);
   }
 }
 const rooms = [
@@ -41,7 +45,7 @@ for(const spawn of [map.spawns.player[0],map.spawns.enemy[0]]) {
 const main = readFileSync(new URL('../scripts/main.js',import.meta.url),'utf8');
 const html = readFileSync(new URL('../index.html',import.meta.url),'utf8');
 assert.match(main,/lingyin: \{ name: '灵隐寺', poster:/);
-assert.match(main,/lingyin: \(\) => import\('\.\/lingyin_map\.js\?v=27'\)/);
+assert.match(main,/lingyin: \(\) => import\('\.\/lingyin_map\.js\?v=32'\)/);
 assert.match(html,/data-map="lingyin"/);
 assert.ok(statSync(new URL('../scripts/lingyin_world.js',import.meta.url)).size>50000);
 assert.ok(statSync(new URL('../assets/lingyin/lotus-mural.jpg',import.meta.url)).size>100000,
@@ -67,6 +71,15 @@ assert.ok(statSync(new URL('../vendor/three/examples/jsm/libs/draco/draco_decode
   'local Draco decoder is bundled for the scanned statue');
 const lingyinRuntime = readFileSync(new URL('../scripts/lingyin_map.js',import.meta.url),'utf8');
 assert.match(lingyinRuntime,/setDRACOLoader\(draco\)/);
-assert.match(lingyinRuntime,/lingyin-buddha-scan/);
-assert.match(lingyinRuntime,/statueLOD\.addLevel/);
-console.log(`Lingyin team map: ${map.colliders.length} collision brushes, ${nav.points.length} navigation nodes, 16 clear reachable spawns`);
+assert.match(lingyinRuntime,/createMainHallInterior\(temple/,
+  'the reviewed three-figure hall is attached to the playable map');
+assert.doesNotMatch(lingyinRuntime,/lingyin-buddha-scan|statueLOD\.addLevel/,
+  'the old standalone statue is no longer duplicated');
+for(const name of ['dragon-coffer','painted-beam','worn-red-lacquer',
+  'aged-stone-floor','carved-altar','red-ceramic-roof']){
+  assert.ok(statSync(new URL(`../assets/lingyin/hall-preview/${name}.webp`,import.meta.url)).size>10000,
+    `${name} is present for the playable hall`);
+}
+assert.match(readFileSync(new URL('../scripts/lingyin_world.js',import.meta.url),'utf8'),
+  /lingyin-main-hall-interior/,'game bundle contains the shared hall geometry');
+console.log(`Lingyin team map: ${map.colliders.length} collision brushes, ${nav.points.length} navigation nodes, ${map.spawns.player.length} clear spawn sites per team`);

@@ -7,7 +7,7 @@ import { RIDGE_LOOKOUTS, RIDGE_SURFACE_LIFT, RIDGE_TRAILS, WEST_RIDGE_TRAIL,
 
 const map=lingyinLayout();
 assert.ok(map.bounds.hw>=80&&map.bounds.hl>=68,'mountain lies inside playable bounds');
-assert.ok(Math.abs(map.surfaceAt(-2,45.7,1.5)-.88)<.01,
+assert.ok(Math.abs(map.surfaceAt(-2,45.7,1.5)-.64)<.01,
   'the gate staircase leads through the terrace opening');
 assert.ok(map.surfaceAt(-2,47.2,.52)!==null,'stairs meet the graded trail');
 assert.ok(Math.abs(map.surfaceAt(-35.5,7,1.5)-(.95+RIDGE_SURFACE_LIFT))<.02,

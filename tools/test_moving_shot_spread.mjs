@@ -46,5 +46,5 @@ assert.match(main, /const offset = sampleShotOffset\(movementShotSpread\(def\)/,
 assert.match(main, /new THREE\.Vector3\(offset\.x, offset\.y, -1\)\.normalize\(\)/);
 assert.match(main, /WEAPON_STATE\.sinceShot = 0;\s*advancePunch\(\)/,
   'the current bullet resolves before next-shot recoil');
-assert.match(html, /main\.js\?v=lingyin-hillside-24/);
+assert.match(html, /main\.js\?v=omoh-return-1/);
 console.log('PASS: stronger recoil and real walking, sneaking and jumping shot spread; stationary aim and sniper hip ring preserved.');

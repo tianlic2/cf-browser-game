@@ -1,11 +1,10 @@
-// ===== 敌人系统（CF SWAT 蒙皮 + 点射走位 AI + 倒地尸体 + 对象池）=====
-// HumanSoldierRig uses one native model/skeleton/animation suite; its classic
-// SWAT base remains a transparent gameplay hitbox and loading-failure fallback.
+// ===== 敌人系统（经典奥摩蒙皮 + 点射走位 AI + 倒地尸体 + 对象池）=====
 import * as THREE from "three";
-import { HumanSoldierRig as SoldierRig } from "./human_soldier.js?v=enemy-loadouts-4";
+import { ClassicSoldierRig as SoldierRig } from "./classic_soldier.js?v=omoh-return-1";
 import { makeBlobShadow } from "./blobshadow.js";
 import { intersectsBrush } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";
+import { chooseDistributedSpawnIndex } from './distributed_spawns.js';
 import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js?v=stable-search-1";
 import { advanceFacing, angleDelta, separationOffset } from './npc_motion.js';
 
@@ -941,12 +940,18 @@ export class EnemyManager {
     const hw = bounds ? bounds.hw : 26;
     const hl = bounds ? bounds.hl : 68;
     for (let i = 0; i < count; i++) {
-      const point=this.spawnPoints?.[Math.floor(Math.random()*this.spawnPoints.length)];
+      const spawnIndex=this.distributedSpawns ? chooseDistributedSpawnIndex(
+        this.spawnPoints,player?[player]:[],this.lastSpawnZone,
+        Math.random,this.spawnSafeDistance??11) :
+        Math.floor(Math.random()*(this.spawnPoints?.length||1));
+      const point=this.spawnPoints?.[spawnIndex];
       const x = point ? point[0] : (Math.random() - 0.5) * (hw * 2 - 6);
       const z = point ? point[2] : -(hl - 4 - Math.random() * 6);
       const y = point ? point[1] : (this.navigation?.heightAt(x, z, 0) ?? 0);
       const valid = (px, py, pz) => Math.abs(px) <= hw - ENEMY_RADIUS &&
         Math.abs(pz) <= hl - ENEMY_RADIUS &&
+        (!this.distributedSpawns||!player||
+          Math.hypot(px-player.pos.x,pz-player.pos.z)>=8) &&
         !(this._colliders || []).some(c => intersectsBrush(c, px, pz, py,
           ENEMY_RADIUS, this.navigation?.climb ?? ENEMY_STEP_H, ENEMY_HEAD_ROOM,
           this._colliders || [], this.navigation?.surfaceAt,
@@ -955,6 +960,7 @@ export class EnemyManager {
       const spot = findActorSpawn(x, y, z,
         player ? [...this.enemies, player] : this.enemies, valid);
       if (!spot) continue;
+      if(this.distributedSpawns)this.lastSpawnZone=point?.[3]??null;
       const e = this.acquire(spot[0], spot[2]);
       e.group.position.y = spot[1];
       // Patrol toward a broad central lane rather than orbiting the spawn or

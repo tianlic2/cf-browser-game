@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
 import { SFX } from "./audio.js?v=bio-damage-milestone-1";
-import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=enemy-loadouts-1";
+import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=lingyin-spawns-2";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
 import { ClassicView } from "./classic_view.js?v=kukri-scoped-vfx-1";
 import { loadAuthoredViews } from "./authored_view.js?v=orient3";
@@ -12,12 +12,13 @@ import { BioMode } from "./bio_mode.js?v=enemy-loadouts-1";
 import { BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT, refillTwoMagazines } from "./bio_rules.js?v=bio-population-damage-1";
 import { HUMAN_RUN_SPEED, weaponMoveScale } from "./move_speed.js?v=bio-arena-1";
 import { ImpactVfx } from "./impact_vfx.js";
-import { loadHumanSoldier } from "./human_soldier.js?v=enemy-loadouts-4";
+import { loadClassicSoldier } from "./classic_soldier.js?v=omoh-return-1";
 import { GroundNavigation } from "./navigation.js?v=goldsrc-visible-wall-1";
 import { intersectsBrush, brushSupport, brushSupportIsExposed, brushBottom, canMoveThroughBrushes,
   brushHorizontalEscape, jumpVelocityForHeightScale, shouldSnapDownToSupport,
   preserveCameraAcrossGroundStep, decayGroundViewOffset } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { sweepActorAxis, overlapsActors, findActorSpawn } from "./actor_collision.js";
+import { chooseDistributedSpawnIndex } from './distributed_spawns.js';
 import { ViewArms, ARM_ANCHORS, ELBOWS, MAGWELL } from "./viewarms.js?v=orient5";
 import {
   SKINS, STOCK, DEFAULT_SKIN, DEFAULT_MUZZLE,
@@ -431,7 +432,7 @@ async function ensureMapLoaded(id, onProgress = () => {}) {
     survivor: () => import('./survivor_map.js?v=map-filter-quality-1').then(m => m.buildSurvivorMap),
     blacktown: () => import('./blacktown_map.js?v=map-filter-quality-1').then(m => m.buildBlacktownMap),
     bio: () => import('./bio_map.js?v=map-filter-quality-1').then(m => m.buildBioMap),
-    lingyin: () => import('./lingyin_map.js?v=27').then(m => m.buildLingyinMap),
+    lingyin: () => import('./lingyin_map.js?v=32').then(m => m.buildLingyinMap),
   };
   if (!loaders[id]) throw new Error('未知地图：' + id);
   onProgress(.06);
@@ -2242,7 +2243,23 @@ function updateSkinGlow(vid) {
 // 「本回合未行动才能换背包」的判定范围必须跟着地图收。
 const SPAWN_SAFE_R = 9;
 let actedThisLife = false;
+let lastPlayerSpawnZone = null;
+let lifeSpawnOrigin = null;
+function selectPlayerSpawnIndex(opponents = enemyManager.enemies) {
+  const points=mapData?.spawns?.player;
+  if(!points?.length)return -1;
+  return mapData.distributedSpawns ? chooseDistributedSpawnIndex(
+    points,opponents,lastPlayerSpawnZone,Math.random,mapData.spawnSafeDistance??11) :
+    Math.floor(Math.random()*points.length);
+}
+function rememberPlayerSpawn(index) {
+  lastPlayerSpawnZone=mapData?.distributedSpawns ? mapData.spawns.player[index]?.[3]??null : null;
+  lifeSpawnOrigin=mapData?.spawnZoneRadius ? player.pos.clone() : null;
+}
 function inSpawnZone() {
+  if(mapData?.spawnZoneRadius&&lifeSpawnOrigin)return (
+    Math.hypot(player.pos.x-lifeSpawnOrigin.x,player.pos.z-lifeSpawnOrigin.z)
+      <=mapData.spawnZoneRadius&&Math.abs(player.pos.y-lifeSpawnOrigin.y)<2.2);
   // 原图有多个出生点；用其包围矩形覆盖整间出生舱，避免边缘出生时不能换背包。
   const spawns = mapData.spawns?.player;
   if (spawns?.length) {
@@ -3560,6 +3577,9 @@ function activateMap(id) {
   }
   bounds = mapData.bounds;
   enemyManager.spawnPoints = mapData.spawns?.enemy || null;
+  enemyManager.distributedSpawns = !!mapData.distributedSpawns;
+  enemyManager.spawnSafeDistance = mapData.spawnSafeDistance;
+  enemyManager.lastSpawnZone = null;
   if (mapData.source && !mapData.navigation)
     mapData.navigation = new GroundNavigation(colliders, bounds,
       { maxHeight: mapData.navigationMaxHeight, step: mapData.navigationStep,
@@ -4964,11 +4984,12 @@ function respawnPlayer() {
   clearFlash();
   setScoped(false);
   player.hp = 100;
-  const spawnIndex = Math.floor(Math.random() * (mapData.spawns?.player?.length || 1));
+  const spawnIndex = selectPlayerSpawnIndex();
   const spawn=mapData.spawns?.player?.[spawnIndex];
   if (spawn) player.pos.fromArray(spawn);
   else player.pos.set((Math.random() - 0.5) * 10, 0, bounds.hl - 6);
   placePlayerAtClearSpawn();
+  rememberPlayerSpawn(spawnIndex);
   actedThisLife = false; // 复活回到安全区，重新开放背包切换（CF 规则）
   // 复活恢复**完整配装**：丢枪留下的空槽与「这条命捡来的枪」一起清掉。
   // 清 lifePickup 是这一节的重点 —— 复活后手上应该是**上一条命选的背包**里配的那把，
@@ -5229,11 +5250,13 @@ function toggleMatchPause() {
 function refreshPlayerPosition() {
   if (state !== "playing" || dead || !gameMenuOpen()) return;
   const spawns = mapData.spawns?.player;
-  if (spawns?.length) player.pos.fromArray(spawns[Math.floor(Math.random() * spawns.length)]);
+  const spawnIndex=selectPlayerSpawnIndex();
+  if (spawns?.length) player.pos.fromArray(spawns[spawnIndex]);
   else player.pos.set(0, 0, bounds.hl - 6);
   placePlayerAtClearSpawn();
+  rememberPlayerSpawn(spawnIndex);
   player.vel.set(0, 0, 0);
-  player.yaw = 0; player.pitch = 0;
+  player.yaw = mapData.spawnYaws?.player?.[spawnIndex] ?? 0; player.pitch = 0;
   player.viewDip = 0; player.stepLift = 0; player.groundY = player.pos.y;
   // This is relocation, not respawn: preserve HP, ammo, score and actedThisLife.
   setScoped(false);
@@ -5511,9 +5534,12 @@ function gameStart() {
   lastKillAt = -Infinity;
   updateStreakHud();   // 立刻收掉倒计时条（别等下一帧；新一局可以是暂停中开的）
   player.hp = 100;
-  player.invuln = 0;
-  if (mapData.spawns?.player?.length) player.pos.fromArray(mapData.spawns.player[0]);
+  player.invuln = tdmMatch()&&mapData.distributedSpawns ? TDM_RESPAWN : 0;
+  lastPlayerSpawnZone=null;
+  const initialSpawnIndex=selectPlayerSpawnIndex([]);
+  if (initialSpawnIndex>=0) player.pos.fromArray(mapData.spawns.player[initialSpawnIndex]);
   else player.pos.set(0, 0, bounds.hl - 6);
+  rememberPlayerSpawn(initialSpawnIndex);
   actedThisLife = false;
   emptySlot.primary = false;   // 新一局恢复完整配装（同 respawnPlayer）
   emptySlot.secondary = false;
@@ -5521,7 +5547,7 @@ function gameStart() {
   lifePickup.secondary = null;
   resetLoadout();              // 上一条命留下的 setSkin 不进下一局（见 LOADOUT_DEFAULT）
   player.vel.set(0, 0, 0);
-  player.yaw = mapData.spawnYaws?.player?.[0] ?? 0;
+  player.yaw = mapData.spawnYaws?.player?.[initialSpawnIndex] ?? 0;
   player.pitch = 0;
   player.viewDip = 0;
   player.stepLift = 0;
@@ -5865,9 +5891,19 @@ function actorSupportAt(x, z, feetY, actors) {
 function placePlayerAtClearSpawn() {
   const bodies = liveActorBodies();
   if (!bodies.length) return;
-  const points = [player.pos.toArray(), ...(mapData.spawns?.player || [])];
+  const distanceFromEnemies = (x,z) => Math.min(...bodies.map(actor=>{
+    const p=actor.group?.position||actor.pos||actor.position;
+    return p?Math.hypot(x-p.x,z-p.z):Infinity;
+  }));
+  const spawnSafety=mapData?.distributedSpawns ?
+    Math.min(8,Math.max(0,distanceFromEnemies(player.pos.x,player.pos.z)-2)) : 0;
+  const alternatives=[...(mapData.spawns?.player || [])];
+  if(mapData?.distributedSpawns)alternatives.sort((a,b)=>
+    distanceFromEnemies(b[0],b[2])-distanceFromEnemies(a[0],a[2]));
+  const points = [player.pos.toArray(), ...alternatives];
   const valid = (x, y, z) => Math.abs(x) <= bounds.hw - PLAYER_RADIUS &&
     Math.abs(z) <= bounds.hl - PLAYER_RADIUS && !blockedBy(x, z, y) &&
+    (!mapData?.distributedSpawns||distanceFromEnemies(x,z)>=spawnSafety) &&
     Math.abs(supportAt(x, z, y) - y) <= (mapData?.stepHeight ?? STEP_H);
   for (const [x, y, z] of points) {
     const found = findActorSpawn(x, y, z, bodies, valid);
@@ -5956,6 +5992,8 @@ function movePlayer(dt) {
   if (canMoveThroughBrushes(colliders, player.pos.x, player.pos.z, nx, player.pos.z,
       player.pos.y, PLAYER_RADIUS, staticStepHeight, PLAYER_TOP, mapData?.surfaceAt,
       mapData?.blockerAt) &&
+      (!player.onGround || !mapData?.canTraverse ||
+        mapData.canTraverse(nx, player.pos.z, player.pos.y, staticStepHeight)) &&
       !overlapsActors(nx, nextXFloor, player.pos.z, actors)) player.pos.x = nx;
   else player.vel.x = 0;
   if (Math.abs(dx - player.vel.x * dt) > 1e-5) player.vel.x = 0;
@@ -5969,6 +6007,8 @@ function movePlayer(dt) {
   if (canMoveThroughBrushes(colliders, player.pos.x, player.pos.z, player.pos.x, nz,
       player.pos.y, PLAYER_RADIUS, staticStepHeight, PLAYER_TOP, mapData?.surfaceAt,
       mapData?.blockerAt) &&
+      (!player.onGround || !mapData?.canTraverse ||
+        mapData.canTraverse(player.pos.x, nz, player.pos.y, staticStepHeight)) &&
       !overlapsActors(player.pos.x, nextZFloor, nz, actors)) player.pos.z = nz;
   else player.vel.z = 0;
   if (Math.abs(dz - player.vel.z * dt) > 1e-5) player.vel.z = 0;
@@ -6947,7 +6987,7 @@ async function init() {
       const v=await ClassicView.load('grenades/'+id);
       if(v){classicNades[id]=v;v.root.name='cf-grenade-'+id;v.root.visible=false;v.projectile();vmScene.add(v.root);}
     })())),
-    trackAsset(loadHumanSoldier()),
+    trackAsset(loadClassicSoldier()),
     ...PRIMARY_IDS.map(id=>trackAsset(requiredWeapon(id))),
     ...['deagle','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
   ]);
@@ -7945,6 +7985,9 @@ async function init() {
   if (!VIEWMODEL_TUNER_ACTIVE && debugParams.get('debugAutoStart') === '1') {
     await prepareSelectedMap(selectedMapId);
     viewport.style.visibility = 'visible';
+    // Local visual QA can inspect authored rooms without NPCs replacing the
+    // requested camera pose during the loading-screen transition.
+    if (debugParams.get('debugNoEnemies') === '1' && tdmMatch()) enemyTarget = 0;
     gameStart();
     // Visual QA can start at a specific authored prop without changing normal
     // spawn logic. Format: debugPlayer=x,y,z,yaw,pitch (angles in radians).

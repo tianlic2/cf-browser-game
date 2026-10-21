@@ -9,7 +9,33 @@ export const LINGYIN_PLATFORM_Y = 3.25;
 const brush = (x, z, hx, hz, y0, h, walkable = false) =>
   ({ x, z, hx, hz, y0, h, walkable });
 
+export function railBeamBrush(a,b,height) {
+  const dx=b.x-a.x,dz=b.z-a.z,length=Math.hypot(dx,dz);
+  const tx=dx/length,tz=dz/length,nx=-tz,nz=tx;
+  const x=(a.x+b.x)/2,z=(a.z+b.z)/2,y=(a.y+b.y)/2+height;
+  const slope=(b.y-a.y)/length,halfWidth=.08,halfHeight=.07;
+  const normalDot=nx*x+nz*z,tangentDot=tx*x+tz*z;
+  return {
+    x,z,hx:Math.abs(dx)/2+halfWidth,hz:Math.abs(dz)/2+halfWidth,
+    y0:Math.min(a.y,b.y)+height-halfHeight,
+    h:Math.max(a.y,b.y)+height+halfHeight,
+    planes:[
+      [nx,0,nz,normalDot+halfWidth],[-nx,0,-nz,-normalDot+halfWidth],
+      [tx,0,tz,tangentDot+length/2],[-tx,0,-tz,-tangentDot+length/2],
+      [-slope*tx,1,-slope*tz,y+halfHeight-slope*tangentDot],
+      [slope*tx,-1,slope*tz,-y+halfHeight+slope*tangentDot],
+    ],
+    rail:{a,b,height},
+  };
+}
+
 export function lingyinLayout() {
+  // Replaced with the real paving mesh after HillsideTrail is built. The
+  // centreline fallback keeps standalone layout/navigation tests available.
+  let trailHeightsAt = (x,z) => {
+    const y = ridgeTrailSurfaceAt(x,z);
+    return y === null ? [] : [y];
+  };
   const colliders = [];
   const add = (...args) => colliders.push(brush(...args));
   // Perimeter solids match the visible wall, closed bridge doors, and north
@@ -22,9 +48,11 @@ export function lingyinLayout() {
   add(27.5, -12, .19, 35, .35, 1.85);
   add(27.5, 39, .19, 6, .35, 1.85);
   add(27.5, 28, .19, 5, .35, 3.1);
-  add(-20.25, 45.7, 15.25, .14, .1, 1.08);
-  add(14.25, 45.7, 13.25, .14, .1, 1.08);
-  for(const x of [-5,1])add(x,45.7,.28,.28,0,1.25);
+  add(-24.75,45.7,10.75,.14,.1,1.14); // outer stone terrace rail
+  add(-9.5,45.7,4.5,.14,0,1.35);      // new gate timber fence
+  add(5.5,45.7,4.5,.14,0,1.35);
+  add(18.75,45.7,8.75,.14,.1,1.14);
+  for(const x of [-5,1])add(x,45.7,.19,.19,0,1.35);
 
   // Generate collision from precisely the same visible rail sections. At a
   // junction only the interior branch rail opens; the outer edge stays fenced.
@@ -38,11 +66,8 @@ export function lingyinLayout() {
         }
         if(i===0)continue;
         const q=section.points[i-1];
-        const hx=Math.abs(p.x-q.x)/2+.085,hz=Math.abs(p.z-q.z)/2+.085;
         for(const beamY of [1.03,1.45])
-          add((p.x+q.x)/2,(p.z+q.z)/2,hx,hz,
-            Math.min(p.y,q.y)+beamY-.07,
-            Math.max(p.y,q.y)+beamY+.07);
+          colliders.push(railBeamBrush(q,p,beamY));
       }
     }
   }
@@ -74,8 +99,8 @@ export function lingyinLayout() {
   // The five halls are real rooms. Their plinths and stair treads are walkable;
   // the same local transforms are used for visual Temple.buildHall() and here.
   const structures = [
-    {name:'gate',x:-2,z:40,w:15,d:8.5,eave:5.4,plinth:.8,rot:0},
-    {name:'main',x:-2,z:-12,w:27,d:17,eave:8,plinth:1.1,rot:0},
+    {name:'gate',x:-2,z:40,w:24.2,d:8.5,eave:6.6,plinth:.8,rot:0},
+    {name:'main',x:-2,z:-12,w:27,d:17,eave:11,plinth:1.1,rot:0},
     {name:'west',x:-25.5,z:7,w:9,d:16,eave:5,plinth:.7,rot:Math.PI/2},
     {name:'east',x:19,z:7,w:9,d:16,eave:5,plinth:.7,rot:-Math.PI/2},
     {name:'rear',x:-2,z:-38,w:17,d:10,eave:6.4,plinth:.9,rot:0},
@@ -91,6 +116,35 @@ export function lingyinLayout() {
       Math.abs(Math.sin(s.rot))*hw+Math.abs(Math.cos(s.rot))*hz,y0,top,walkable);
   };
   for (const s of structures) {
+    if(s.name==='gate') {
+      // The gate study's platform is raised .68m above the courtyard. Its
+      // shallow slab, front/rear treads and open central bay match these
+      // movement and bullet brushes rather than the former hall footprint.
+      const floorY=1.05;
+      addLocal(s,0,0,8.8,3.9,0,floorY,true);
+      floors.push({s,lx:0,lz:0,hx:8.8,hz:3.9,y:floorY});
+      for(const side of [-1,1])for(let i=0;i<3;i++) {
+        const z=side*(4+(2-i)*.5), y=.8+i*.12;
+        addLocal(s,0,z,4.75,.25,0,y,true);
+        floors.push({s,lx:0,lz:z,hx:4.75,hz:.25,y});
+      }
+      for(const side of [-1,1])for(let i=0;i<4;i++) {
+        const z=side*(7-i*.5),y=.16*(i+1);
+        addLocal(s,0,z,2.5,.25,0,y,true);
+        floors.push({s,lx:0,lz:z,hx:2.5,hz:.25,y});
+      }
+      for(const x of [-6,-2.6,2.6,6])for(const z of [-2,2])
+        addLocal(s,x,z,.43,.43,1.05,6.3);
+      for(const x of [-4.3,4.3])for(const z of [-2,2])
+        addLocal(s,x,z,1.7,.16,1.05,6.25);
+      for(const x of [-6,6])addLocal(s,x,0,.16,2,1.05,6.25);
+      for(const x of [-9.1,9.1])addLocal(s,x,-1.1,3,.24,1.05,3.35);
+      // Four authored trunks frame the gate. Crowns are visual-only; only
+      // the bark bases stop a player or NPC.
+      for(const [x,z,r] of [[-8.5,7,.8],[9.5,5.5,.72],[-11,-4,.86],[12.6,-5.2,.8]])
+        addLocal(s,x,z,r,r,0,8);
+      continue;
+    }
     const hw=s.w/2,hd=s.d/2,roomY=s.plinth+.25;
     addLocal(s,0,0,hw+1.2,hd+1.2,0,roomY,true);
     floors.push({s,lx:0,lz:0,hx:hw+1.37,hz:hd+1.37,y:roomY});
@@ -108,11 +162,11 @@ export function lingyinLayout() {
       }
     }
     const inset=1.35,gap=s.name==='main'?5.4:s.name==='rear'||s.name==='gate'?4.6:3.4;
-    const wallY=roomY,wallTop=s.eave-s.plinth-.15;
+    const wallY=roomY,wallTop=s.name==='gate'?3.8:s.eave-s.plinth-.15;
     const wallX=hw-inset,wallZ=hd-inset;
     const seg=(s.w-2*inset-gap)/2;
     for(const sign of [-1,1]) {
-      if(s.name==='gate')addLocal(s,sign*(hw-2.2),wallZ,1.2,.18,wallY,wallTop);
+      if(s.name==='gate')addLocal(s,sign*(hw-2.05),wallZ,1.9,.18,wallY,wallTop);
       else addLocal(s,sign*(gap/2+seg/2),wallZ,seg/2,.18,wallY,wallTop);
       addLocal(s,sign*wallX,0,.18,hd-inset,wallY,wallTop);
     }
@@ -128,11 +182,17 @@ export function lingyinLayout() {
       const x=-hw+1+((s.w-2)*i)/colsX;
       if((s.name==='main'&&zs===1&&Math.abs(x)<1.6)||
          (s.name==='gate'&&Math.abs(x)<1))continue;
-      addLocal(s,x,zs*(hd-.9),.29,.29,roomY,columnTop);
+      addLocal(s,x,zs*(hd-.9),.29,.29,roomY,
+        s.name==='gate'&&Math.abs(x)>4?3.7:columnTop);
     }
     for(const xs of [-1,1])for(let i=1;i<colsZ;i++){
       const z=-hd+1+((s.d-2)*i)/colsZ;
-      addLocal(s,xs*(hw-.9),z,.29,.29,roomY,columnTop);
+      addLocal(s,xs*(hw-.9),z,.29,.29,roomY,s.name==='gate'?3.7:columnTop);
+    }
+    if(s.name==='gate'){
+      addLocal(s,0,hd-.35,4.45,.35,columnTop-.63,columnTop+.07);
+      addLocal(s,0,0,4.45,hd+.175,columnTop-.03,columnTop+.45);
+      addLocal(s,0,-hd+1.35,4.45,.16,3.68,5.78);
     }
     if(s.name==='main'){
       const railW=hw+1.2,railZ=hd+1.45;
@@ -140,6 +200,10 @@ export function lingyinLayout() {
         addLocal(s,sign*(railW+3.6)/2,railZ,(railW-3.6)/2,.14,.45,1.35);
         addLocal(s,sign*railW,0,.14,railZ,.45,1.35);
       }
+      // The three-figure shrine now sits against the rear wall. Match its
+      // raised dais and altar, leaving the aisle from the front door clear.
+      addLocal(s,0,-4.72,8.1,1.75,roomY,roomY+.72);
+      addLocal(s,0,-2.06,6.75,.65,roomY,roomY+1.4);
     }
     if(s.name!=='gate'&&s.name!=='main'&&s.name!=='west') {
       // Back-wall altar: visible geometry and capsule obstruction agree.
@@ -160,8 +224,6 @@ export function lingyinLayout() {
   }
   add(-2,22,1.5,1.5,1.9,3.32); // bowl and lid, clear of standing heads
   add(-2,22,.28,.28,3.32,4.1); // finial
-  add(-2,-10.25,1.9,1.2,1.1,5.7); // Buddha and throne, moved up against the mural wall
-  add(-2,-11.4,4.25,.13,.4,7.0); // prevent walking through the mural backing
   for (const [x,z] of [[-7.5,44],[3.5,44],[-10,34],[6,34],[5,10],[-10,10],[25,33]])
     add(x,z,.39,.39,0,2.45);
   for (const x of [-10.5,6.5]) add(x,41.5,.74,1.08,0,2.15);
@@ -170,10 +232,11 @@ export function lingyinLayout() {
 
   const insideTemple = (x,z) => x > -35.5 && x < 27.5 && z > -46.8 && z < 45.7;
   const surfacesAt = (x,z,maxHeight = Infinity) => {
-    const ridgeY=ridgeTrailSurfaceAt(x,z);
-    if(!insideTemple(x,z)&&ridgeY===null)return [];
+    const ridgeHeights=trailHeightsAt(x,z);
+    const lookout=RIDGE_LOOKOUTS.find(p=>Math.abs(x-p.x)<=p.hx&&Math.abs(z-p.z)<=p.hz);
     const heights=maxHeight>=0&&insideTemple(x,z)?[0]:[];
-    if(ridgeY!==null&&ridgeY<=maxHeight)heights.push(ridgeY);
+    for(const y of ridgeHeights)if(y<=maxHeight)heights.push(y);
+    if(lookout&&lookout.y<=maxHeight)heights.push(lookout.y);
     for(const f of floors) {
       if(f.y>maxHeight)continue;
       const p=local(f.s,x,z);
@@ -184,9 +247,37 @@ export function lingyinLayout() {
     return [...new Set(heights)].sort((a,b)=>a-b);
   };
   const surfaceAt = (x,z,maxHeight = Infinity) => surfacesAt(x,z,maxHeight).at(-1) ?? null;
+  const canTraverse = (x,z,feet,step=.52) =>
+    surfacesAt(x,z,feet+step).some(y=>y>=feet-.7);
 
-  const player = [[-25,0,28],[-22,0,31],[-28,0,24],[-18,0,27],[-24,0,20],[-17,0,33],[-30,0,18],[-20,0,21]];
-  const enemy = [[21,0,-29],[18,0,-31],[23,0,-25],[17,0,-27],[22,0,-33],[15,0,-29],[24,0,-20],[18,0,-24]];
+  // Both teams may return in several distinct, already playable parts of the
+  // level. The last value is a zone key, not a fixed team base. Actual picks
+  // are screened against live opponents when a character respawns.
+  const spawnCandidates = [
+    [-25,28,0,'west-court'],[-20,24,0,'west-court'],[-27,17,0,'west-court'],
+    [-17,32,0,'north-court'],[-13,40,0,'north-court'],[12,39,0,'north-court'],
+    [16,31,0,'east-court'],[11,24,0,'east-court'],[21,22,0,'east-court'],
+    [-13,17,0,'central-court'],[-12,1,0,'central-court'],[9,16,0,'central-court'],
+    [14,-26,0,'south-court'],[21,-28,0,'south-court'],[18,-17,0,'south-court'],
+    [-15,-28,0,'rear-court'],[-15,-38,0,'rear-court'],[11,-38,0,'rear-court'],
+    [-2,40,1.05,'gate-hall'],[-25.5,7,.95,'west-hall'],[19,7,.95,'east-hall'],
+    [-2,-5,1.35,'main-hall'],[-8,-8,1.35,'main-hall'],[5,-8,1.35,'main-hall'],
+    [-2,-38,1.15,'rear-hall'],
+    [-40,7,1.4,'west-ascent'],[-44,22,6.2,'west-ascent'],
+    [-49,33,10,'west-ascent'],[-37,46,11.8,'west-ascent'],
+    [-5,58,6.3,'north-ascent'],[-22,64,8.5,'north-ascent'],[-35,67,10.2,'north-ascent'],
+    [-58,58,15.8,'upper-ridge'],[-72,63,16.5,'upper-ridge'],
+    [-58,49,15.8,'lower-lookout'],[-75,50,19.8,'upper-lookout'],
+  ];
+  const player=spawnCandidates.map(([x,z,y,zone])=>[x,y,z,zone]);
+  const enemy=spawnCandidates.map(([x,z,y,zone])=>[x,y,z,zone]);
+  const refreshSpawnHeights=()=>{
+    for(const points of [player,enemy])for(let i=0;i<points.length;i++) {
+      const [x,z,expected]=spawnCandidates[i];
+      points[i][1]=surfaceAt(x,z,expected+.52)??expected;
+    }
+  };
+  refreshSpawnHeights();
   const topdown = [
     {kind:'hull',x:-35.5,z:-21.1,hx:.2,hz:24.9},
     {kind:'hull',x:-35.5,z:27.95,hx:.2,hz:17.75},
@@ -205,7 +296,10 @@ export function lingyinLayout() {
     ...RIDGE_LOOKOUTS.map(p=>({kind:'bridge',x:p.x,z:p.z,hx:p.hx,hz:p.hz})),
   ];
   return { colliders, bounds: LINGYIN_BOUNDS, spawns:{player,enemy},
-    spawnYaws:{player:player.map(()=>0)},
+    setTrailSurface(fn){trailHeightsAt=fn;refreshSpawnHeights();},
+    canTraverse,
+    distributedSpawns:true,spawnSafeDistance:18,spawnZoneRadius:5.5,
+    spawnYaws:{player:player.map(([x,,z])=>Math.atan2(x+2,z))},
     topdown, surfacesAt, surfaceAt, floorY:0,
-    navigationMaxHeight:21, navigationStep:.7, stepHeight:.52 };
+    navigationMaxHeight:21, navigationStep:.7, stepHeight:.52, groundSnap:.52 };
 }

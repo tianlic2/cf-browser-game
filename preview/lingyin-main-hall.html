@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <base href="../" />
+  <link rel="icon" href="data:," />
+  <title>大雄宝殿 · 三佛殿重做预览</title>
+  <link rel="stylesheet" href="./preview/lingyin-main-hall.css?v=exterior-2" />
+  <script type="importmap">
+  {"imports":{
+    "three":"./vendor/three/build/three.module.js",
+    "three/addons/":"./vendor/three/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+  <canvas id="hall-canvas" aria-label="大雄宝殿独立三维预览"></canvas>
+  <header class="topbar">
+    <div class="eyebrow">LINGYIN · ISOLATED STUDY / 01</div>
+    <h1>大雄宝殿 <span>三佛殿重做预览</span></h1>
+    <p>双层红瓦檐 · 上层中央牌匾 · 蓝金彩绘梁枋 · 三佛殿内景。已接入灵隐寺团队竞技地图。</p>
+  </header>
+  <aside class="toolbar" aria-label="预览控制">
+    <div class="toolbar-title">检查机位</div>
+    <div class="views">
+      <button type="button" data-view="exterior" aria-pressed="true">外立面</button>
+      <button type="button" data-view="front">中轴全景</button>
+      <button type="button" data-view="entrance">左侧视角</button>
+      <button type="button" data-view="side">右侧视角</button>
+      <button type="button" data-view="ceiling">藻井梁架</button>
+    </div>
+    <label class="toggle"><input type="checkbox" id="study-toggle" checked /><span>显示重做版（关闭可看旧版）</span></label>
+    <p class="hint">拖动旋转 · 滚轮缩放 · 关闭重做版可对照替换前的旧殿</p>
+    <p class="perf" id="hall-metrics">准备渲染数据…</p>
+  </aside>
+  <div class="status" id="hall-status" role="status">正在准备独立预览…</div>
+  <script type="module" src="./preview/lingyin-main-hall.js"></script>
+</body>
+</html>

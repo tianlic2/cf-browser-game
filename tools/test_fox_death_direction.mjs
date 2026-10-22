@@ -43,7 +43,7 @@ assert.match(fox, /setDuration\(\.24\)\.setEffectiveWeight\(\.48\)/,
   'hit reaction is brief and partial rather than a full-pose override');
 for (const [legacy, png] of [['woman_body_bl.bmp', 'body.png'],
   ['woman_face_bl.bmp', 'face.png'], ['ddfcd20.bmp', 'ddfcd20.png']]) {
-  assert.match(fox, new RegExp(`'${legacy}': BASE \\+ '${png}'`),
+  assert.match(fox, new RegExp(`'${legacy}': assetUrl\\('${png.replace('.', '\\.')}\\'\\)`),
     `${legacy} embedded request must resolve to the available PNG`);
 }
 

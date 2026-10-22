@@ -9,6 +9,8 @@ import { createFoxBreathingIdle } from './fox_idle.js';
 import { FOX_MODEL_HEIGHT, FOX_MODEL_SCALE } from './fox_dimensions.js';
 
 const BASE = new URL('../assets/local/fox_npc/', import.meta.url).href;
+const FOX_ASSET_VERSION = 'fox-published-1';
+const assetUrl = file => `${BASE}${file}?v=${FOX_ASSET_VERSION}`;
 let source = null;
 const V = new THREE.Vector3();
 const W = new THREE.Vector3();
@@ -123,19 +125,19 @@ export async function loadFoxSoldier() {
     // 覆盖材质。把加载器内部的旧请求也指向现有文件，避免浏览器等待三个 404 后卡在 66%。
     const fbxManager = new THREE.LoadingManager();
     const embeddedTextureAliases = {
-      'woman_body_bl.bmp': BASE + 'body.png',
-      'woman_face_bl.bmp': BASE + 'face.png',
-      'ddfcd20.bmp': BASE + 'ddfcd20.png',
+      'woman_body_bl.bmp': assetUrl('body.png'),
+      'woman_face_bl.bmp': assetUrl('face.png'),
+      'ddfcd20.bmp': assetUrl('ddfcd20.png'),
     };
     fbxManager.setURLModifier(url => {
       const file = decodeURIComponent(url).split('/').at(-1).toLowerCase();
       return embeddedTextureAliases[file] || url;
     });
     const [actor, body, face, hair] = await Promise.all([
-      new FBXLoader(fbxManager).loadAsync(BASE + 'fox.fbx'),
-      textureLoader.loadAsync(BASE + 'body.png'),
-      textureLoader.loadAsync(BASE + 'face.png'),
-      textureLoader.loadAsync(BASE + 'ddfcd20.png'),
+      new FBXLoader(fbxManager).loadAsync(assetUrl('fox.fbx')),
+      textureLoader.loadAsync(assetUrl('body.png')),
+      textureLoader.loadAsync(assetUrl('face.png')),
+      textureLoader.loadAsync(assetUrl('ddfcd20.png')),
     ]);
     for (const map of [body, face, hair]) {
       map.colorSpace = THREE.SRGBColorSpace;

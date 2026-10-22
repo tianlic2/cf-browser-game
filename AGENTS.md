@@ -1,5 +1,10 @@
 # AGENTS.md
 
+## 2026-10-22 Fox 资源获准发布到 GitHub
+- 用户在确认 GitHub Pages 因 Fox 文件未发布而持续报错后，明确授权把 `assets/local/fox_npc/fox.fbx`、`body.png`、`face.png` 和 `ddfcd20.png` 上传到当前 GitHub 仓库。本条构成此前“未获明确发布授权前不可推送”的所需授权；四个运行资源不再保持 `.gitignore` 状态。
+- `.gitignore` 只放行上述 Fox 运行文件，不放行 `assets/local/` 下其他本地候选素材。`scripts/fox_soldier.js` 对四个 URL 使用统一 `fox-published-1` 缓存版本，避免 GitHub Pages 上既有 404 缓存继续触发加载失败。
+- 每次发布后必须验证 GitHub Pages 上四个 URL 均返回 HTTP 200；`fox.fbx` 大小约 7.3 MiB，三张贴图合计约 483 KiB。不得用旧奥摩静默回退掩盖线上资源缺失。
+
 ## 2026-10-22 五把枪的动画枪口曳光校准正式接入
 - 用户在 `preview/tracer-muzzle.html` 确认的方向参数为：AK `yaw 3.7° / pitch 2.6°`，M4A1-C `1.3° / .6°`，炫金雷神 `.6° / .5°`，巴雷特 `4.1° / 1.4°`，沙漠之鹰 `.9° / 1°`；五把枪的模型枪口位置修正均为相机局部 `X/Y/Z=0`。`scripts/tracer_muzzle.js` 是这些正式参数的唯一来源。
 - 曳光起点逐帧读取当前 `ClassicView.muzzle()` 或正式视模的相机空间枪口，随后叠加该枪位置修正并转换到世界空间。不同皮肤必须区分 M4A1-C 与炫金雷神；缓存枪口只允许用于相同校准 key，不能在刚切枪时继承上一把枪的位置。

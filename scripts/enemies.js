@@ -1,12 +1,14 @@
-// ===== 敌人系统（经典奥摩蒙皮 + 点射走位 AI + 倒地尸体 + 对象池）=====
+// ===== 敌人系统（Fox 原生人物动作 + 点射走位 AI + 倒地尸体 + 对象池）=====
 import * as THREE from "three";
-import { ClassicSoldierRig as SoldierRig } from "./classic_soldier.js?v=omoh-return-1";
+import { createNpcNamePool } from './npc_names.js';
+import { FoxSoldierRig as SoldierRig } from "./fox_soldier.js?v=fox-native-4";
 import { makeBlobShadow } from "./blobshadow.js";
 import { intersectsBrush } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";
 import { chooseDistributedSpawnIndex } from './distributed_spawns.js';
 import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js?v=stable-search-1";
 import { advanceFacing, angleDelta, separationOffset } from './npc_motion.js';
+import { selectFoxDeathDirection } from './fox_death_direction.js';
 
 // 敌人血量恒定：HP 必须固定，否则「AK 3 枪死」的数值不成立 —— 所以难度**不碰血量**，
 // 只缩放下面这份 ENEMY_TUNING 里的乘数。
@@ -153,6 +155,9 @@ export class Enemy {
     this.engageFar = opts.engageFar || ENGAGE_FAR;
     this.dead = false;
     this.deathHeadshot = false;
+    this.deathDirection = 'back';
+    this.deathPushX = 0;
+    this.deathPushZ = -1;
     this.corpseT = 0;
     this.headshotPushCurve = 0;
     this.headshotPushDistance = 0;
@@ -713,7 +718,7 @@ export class Enemy {
   }
 
   // 击杀 → 进入倒地状态（先不销毁：尸身要留在场上）
-  takeDamage(amount, headshot = false) {
+  takeDamage(amount, headshot = false, impactDir = null) {
     if (this.dead) return false;
     if (this.trainingImmortal) {
       this.setFlash();
@@ -731,6 +736,12 @@ export class Enemy {
       // 地上的掉落枪由 onEnemyDeath 单独生成；尸体不再保留胸前的持枪模型。
       this.rig.mount.visible = false;
       this.deathHeadshot = !!headshot;
+      const yaw = this.group.rotation.y;
+      this.deathDirection = selectFoxDeathDirection(impactDir, yaw);
+      const x = Number(impactDir?.x), z = Number(impactDir?.z);
+      const length = Math.hypot(x, z);
+      this.deathPushX = length > 1e-4 ? x / length : -Math.sin(yaw);
+      this.deathPushZ = length > 1e-4 ? z / length : -Math.cos(yaw);
       this.corpseT = 0;
       this.wantShoot = false;
       this.blindT = 0;
@@ -810,8 +821,8 @@ export class Enemy {
       const target = HEADSHOT_KNOCKBACK * (1 - Math.pow(1 - p, 3));
       const delta = target - this.headshotPushCurve;
       this.headshotPushCurve = target;
-      const backX = -Math.sin(this.group.rotation.y);
-      const backZ = -Math.cos(this.group.rotation.y);
+      const backX = this.deathPushX;
+      const backZ = this.deathPushZ;
       const steps = Math.max(1, Math.ceil(delta / 0.08));
       for (let i = 0; i < steps; i++) {
         const distance = delta / steps;
@@ -878,7 +889,8 @@ export class Enemy {
     // 骨架同步进入瘫倒姿势：膝盖跪折、上身塌下、双手松开
     // （所以尸体是「瘫下去」的，而不是一整块板子拍在甲板上）
     const headSnap = this.deathHeadshot ? Math.max(0, 1 - this.corpseT / 0.18) : 0;
-    this.rig.animate(dt, { moved: 0, speed: 0, aim: 0, aimPitch: 0, blind: 0, flinch: headSnap, dead: true });
+    this.rig.animate(dt, { moved: 0, speed: 0, aim: 0, aimPitch: 0, blind: 0,
+      flinch: headSnap, dead: true, deathDirection: this.deathDirection });
   }
 
   get corpseDone() {
@@ -897,6 +909,7 @@ export class EnemyManager {
     this.frozen = false;
     this.onFootstep = opts.onFootstep || null;
     this._nameSeq = 0;
+    this._namePool = createNpcNamePool(32);
     this.senseClock = 0;
     this.lastNoise = null;
     this.callout = null;
@@ -914,7 +927,15 @@ export class EnemyManager {
   }
 
   nextName() {
-    return ENEMY_NAMES[this._nameSeq++ % ENEMY_NAMES.length];
+    if (this._nameSeq >= this._namePool.length) {
+      this._namePool.push(...createNpcNamePool(32, Math.random, this._namePool));
+    }
+    return this._namePool[this._nameSeq++];
+  }
+
+  resetNamePool() {
+    this._namePool = createNpcNamePool(32);
+    this._nameSeq = 0;
   }
 
   // 复用池里的尸体/新建，避免一局创建上百个敌人导致材质与纹理泄漏。

@@ -15,12 +15,18 @@ export function timberMaterial(dark = 0) {
       // vertical grain and long weather streaks
       float grain = cgFbm2(vec2(cgP.x * 5.0 + cgP.z * 3.0, cgP.y * 0.55));
       float fine = cgNoise2(vec2(cgP.x * 22.0 + cgP.z * 14.0, cgP.y * 2.2));
-      vec3 warm = mix(vec3(0.095, 0.045, 0.032), vec3(0.20, 0.105, 0.068), grain * 0.8 + fine * 0.2);
-      vec3 grey = mix(vec3(0.08, 0.072, 0.062), vec3(0.17, 0.16, 0.14), grain);
+      vec3 warm = mix(vec3(0.055, 0.033, 0.026), vec3(0.115, 0.07, 0.048), grain * 0.8 + fine * 0.2);
+      vec3 grey = mix(vec3(0.07, 0.066, 0.058), vec3(0.155, 0.148, 0.132), grain);
       // old red lacquer survives in patches, mostly near the top
       float paint = smoothstep(0.52, 0.72, cgFbm2(vec2(cgP.x * 1.3 + cgP.z * 1.1, cgP.y * 1.4) + 3.1));
       paint *= smoothstep(0.4, 3.0, cgP.y) * (1.0 - smoothstep(4.2, 5.4, cgP.y));
       vec3 c = mix(warm, grey, smoothstep(0.35, 0.7, grain) * 0.35);
+      // long vertical checking cracks and sun cracks
+      float crack = smoothstep(0.72, 0.88, cgRidge2(vec2((cgP.x + cgP.z) * 10.0, cgP.y * 0.55)));
+      c *= 1.0 - crack * 0.55;
+      // knots and resin scars
+      float knot = smoothstep(0.82, 0.94, cgNoise2(vec2((cgP.x - cgP.z) * 7.0, cgP.y * 1.1)));
+      c = mix(c, vec3(0.045, 0.028, 0.018), knot * 0.6);
       c = mix(c, vec3(0.16, 0.045, 0.03), paint * 0.45);
       // soot / damp at the foot, green algae in the lowest 0.8 m
       c = mix(c, vec3(0.045, 0.038, 0.032), (1.0 - smoothstep(0.0, 1.1, cgP.y - 0.35)) * 0.55);
@@ -32,13 +38,15 @@ export function timberMaterial(dark = 0) {
     `,
     roughness: /* glsl */ `
       float grain = cgFbm2(vec2(cgP.x * 6.0, cgP.y * 0.7));
-      roughnessFactor = 0.66 + 0.24 * grain;
+      float damp = (1.0 - smoothstep(0.5, 2.2, cgP.y)) * 0.2;
+      roughnessFactor = clamp(0.72 + 0.2 * grain - damp, 0.36, 1.0);
     `,
     normal: /* glsl */ `
-      float e = 0.03;
-      float h0 = cgFbm2(vec2(cgP.x * 14.0, cgP.y * 0.9));
-      float hx = cgFbm2(vec2((cgP.x + e) * 14.0, cgP.y * 0.9));
-      cgBump = vec3(h0 - hx, 0.0, 0.0) * 0.8;
+      float e = 0.025;
+      float h0 = cgFbm2(vec2(cgP.x * 18.0, cgP.y * 1.1));
+      float hx = cgFbm2(vec2((cgP.x + e) * 18.0, cgP.y * 1.1));
+      float hz = cgFbm2(vec2(cgP.x * 18.0, (cgP.y + e) * 1.1));
+      cgBump = vec3(h0 - hx, h0 - hz, 0.0) * 1.5;
     `,
   });
 }
@@ -82,11 +90,15 @@ export function plasterMaterial() {
     color: /* glsl */ `
       float n = cgFbm2(vec2(cgP.x * 0.9 + cgP.z * 0.9, cgP.y * 0.7));
       float fine = cgNoise2(vec2(cgP.x * 8.0 + cgP.z * 4.0, cgP.y * 6.0));
-      vec3 c = mix(vec3(0.26, 0.17, 0.06), vec3(0.40, 0.28, 0.115), n * 0.8 + fine * 0.2);
-      // vertical rain wash
+      vec3 c = mix(vec3(0.18, 0.13, 0.052), vec3(0.30, 0.215, 0.09), n * 0.8 + fine * 0.2);
+      // vertical rain wash and hairline cracks
       float streak = smoothstep(0.6, 0.9, cgNoise2(vec2(cgP.x * 4.0 + cgP.z * 2.0, cgP.y * 0.15)));
-      c *= 1.0 - streak * 0.22;
+      c *= 1.0 - streak * 0.28;
+      float crack = smoothstep(0.7, 0.9, cgRidge2(vec2((cgP.x + cgP.z) * 5.0, cgP.y * 0.25)));
+      c *= 1.0 - crack * 0.3;
       c = mix(c, vec3(0.30, 0.245, 0.16), (1.0 - smoothstep(0.35, 1.4, cgP.y - 0.35)) * 0.5);
+      float algae = smoothstep(0.4, 0.85, cgFbm2(vec2(cgP.x * 1.8 + cgP.z, cgP.y * 1.1) + 6.0));
+      c = mix(c, vec3(0.12, 0.15, 0.065), algae * (1.0 - smoothstep(0.3, 1.2, cgP.y - 0.3)) * 0.55);
       diffuseColor.rgb = c;
     `,
   });
@@ -102,12 +114,12 @@ export function roofFieldMaterial() {
       float course = abs(fract(vMapUv.y / 0.36) - 0.5) * 2.0;
       float rowLine = smoothstep(0.82, 0.98, course);
       float pan = abs(fract(vMapUv.x / 0.32) - 0.5) * 2.0;
-      vec3 tile = mix(vec3(0.035,0.04,0.038), vec3(0.09,0.095,0.088), cgHash12(floor(vec2(vMapUv.x/0.32, vMapUv.y/0.36))) * 0.35 + (1.0-pan)*0.15);
+      vec3 tile = mix(vec3(0.052,0.054,0.056), vec3(0.105,0.108,0.11), cgHash12(floor(vec2(vMapUv.x/0.32, vMapUv.y/0.36))) * 0.35 + (1.0-pan)*0.15);
       tile *= 1.0 - rowLine * 0.32;
       // green moss, denser near the ridge and in the pan valleys
       float moss = smoothstep(0.38, 0.68, cgFbm2(vMapUv * 0.45 + 4.0));
       moss *= 0.4 + 0.6 * (1.0 - pan);
-      tile = mix(tile, vec3(0.14,0.185,0.07), moss * 0.85);
+      tile = mix(tile, vec3(0.16,0.19,0.08), moss * 0.8);
       // pale lichen spots
       tile = mix(tile, vec3(0.34,0.34,0.30), smoothstep(0.72,0.86, cgNoise2(vMapUv*3.2)) * 0.25);
       diffuseColor.rgb = tile;
@@ -126,7 +138,7 @@ export function coverTileMaterial() {
     params: { color: 0xffffff, roughness: 0.95, metalness: 0.0, side: THREE.DoubleSide, vertexColors: true, envMapIntensity: 0.06 },
     color: /* glsl */ `
       float n = cgNoise2(cgP.xz * 3.0 + cgP.y * 2.0);
-      vec3 c = mix(vec3(0.06,0.07,0.065), vec3(0.14,0.15,0.14), n);
+      vec3 c = mix(vec3(0.07,0.072,0.074), vec3(0.15,0.152,0.155), n);
       float moss = smoothstep(0.55, 0.8, cgFbm2(vec2(cgP.x * 0.9, cgP.z * 0.9) + 3.0));
       c = mix(c, vec3(0.18,0.23,0.08), moss * 0.65);
       c *= 0.85 + 0.25 * smoothstep(0.2, 1.0, cgN.y);

@@ -51,6 +51,8 @@ function fixture(){
   r.root.position.set(4,.3,-9);r.root.rotation.y=.87;r.root.add(r.skinRoot);
   const node=(parent,x,y,z)=>{const n=new THREE.Group();n.position.set(x,y,z);parent.add(n);return n;};
   r.pelvis=node(r.root,0,.95,0);r.spine=node(r.pelvis,0,.06,0);r.chest=node(r.spine,0,.28,0);r.neck=node(r.spine,0,.5,0);r.head=node(r.neck,0,.1,0);
+  r.mount=node(r.chest,-.04,.3,.37);
+  r.upperRunW=0;
   for(const [key,side] of [['legL',1],['legR',-1]]){
     const hip=node(r.pelvis,side*.1,-.04,0),knee=node(hip,0,-.42,0),ankle=node(knee,0,-.4,0);r[key]={hip,knee,ankle};
   }
@@ -79,4 +81,14 @@ for(let frame=0;frame<240;frame++){
   }
 }
 assert.ok(worst<1e-8,`bone matrix error ${worst}`);
-console.log(`PASS: 240 moving/turning poses, ${data.bones.length} source bones, max matrix error ${worst}; scratch pool reused.`);
+const running=fixture();
+running.upperRunW=1;
+running._rifleHandQ={left:new THREE.Quaternion(),right:new THREE.Quaternion()};
+running.mount.rotation.set(-.3,.23,0);
+optimized.call(running);
+const rifleQ=running.mount.getWorldQuaternion(new THREE.Quaternion());
+for(const index of [18,31]) {
+  assert.ok(running.bones[index].getWorldQuaternion(new THREE.Quaternion()).angleTo(rifleQ)<2e-4,
+    `running glove ${index} should stay oriented to the rifle`);
+}
+console.log(`PASS: 240 moving/turning poses, ${data.bones.length} source bones, max matrix error ${worst}; running gloves follow rifle orientation and scratch pool is reused.`);

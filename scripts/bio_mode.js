@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
-import { ClassicSoldierRig } from './classic_soldier.js?v=omoh-return-1';
+import { FoxSoldierRig } from './fox_soldier.js?v=fox-native-4';
 import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
 import { enemyModel } from './guncatalog.js?v=enemy-loadouts-1';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';
@@ -13,6 +13,7 @@ import { chooseIntent, createDirector, directorProfile, humanRole, seededTraits,
 import { BIO_HUMAN_SENSE_INTERVAL, BIO_ZOMBIE_ROUTE_INTERVAL,
   BIO_ZOMBIE_SENSE_INTERVAL, bioAnimationInterval, bioBudgetDue,
   bioSenseOffset } from './bio_performance.js?v=bio-lod-1';
+import { createNpcNamePool } from './npc_names.js';
 
 const ASSET = new URL('../assets/bio/zombie/', import.meta.url).href;
 const CLIPS = ['idle', 'run', 'attack', 'hit', 'death', 'scream'];
@@ -41,8 +42,6 @@ const HUMAN_SIGHT_RANGE = 31;
 const ZOMBIE_SIGHT_RANGE = 34;
 const HUMAN_HEARING_RANGE = 18;
 const ZOMBIE_HEARING_RANGE = 24;
-
-const MERCENARY_NAMES = ['猎鹰', '夜莺', '冷锋', '铁锤', '红隼', '灰狼', '黑曜', '雷鹰', '苍龙', '雪豹', '山鬼', '破晓'];
 
 export class BioMode {
   constructor({ scene, camera = null, sound, onPlayerInfected, onPlayerRespawn, onRoundEnd, onZombieKilled,
@@ -208,18 +207,19 @@ export class BioMode {
     this.timer = PREP;
     this.kills = this.infections = 0;
     const spawns = map.bio?.humans || map.spawns.player;
+    const mercenaryNames = createNpcNamePool(Math.min(BIO_NPC_COUNT, spawns.length));
     for (let i = 0; i < Math.min(BIO_NPC_COUNT, spawns.length); i++) {
       const [x, y, z] = spawns[i];
       const spot = this._findSpawn(x, y, z);
       if (!spot) continue;
       const group = new THREE.Group();
-      const rig = new ClassicSoldierRig(enemyModel('m4'));
+      const rig = new FoxSoldierRig(enemyModel('m4'));
       group.add(rig.root);
       group.position.fromArray(spot);
       group.rotation.y = Math.PI;
       this.scene.add(group);
       this.humans.push({ group, rig, alive: true, infected: false,
-        name: MERCENARY_NAMES[i % MERCENARY_NAMES.length], shotCd: .3 + i * .23,
+        name: mercenaryNames[i], shotCd: .3 + i * .23,
         hold: i % (map.bio?.holdPoints?.length || 1), panic: 0, hp: 100,
         ammo: HUMAN_MAG_SIZE, reserve: HUMAN_INITIAL_RESERVE, reloadT: 0,
         routeT: 0, routeX: 0, routeZ: 0, moveX: 0, moveZ: 0,

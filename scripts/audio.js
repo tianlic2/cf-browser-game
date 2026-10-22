@@ -339,7 +339,11 @@ export class SFX {
     for (const ext of cands) {
       last = "./audio/" + stem + ext;
       try {
-        const res = await fetch(last);
+        // These two files were replaced in place. Version only their requests so
+        // an already-played local build cannot reuse the old decoded HTTP body.
+        const request=(id==="sw_scope_in"||id==="sw_scope_out")
+          ? last+"?v=scope-210018-1":last;
+        const res = await fetch(request);
         if (!res.ok) throw new Error("HTTP " + res.status);
         const buf = await decode(dec, await res.arrayBuffer());
         if (!this._buffers.has(id)) this._buffers.set(id, []);
@@ -453,6 +457,17 @@ export class SFX {
 
     const h = {
       src, gain, dur, at: t, delay: o.delay || 0, method: o.schedule || null, stopped: false,
+      // A deploy event can be scheduled ahead of its authored animation frame.
+      // If the weapon is switched away before that frame, cancel it before its
+      // AudioBufferSource ever starts instead of fading a sound that should not exist.
+      cancelPending: () => {
+        if (h.stopped) return;
+        h.stopped = true;
+        const now = c.currentTime;
+        try { gain.gain.cancelScheduledValues(now); } catch (_) {}
+        try { gain.gain.setValueAtTime(0.0001, now); } catch (_) {}
+        try { src.stop(now); } catch (_) {}
+      },
       stop: (fade = 0.03) => {
         if (h.stopped) return;
         h.stopped = true;
@@ -510,6 +525,13 @@ export class SFX {
   }
   cancelReload() { this.cancelScheduled("reload"); }
   cancelBolt() { this.cancelScheduled("bolt"); }
+  cancelPendingDeploy() {
+    if (!this._scheduled.size) return;
+    const now = this.ctx?.currentTime ?? 0;
+    for (const h of Array.from(this._scheduled)) {
+      if (h.method === "deploy" && h.at > now) h.cancelPending();
+    }
+  }
   cancelStreak() { this.cancelScheduled("streak", 0.015); }
 
   // ---- 闪光弹：听力闷住 / 耳鸣 ----
@@ -1129,20 +1151,23 @@ export class SFX {
       volJitter: deagle || ak || m4c ? 0 : undefined,
       rate: 1.0, rateJitter: awm ? 0.03 : 0,
       wet: barrett || deagle || ak || m4c ? 0 : ironbeast ? 0.5 : axe ? 0.35 : 0.2,
-      schedule: barrett || ak || m4c ? "bolt" : undefined,
+      // Keep draw/select events separate from a post-shot bolt cycle. Every
+      // delayed deploy event (including Barrett and Desert Eagle) can then be
+      // withdrawn if its source animation is interrupted before that frame.
+      schedule: "deploy",
     });
   }
 
-  // 两把狙击枪共用短促的机械镜筒卡榫声；巴雷特略低沉，二级倍率略轻。
-  // 新录音比旧握持摩擦更有可辨识的瞬态，增益留有余量避免叠音削波。
+  // 两把狙击枪共用专门录制的短促镜筒机械声；巴雷特略低沉，二级倍率略高。
+  // 原文件的瞬态已经标准化，不再随机音量，避免同一次开镜反馈忽强忽弱。
   scopeIn(weaponId = "awm", stage = 1) {
     if (!this.ready()) return;
     const heavy = weaponId === "barrett";
     this._playMapped("scopeIn", {
       id: "sw_scope_in", kind: weaponId + ":" + stage,
-      vol: heavy ? (stage === 2 ? 0.88 : 0.95) : (stage === 2 ? 0.85 : 0.92),
-      rate: heavy ? (stage === 2 ? 1.02 : 0.90) : (stage === 2 ? 1.20 : 1.07),
-      volJitter: 0.06, rateJitter: 0.01, wet: 0.02,
+      vol: heavy ? (stage === 2 ? 0.96 : 1.0) : (stage === 2 ? 0.94 : 0.98),
+      rate: heavy ? (stage === 2 ? 1.06 : 0.96) : (stage === 2 ? 1.13 : 1.02),
+      volJitter: 0, rateJitter: 0, wet: 0,
     }, () => this._scopeInSynth(weaponId, stage));
   }
   scopeOut(weaponId = "awm") {
@@ -1150,8 +1175,8 @@ export class SFX {
     const heavy = weaponId === "barrett";
     this._playMapped("scopeOut", {
       id: "sw_scope_out", kind: weaponId,
-      vol: heavy ? 0.98 : 0.92, rate: heavy ? 0.82 : 0.93,
-      volJitter: 0.06, rateJitter: 0.01, wet: 0.02,
+      vol: heavy ? 1.0 : 0.96, rate: heavy ? 0.90 : 0.96,
+      volJitter: 0, rateJitter: 0, wet: 0,
     }, () => this._scopeOutSynth());
   }
 

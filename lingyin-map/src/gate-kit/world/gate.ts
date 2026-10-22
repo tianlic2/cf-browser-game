@@ -1,9 +1,11 @@
 import * as THREE from 'three';
-import { box, cyl, merge, sparrowBrace, tint } from './geom';
+import { box, cyl, merge, sparrowBrace } from './geom';
 import { canvasTexture } from '../core/materials';
-import { goldMaterial, plasterMaterial, stoneMaterial, timberMaterial } from './materials';
+import { goldMaterial, plasterMaterial, timberMaterial } from './materials';
+import { flagstoneMaterial, graniteMaterial } from './textures';
 import { Roof } from './roof';
-import { goldMaterial as templeGoldMaterial, templePlaqueTexture } from '../../world/materials';
+import { goldMaterial as templeGoldMaterial, stoneMaterial as templeStoneMaterial,
+  templePlaqueTexture } from '../../world/materials';
 
 const PLATFORM_Y = 0.35;
 const COL_TOP = 5.6;
@@ -15,7 +17,8 @@ export class Gate {
   readonly roof: Roof;
   private timber = timberMaterial(0);
   private timberDark = timberMaterial(1);
-  private stone = stoneMaterial(0.15);
+  private stone = graniteMaterial(0.12);
+  private balustradeStone = templeStoneMaterial(0.2);
   private plaster = plasterMaterial();
   private gold = goldMaterial();
 
@@ -26,9 +29,10 @@ export class Gate {
     this.buildBrackets();
     this.buildWalls();
     this.buildRailings();
-    this.buildApproachFence();
     this.buildPlaque();
+    this.buildCeiling();
     this.buildWings();
+    this.buildIvy();
     this.buildContactShadow();
     this.roof = new Roof();
     this.group.add(this.roof.group);
@@ -36,8 +40,8 @@ export class Gate {
 
   private buildPlatformAndBases() {
     const geos: THREE.BufferGeometry[] = [];
-    // The FPS courtyard is at y=0 while the playable gate floor is y=1.05.
-    // Fill the plinth below the study's shallow platform so it cannot float.
+    // The playable courtyard sits 0.68m below the gate study's local origin.
+    // Carry the updated platform down to the real floor so its edge is solid.
     geos.push(box(17.2, 0.68, 7.4, 0, -0.34, 0));
     // stone platform top (the paving module covers the approach)
     geos.push(box(17.2, 0.35, 7.4, 0, 0.175, 0));
@@ -53,15 +57,22 @@ export class Gate {
         rim.rotateX(Math.PI / 2);
         rim.translate(x, PLATFORM_Y + 0.62, z);
         geos.push(rim);
+        // carved lotus-petal ring around the drum
+        for (let k = 0; k < 12; k++) {
+          const a = (k / 12) * Math.PI * 2;
+          const petal = box(0.16, 0.05, 0.26, 0, 0, 0);
+          petal.rotateX(-0.28);
+          petal.rotateY(-a);
+          petal.translate(x + Math.cos(a) * 0.5, PLATFORM_Y + 0.56, z + Math.sin(a) * 0.5);
+          geos.push(petal);
+        }
       }
     }
-    // three shallow front steps
+    // Shallow front and rear steps meet the existing gameplay walk surface.
     for (let i = 0; i < 3; i++) {
       geos.push(box(9.5, 0.12, 0.5, 0, 0.06 + i * 0.12, 4.0 + (2 - i) * 0.5));
       geos.push(box(9.5, 0.12, 0.5, 0, 0.06 + i * 0.12, -4.0 - (2 - i) * 0.5));
     }
-    // Four lower, narrow treads join the raised study gate to the original
-    // courtyard and the north mountain opening without an unclimbable lip.
     for (let i = 0; i < 4; i++) {
       const top = .16 * (i + 1);
       for (const side of [-1, 1])
@@ -71,6 +82,23 @@ export class Gate {
     m.castShadow = true;
     m.receiveShadow = true;
     this.group.add(m);
+
+    // textured paving on the platform and step treads
+    const topMat = flagstoneMaterial(3.4, false);
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(16.7, 7.0), topMat);
+    top.rotation.x = -Math.PI / 2;
+    top.position.set(0, 0.356, 0);
+    top.receiveShadow = true;
+    this.group.add(top);
+    for (let i = 0; i < 3; i++) {
+      for (const side of [-1, 1]) {
+        const step = new THREE.Mesh(new THREE.PlaneGeometry(9.4, 0.48), topMat);
+        step.rotation.x = -Math.PI / 2;
+        step.position.set(0, 0.122 + i * 0.12, side * (4.0 + (2 - i) * 0.5));
+        step.receiveShadow = true;
+        this.group.add(step);
+      }
+    }
   }
 
   private buildColumns() {
@@ -136,18 +164,27 @@ export class Gate {
 
   private bracketCluster() {
     const g: THREE.BufferGeometry[] = [];
-    g.push(box(0.55, 0.28, 0.55, 0, 0.14, 0));
-    g.push(box(1.1, 0.16, 0.28, 0, 0.36, 0));
-    g.push(box(0.3, 0.18, 1.05, 0, 0.36, 0.12));
-    g.push(box(0.42, 0.22, 0.42, -0.42, 0.56, 0));
-    g.push(box(0.42, 0.22, 0.42, 0, 0.56, 0));
-    g.push(box(0.42, 0.22, 0.42, 0.42, 0.56, 0));
-    g.push(box(1.45, 0.15, 0.28, 0, 0.68, 0.05));
-    g.push(box(0.3, 0.16, 1.25, 0, 0.68, 0.2));
-    // projecting cantilever (ang) and its end block
-    g.push(box(0.22, 0.14, 0.95, 0, 0.82, 0.5, 0, 0.1));
-    g.push(box(0.38, 0.2, 0.38, 0, 0.94, 1.05));
-    g.push(box(0.16, 0.5, 0.16, 0, 0.55, 1.0));
+    // bearing block and first tier of arms
+    g.push(box(0.58, 0.26, 0.58, 0, 0.13, 0));
+    g.push(box(1.18, 0.15, 0.3, 0, 0.34, 0));
+    g.push(box(0.32, 0.15, 1.12, 0, 0.34, 0.1));
+    // three sheng (small bearing blocks) on the first tier
+    for (const x of [-0.46, 0, 0.46]) g.push(box(0.3, 0.2, 0.3, x, 0.5, 0));
+    // second tier with transverse arm
+    g.push(box(1.5, 0.14, 0.27, 0, 0.64, 0.05));
+    g.push(box(0.29, 0.14, 1.3, 0, 0.64, 0.16));
+    for (const x of [-0.62, 0, 0.62]) g.push(box(0.26, 0.18, 0.26, x, 0.8, 0.08));
+    // third, shorter tier
+    g.push(box(1.0, 0.12, 0.24, 0, 0.92, 0.16));
+    // projecting ang (cantilever) with a slight downward tilt
+    g.push(box(0.2, 0.15, 1.05, 0, 0.84, 0.55, 0, 0.12));
+    g.push(box(0.44, 0.2, 0.42, 0, 0.98, 1.12));
+    // paired diagonal braces under the cantilever
+    for (const sx of [-1, 1]) {
+      g.push(box(0.09, 0.5, 0.13, sx * 0.18, 0.62, 0.52, 0, sx * 0.55, sx * 0.16));
+    }
+    // hanging pendant under the end block
+    g.push(box(0.12, 0.34, 0.12, 0, 0.78, 1.13));
     return merge(g);
   }
 
@@ -167,9 +204,26 @@ export class Gate {
     }
     for (const [x, y, z] of puts) {
       const c = base.clone();
-      c.scale(0.74, 0.78, 0.74);
+      c.scale(0.7, 0.76, 0.7);
       if (Math.abs(x) > 6.2) c.rotateY(Math.PI / 2);
       c.translate(x, y, z);
+      clusters.push(c);
+    }
+    // upper tier, offset half a bay, to give the eave its layered depth
+    for (const [x, y, z] of puts) {
+      if ((Math.round(x / 0.68) & 1) === 0) continue;
+      const c = base.clone();
+      c.scale(0.5, 0.55, 0.5);
+      if (Math.abs(x) > 6.2) c.rotateY(Math.PI / 2);
+      c.translate(x + (Math.abs(x) > 6.2 ? 0 : 0.34), y + 0.5, z - 0.05);
+      clusters.push(c);
+    }
+    // outer eave row: smaller clusters closer to the tile edge, adding depth
+    for (const [x, y, z] of puts) {
+      const c = base.clone();
+      c.scale(0.48, 0.52, 0.48);
+      if (Math.abs(x) > 6.2) c.rotateY(Math.PI / 2);
+      c.translate(x, y - 0.04, z + (z > 0 ? 0.42 : -0.42));
       clusters.push(c);
     }
     // corner clusters turned 45 degrees
@@ -193,6 +247,7 @@ export class Gate {
     const am = new THREE.Mesh(merge(accents), this.gold);
     am.castShadow = false;
     this.group.add(am);
+
   }
 
   private panelWall(w: number, h: number, x: number, y: number, z: number) {
@@ -222,21 +277,21 @@ export class Gate {
       const cx = (a + b) / 2;
       for (const z of [-COL_Z, COL_Z]) {
         const back = box(w, 4.95, 0.08, 0, 2.47, -0.09);
-        back.translate(cx, PLATFORM_Y + 0.62, z);
+        back.translate(cx, PLATFORM_Y + 0.02, z);
         walls.push(back);
-        walls.push(this.panelWall(w, 4.95, cx, PLATFORM_Y + 0.62, z));
+        walls.push(this.panelWall(w, 4.95, cx, PLATFORM_Y + 0.02, z));
         // door frame and lower panel divisions
         const frame: THREE.BufferGeometry[] = [];
         for (const fx of [a + 0.3, (a + b) / 2, b - 0.3]) {
-          frame.push(box(0.2, 4.95, 0.18, fx, PLATFORM_Y + 0.62 + 2.47, z + (z > 0 ? 0.1 : -0.1)));
+          frame.push(box(0.2, 4.95, 0.18, fx, PLATFORM_Y + 0.02 + 2.47, z + (z > 0 ? 0.1 : -0.1)));
         }
         for (const fy of [1.4, 2.6, 3.9]) {
-          frame.push(box(w, 0.16, 0.16, cx, PLATFORM_Y + 0.62 + fy, z + (z > 0 ? 0.1 : -0.1)));
+          frame.push(box(w, 0.16, 0.16, cx, PLATFORM_Y + 0.02 + fy, z + (z > 0 ? 0.1 : -0.1)));
         }
         walls.push(merge(frame));
         // framed lattice over the upper half of the side-bay doors
         const lat: THREE.BufferGeometry[] = [];
-        const ly = PLATFORM_Y + 0.62 + 2.6;
+        const ly = PLATFORM_Y + 0.02 + 2.6;
         const lh = 2.0;
         for (let k = 0; k <= Math.round(w / 0.22); k++) {
           lat.push(box(0.05, lh, 0.07, cx - w / 2 + (w * k) / Math.round(w / 0.22), ly + lh / 2, z + (z > 0 ? 0.12 : -0.12)));
@@ -255,7 +310,7 @@ export class Gate {
         g.push(box(0.12, 4.95, 0.28, 0, 2.47, z));
       }
       const geo = merge(g);
-      geo.translate(x, PLATFORM_Y + 0.62, 0);
+      geo.translate(x, PLATFORM_Y + 0.02, 0);
       walls.push(geo);
     }
     const m = new THREE.Mesh(merge(walls), this.timberDark);
@@ -263,12 +318,36 @@ export class Gate {
     m.receiveShadow = true;
     this.group.add(m);
 
+    // iron studs and ring handles on the side-bay doors
+    const studs: THREE.BufferGeometry[] = [];
+    for (const [a, b] of bays) {
+      const cx = (a + b) / 2;
+      for (const z of [-COL_Z, COL_Z]) {
+        for (let row = 0; row < 4; row++) {
+          for (let col = 0; col < 3; col++) {
+            const x = cx - 0.9 + col * 0.9;
+            const y = PLATFORM_Y + 0.9 + row * 0.85;
+            const g = new THREE.SphereGeometry(0.045, 7, 5);
+            g.scale(1, 1, 0.5);
+            g.translate(x, y, z + (z > 0 ? 0.19 : -0.19));
+            studs.push(g);
+          }
+        }
+        const ring = new THREE.TorusGeometry(0.13, 0.022, 6, 12);
+        ring.translate(cx, PLATFORM_Y + 1.4, z + (z > 0 ? 0.2 : -0.2));
+        studs.push(ring);
+      }
+    }
+    const sm = new THREE.Mesh(merge(studs), this.gold);
+    sm.castShadow = false;
+    this.group.add(sm);
+
     // ochre plaster side wings
     const plaster: THREE.BufferGeometry[] = [];
     for (const s of [-1, 1]) {
-      plaster.push(box(6.0, 2.3, 0.34, s * 9.1, PLATFORM_Y + 1.15, -1.1));
+      plaster.push(box(6.4, 2.3, 0.34, s * 8.95, PLATFORM_Y + 1.15, -1.1));
       // stone plinth under the wall
-      plaster.push(box(6.2, 0.4, 0.46, s * 9.1, PLATFORM_Y + 0.2, -1.1));
+      plaster.push(box(6.6, 0.4, 0.46, s * 8.95, PLATFORM_Y + 0.2, -1.1));
     }
     const pm = new THREE.Mesh(merge(plaster), this.plaster);
     pm.castShadow = true;
@@ -278,51 +357,58 @@ export class Gate {
 
   private buildRailings() {
     const g: THREE.BufferGeometry[] = [];
+    // Use the same stone post/cap/beam language as the temple terrace. The
+    // former dense timber pickets sat only a few metres from that balustrade
+    // and made the entrance read as two unrelated architectural kits.
     const rail = (x0: number, x1: number, z: number) => {
-      const n = Math.round((x1 - x0) / 0.22);
+      const len = Math.abs(x1 - x0);
+      const n = Math.max(2, Math.round(len / 2.4));
       for (let i = 0; i <= n; i++) {
         const x = x0 + ((x1 - x0) * i) / n;
-        g.push(box(0.05, 0.85, 0.05, x, PLATFORM_Y + 0.62 + 0.43, z));
-      }
-      g.push(box(x1 - x0, 0.09, 0.1, (x0 + x1) / 2, PLATFORM_Y + 1.3, z));
-      g.push(box(x1 - x0, 0.09, 0.1, (x0 + x1) / 2, PLATFORM_Y + 0.9, z));
-      for (let i = 0; i <= 2; i++) {
-        const x = x0 + ((x1 - x0) * i) / 2;
-        g.push(box(0.12, 1.0, 0.12, x, PLATFORM_Y + 0.62 + 0.5, z));
+        g.push(box(0.24, 0.95, 0.24, x, PLATFORM_Y + 0.475, z));
+        g.push(box(0.34, 0.12, 0.34, x, PLATFORM_Y + 0.98, z));
+        if (i < n) {
+          const nextX = x0 + ((x1 - x0) * (i + 0.5)) / n;
+          g.push(box(len / n, 0.16, 0.14, nextX, PLATFORM_Y + 0.74, z));
+        }
       }
     };
     rail(-5.6, -2.9, 1.35);
     rail(2.9, 5.6, 1.35);
-    const m = new THREE.Mesh(merge(g), this.timberDark);
+    const m = new THREE.Mesh(merge(g), this.balustradeStone);
+    m.name = 'gate-stone-balustrades';
     m.castShadow = true;
     m.receiveShadow = true;
     this.group.add(m);
   }
 
-  private buildApproachFence() {
+  private buildCeiling() {
     const geos: THREE.BufferGeometry[] = [];
-    // North terrace edge: the old stone balustrade stops at these spans.
-    // The centre [-3, 3] remains fully open to the seven stair treads.
-    for (const [a,b] of [[-12,-3],[3,12]]) {
-      const n = 5;
-      for (let i=0;i<=n;i++) {
-        const x=a+(b-a)*i/n;
-        geos.push(box(.19,1.26,.19,x,-.68+.63,5.7));
-        geos.push(box(.3,.1,.3,x,-.68+1.3,5.7));
-      }
-      for (const h of [.52,1.03])
-        geos.push(box(b-a,.13,.17,(a+b)/2,-.68+h,5.7));
+    // exposed ceiling rafters across the open central bay
+    for (let x = -6.2; x <= 6.2; x += 0.5) {
+      geos.push(box(0.11, 0.14, 4.2, x, 5.62, 0, 0, 0.06));
     }
-    const fence = new THREE.Mesh(merge(geos),this.timberDark);
-    fence.name='gate-terrace-timber-fence';
-    fence.castShadow=true;
-    fence.receiveShadow=true;
-    this.group.add(fence);
+    // two longitudinal purlins and a central ridge beam
+    for (const z of [-1.2, 0, 1.2]) {
+      const g = cyl(0.09, 0.09, 12.8, 8, 0, 5.72, z);
+      g.rotateZ(Math.PI / 2);
+      geos.push(g);
+    }
+    // carved beam ends peeking below the eave
+    for (const x of [-6.1, -2.65, 2.65, 6.1]) {
+      for (const z of [-1.95, 1.95]) {
+        geos.push(box(0.26, 0.3, 0.35, x, 5.62, z));
+      }
+    }
+    const m = new THREE.Mesh(merge(geos), this.timber);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    this.group.add(m);
   }
 
   private buildPlaque() {
     const group = new THREE.Group();
-    // Keep the game's existing Lingyin plaque artwork on the new building.
+    // Keep the game's existing Lingyin sign artwork and dimensions.
     const tex = templePlaqueTexture('gate');
     const board = new THREE.Mesh(
       new THREE.BoxGeometry(4.5, 1.45, 0.16), templeGoldMaterial(),
@@ -348,6 +434,75 @@ export class Gate {
     this.group.add(group);
   }
 
+  private buildIvy() {
+    const tex = canvasTexture(256, 256, (ctx) => {
+      ctx.clearRect(0, 0, 256, 256);
+      let a = 98765;
+      const rnd = () => {
+        a = (a * 1664525 + 1013904223) >>> 0;
+        return a / 4294967296;
+      };
+      for (let i = 0; i < 14; i++) {
+        const x = 26 + rnd() * 204;
+        const y = 26 + rnd() * 204;
+        const r = 12 + rnd() * 20;
+        const ang = rnd() * Math.PI * 2;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(ang);
+        const g = ctx.createLinearGradient(-r, 0, r, 0);
+        g.addColorStop(0, '#263a18');
+        g.addColorStop(0.5, '#557034');
+        g.addColorStop(1, '#2c421c');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r, r * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(24,36,14,0.75)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-r, 0);
+        ctx.lineTo(r, 0);
+        ctx.stroke();
+        ctx.restore();
+      }
+    });
+    tex.anisotropy = 4;
+    const leafMat = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 0.95, envMapIntensity: 0.05 });
+    const stemMat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2a341a'), roughness: 1 });
+    const leaves: THREE.BufferGeometry[] = [];
+    const stems: THREE.BufferGeometry[] = [];
+    let a = 24680;
+    const rnd = () => {
+      a = (a * 1664525 + 1013904223) >>> 0;
+      return a / 4294967296;
+    };
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 8; i++) {
+        const x = s * 8.95 - 2.65 + i * 0.75 + rnd() * 0.2;
+        const top = PLATFORM_Y + 2.52;
+        const len = 0.5 + rnd() * 1.2;
+        const stem = new THREE.CylinderGeometry(0.012, 0.016, len, 5);
+        stem.rotateZ((rnd() - 0.5) * 0.15);
+        stem.translate(x, top - len / 2, -0.885);
+        stems.push(stem);
+        for (let k = 0; k < 4; k++) {
+          const y = top - len * (0.18 + k * 0.24);
+          const g = new THREE.PlaneGeometry(0.28 + rnd() * 0.26, 0.2 + rnd() * 0.2);
+          g.rotateZ(rnd() * Math.PI * 2);
+          g.translate(x + (rnd() - 0.5) * 0.2, y, -0.875);
+          leaves.push(g);
+        }
+      }
+    }
+    const stemMesh = new THREE.Mesh(merge(stems), stemMat);
+    stemMesh.castShadow = false;
+    this.group.add(stemMesh);
+    const leafMesh = new THREE.Mesh(merge(leaves), leafMat);
+    leafMesh.castShadow = false;
+    this.group.add(leafMesh);
+  }
+
   private buildContactShadow() {
     const tex = canvasTexture(512, 256, (ctx) => {
       const g = ctx.createRadialGradient(256, 128, 10, 256, 128, 250);
@@ -365,44 +520,47 @@ export class Gate {
   }
 
   private buildWings() {
-    // tiled coping on the plaster walls: two shallow slopes and a small ridge
-    const geos: THREE.BufferGeometry[] = [];
-    const wingTile = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2a2f2b'), roughness: 0.94 });
+    // low ochre walls with a small tiled cap and a dark service door
+    const tileMat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2c322d'), roughness: 0.95, metalness: 0 });
+    const doorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#241812'), roughness: 0.95 });
     for (const s of [-1, 1]) {
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.12, 1.5), wingTile);
-      slab.rotation.x = 0.22;
-      slab.position.set(s * 9.1, PLATFORM_Y + 2.9, -1.1);
-      slab.castShadow = true;
-      slab.receiveShadow = true;
-      this.group.add(slab);
-      for (let i = 0; i < 4; i++) {
-        const r = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 1.5), this.timberDark);
-        r.position.set(s * 9.1 - 2.4 + i * 1.6, PLATFORM_Y + 2.7, -0.55);
-        this.group.add(r);
-      }
-    }
-    for (const s of [-1, 1]) {
+      const cx = s * 8.95;
       for (const zs of [-1, 1]) {
-        const g = box(6.2, 0.12, 0.85, 0, 0, 0);
-        g.rotateX(zs * 0.32);
-        g.translate(s * 9.1, PLATFORM_Y + 3.0, -1.1 + zs * 0.38);
-        geos.push(g);
+        const slab = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.1, 0.95), tileMat);
+        slab.rotation.x = zs * 0.34;
+        slab.position.set(cx, PLATFORM_Y + 3.0, -1.1 + zs * 0.38);
+        slab.castShadow = true;
+        slab.receiveShadow = true;
+        this.group.add(slab);
       }
-      geos.push(box(6.2, 0.18, 0.18, s * 9.1, PLATFORM_Y + 3.16, -1.1));
-      // eave tile ends
-      for (let i = 0; i < 16; i++) {
-        const x = s * 9.1 - 3 + i * 0.4;
-        for (const zs of [-1, 1]) {
-          geos.push(box(0.1, 0.1, 0.12, x, PLATFORM_Y + 3.0, -1.1 + zs * 0.8));
-        }
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.14, 0.18), tileMat);
+      ridge.position.set(cx, PLATFORM_Y + 3.16, -1.1);
+      this.group.add(ridge);
+      const fascia = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.16, 0.1), this.timberDark);
+      fascia.position.set(cx, PLATFORM_Y + 2.86, -0.22);
+      this.group.add(fascia);
+      for (let i = 0; i < 15; i++) {
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.06, 8), tileMat);
+        cap.rotation.x = Math.PI / 2;
+        cap.position.set(cx - 3.2 + i * 0.44, PLATFORM_Y + 2.82, -0.17);
+        this.group.add(cap);
       }
+      // continuous stone footing: the wing walls sit on the ground, not in mid-air
+      const footing = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.62, 0.86), this.stone);
+      footing.position.set(cx, 0.04, -1.1);
+      footing.castShadow = true;
+      footing.receiveShadow = true;
+      this.group.add(footing);
+      const footingCap = new THREE.Mesh(new THREE.BoxGeometry(7.12, 0.12, 0.96), this.stone);
+      footingCap.position.set(cx, PLATFORM_Y + 0.06, -1.1);
+      footingCap.receiveShadow = true;
+      this.group.add(footingCap);
+      const door = new THREE.Mesh(new THREE.BoxGeometry(1.05, 2.0, 0.07), doorMat);
+      door.position.set(cx + s * 0.4, PLATFORM_Y + 1.2, -0.91);
+      this.group.add(door);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(1.26, 2.2, 0.1), this.timberDark);
+      frame.position.set(cx + s * 0.4, PLATFORM_Y + 1.3, -0.94);
+      this.group.add(frame);
     }
-    const merged = merge(geos);
-    tint(merged, new THREE.Color(0.13, 0.14, 0.13));
-    const tileMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, vertexColors: true, envMapIntensity: 0.08 });
-    const m = new THREE.Mesh(merged, tileMat);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    this.group.add(m);
   }
 }

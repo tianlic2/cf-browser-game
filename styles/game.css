@@ -674,7 +674,7 @@ body {
 
 /* 连杀播报紧跟圆形星章，整组位于准星下方。 */
 .streak {
-  position: absolute; left: 50%; top: calc(64% + 122px);
+  position: absolute; left: 50%; top: calc(64% + 138px);
   transform: translateX(-50%); opacity: 0; white-space: nowrap;
   font: 900 20px "Arial", "PingFang SC", "Microsoft YaHei", sans-serif;
   letter-spacing: 2px; color: #e5d6a8;
@@ -684,8 +684,10 @@ body {
 .streak.long { font-size: 16px; letter-spacing: 1px; }
 .streak.show { animation: streakPop 1.35s ease-out forwards; }
 @keyframes streakPop {
-  0% { opacity: 0; transform: translateX(-50%) translateY(5px); }
-  12%, 73% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  0% { opacity: 0; transform: translateX(-50%) translateY(8px) scale(1.16); }
+  8% { opacity: 1; transform: translateX(calc(-50% + 4px)) translateY(-2px) rotate(-1.8deg) scale(1.08); }
+  15% { opacity: 1; transform: translateX(calc(-50% - 4px)) translateY(2px) rotate(1.6deg) scale(1.03); }
+  23%, 73% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
   100% { opacity: 0; transform: translateX(-50%) translateY(-3px); }
 }
 
@@ -695,7 +697,7 @@ body {
 .sk-timer {
   position: absolute;
   left: 50%;
-  top: calc(64% + 151px);
+  top: calc(64% + 169px);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -746,7 +748,7 @@ body {
 
 /* 击杀军徽统一放在同一方框；六档素材按透明区内的实际图形高度校准。 */
 .killicon {
-  position: absolute; left: 50%; top: 64%; width: 122px; height: 122px;
+  position: absolute; left: 50%; top: 64%; width: 138px; height: 138px;
   transform: translateX(-50%); opacity: 0; pointer-events: none;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.9));
 }
@@ -769,12 +771,13 @@ body {
 .killicon.gold { filter: drop-shadow(0 2px 2px rgba(0,0,0,.9)) drop-shadow(0 0 6px rgba(255,202,93,.7)); }
 .killicon.show { animation: killIconAnim 1.15s ease-out forwards; }
 @keyframes killIconAnim {
-  0% { opacity: 1; transform: translateX(-50%) scale(1.30); }
-  6% { opacity: 1; transform: translateX(-50%) translate(3px, -2px) scale(1.27); }
-  13% { opacity: 1; transform: translateX(-50%) translate(-3px, 2px) scale(1.21); }
-  20% { opacity: 1; transform: translateX(-50%) translate(2px, -1px) scale(1.14); }
-  28% { opacity: 1; transform: translateX(-50%) translate(-1px, 1px) scale(1.07); }
-  36%, 76% { opacity: 1; transform: translateX(-50%) scale(1); }
+  0% { opacity: 1; transform: translateX(-50%) scale(1.42); }
+  6% { opacity: 1; transform: translateX(calc(-50% + 8px)) translateY(-5px) rotate(-3.2deg) scale(1.35); }
+  13% { opacity: 1; transform: translateX(calc(-50% - 8px)) translateY(5px) rotate(3.5deg) scale(1.27); }
+  20% { opacity: 1; transform: translateX(calc(-50% + 6px)) translateY(-3px) rotate(-2.5deg) scale(1.18); }
+  28% { opacity: 1; transform: translateX(calc(-50% - 4px)) translateY(3px) rotate(1.8deg) scale(1.10); }
+  36% { opacity: 1; transform: translateX(calc(-50% + 2px)) translateY(-1px) rotate(-.8deg) scale(1.04); }
+  44%, 76% { opacity: 1; transform: translateX(-50%) scale(1); }
   100% { opacity: 0; transform: translateX(-50%) scale(1); }
 }
 
@@ -2422,9 +2425,9 @@ body {
 }
 
 @media (max-height: 600px) {
-  .killicon { top: 60%; width: 99px; height: 99px; }
-  .streak { top: calc(60% + 99px); font-size: 16px; }
-  .sk-timer { top: calc(60% + 121px); padding: 2px 6px; }
+  .killicon { top: 60%; width: 112px; height: 112px; }
+  .streak { top: calc(60% + 112px); font-size: 16px; }
+  .sk-timer { top: calc(60% + 136px); padding: 2px 6px; }
 }
 
 /* Match HUD uses the restrained olive / steel palette of the classic client. */
@@ -2910,6 +2913,11 @@ body.training-playing .roundbar{border-color:#4d8d85;box-shadow:0 0 13px #3fa89b
   color: #10202a; font: 800 17px Arial,"Microsoft YaHei",sans-serif; cursor: pointer;
 }
 .nickname-card button:hover { filter: brightness(1.08); }
+.nickname-actions { display: grid; grid-template-columns: auto 1fr; gap: 10px; margin-top: 18px; }
+.nickname-card .nickname-actions button { margin-top: 0; }
+.nickname-card .nickname-actions .nickname-cancel {
+  width: auto; min-width: 92px; border-color: #536974; background: #102632; color: #b9c8ce;
+}
 
 #menu.lobby {
   position: fixed; inset: 0; z-index: 10;
@@ -2948,6 +2956,12 @@ body.training-playing .roundbar{border-color:#4d8d85;box-shadow:0 0 13px #3fa89b
 #menu .lobby-tab.active { color: #ecd9a9; background: rgba(213,188,126,.055); border: 0; font-weight: 700; }
 #menu .lobby-tab.active::before { background: #d7bd7d; }
 #menu .lobby-profile { flex: 0 0 auto; display: flex; align-items: center; gap: 11px; color: #cbd4d5; font-size: 12px; }
+#menu .lobby-rename, #menu .modern-rename {
+  border: 1px solid #566f7a; background: #102a37; color: #b9c8cd; cursor: pointer;
+  font: 11px/1 Arial,"Microsoft YaHei",sans-serif;
+}
+#menu .lobby-rename { padding: 6px 9px; border-radius: 2px; }
+#menu .lobby-rename:hover, #menu .modern-rename:hover { border-color: #d1b875; color: #f1dfae; }
 #menu .lobby-credit { color: #788b94; white-space: nowrap; }
 #menu .lobby-credit b { color: #d9c78f; font-weight: 600; }
 #menu .lobby-rank { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; border: 1px solid #718590; color: #d6c68f; background: #112936; font-weight: 900; }
@@ -3000,6 +3014,7 @@ body.training-playing .roundbar{border-color:#4d8d85;box-shadow:0 0 13px #3fa89b
 #menu .modern-player-card b { color: #ecf0ec; font-size: 13px; }
 #menu .modern-player-card small { color: #748b95; font-size: 10px; }
 #menu .modern-player-card em { color: #d8bf7e; font-size: 10px; font-style: normal; }
+#menu .modern-player-card .modern-rename { padding: 7px 9px; border-radius: 2px; white-space: nowrap; }
 #menu .modern-room-side > p { margin: 18px 0; color: #718690; font-size: 11px; line-height: 1.75; }
 #menu .modern-room-state { display: grid; grid-template-columns: 1fr auto; gap: 9px; padding-top: 14px; border-top: 1px solid rgba(120,145,155,.2); font-size: 10px; }
 #menu .modern-room-state span { color: #667e89; }

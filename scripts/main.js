@@ -1,18 +1,19 @@
 // ===== CrossFire FPS - 主游戏（运输船 · 团队竞技 · CF 手感）=====
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
-import { SFX } from "./audio.js?v=bio-damage-milestone-1";
-import { EnemyManager, ENEMY_NAMES, ENEMY_TUNING } from "./enemies.js?v=lingyin-spawns-2";
+import { SFX } from "./audio.js?v=scope-210018-1";
+import { EnemyManager, ENEMY_TUNING } from "./enemies.js?v=human-names-1";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
 import { ClassicView } from "./classic_view.js?v=kukri-scoped-vfx-1";
 import { loadAuthoredViews } from "./authored_view.js?v=orient3";
 import { KNIFE, knifePose } from "./melee.js?v=axe-speed-1";
 import { GRENADE, advanceGrenade, sweepGrenade, grenadePose } from "./grenades.js";
-import { BioMode } from "./bio_mode.js?v=enemy-loadouts-1";
+import { BioMode } from "./bio_mode.js?v=human-names-1";
 import { BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT, refillTwoMagazines } from "./bio_rules.js?v=bio-population-damage-1";
 import { HUMAN_RUN_SPEED, weaponMoveScale } from "./move_speed.js?v=bio-arena-1";
-import { ImpactVfx } from "./impact_vfx.js";
-import { loadClassicSoldier } from "./classic_soldier.js?v=omoh-return-1";
+import { ImpactVfx } from "./impact_vfx.js?v=tracer-muzzle-1";
+import { loadFoxSoldier } from "./fox_soldier.js?v=fox-native-4";
+import { VIEWMODEL_BOB_DISTANCE, viewmodelBobProfile } from "./viewmodel_bob.js";
 import { GroundNavigation } from "./navigation.js?v=goldsrc-visible-wall-1";
 import { intersectsBrush, brushSupport, brushSupportIsExposed, brushBottom, canMoveThroughBrushes,
   brushHorizontalEscape, jumpVelocityForHeightScale, shouldSnapDownToSupport,
@@ -35,6 +36,10 @@ import { Lobby } from "./lobby.js?v=crossfire-name-1";
 import { weaponPreview } from "./weapon_preview.js";
 import { rollHeadshotDamage, rollBodyshotDamage } from "./headshot_damage.js?v=barrett-body-random-1";
 import { movementSpreadTangent, sampleShotOffset } from "./shot_spread.js";
+import { isHeadshotIntersection } from "./head_hit.js?v=fox-scale-1";
+import { createShotShakeState, resetShotShake, triggerShotShake, stepShotShake } from "./shot_feedback.js?v=impact-1";
+import { createNpcNamePool } from './npc_names.js';
+import { applyTracerLaunchCorrection, tracerMuzzleKey, tracerMuzzleProfile } from './tracer_muzzle.js?v=1';
 
 // ---------- DOM ----------
 const viewport = document.getElementById("viewport");
@@ -51,7 +56,13 @@ const shellParams = new URLSearchParams(location.search);
 const nicknameGate = document.getElementById("nicknameGate");
 const nicknameInput = document.getElementById("nicknameInput");
 const nicknameEnter = document.getElementById("nicknameEnter");
+const nicknameCancel = document.getElementById("nicknameCancel");
+const nicknameTitle = document.getElementById("nicknameTitle");
+const nicknameHint = document.getElementById("nicknameHint");
+const renameNicknameBtn = document.getElementById("renameNicknameBtn");
+const renameNicknameCardBtn = document.getElementById("renameNicknameCardBtn");
 const nicknamePreview = shellParams.get("nicknamePreview") === "1";
+let nicknameEditing = false;
 let playerNickname = "";
 try { playerNickname = (localStorage.getItem("tactical.nickname") || "").trim().slice(0, 16); }
 catch { /* private browsing or disabled storage: keep a session-only nickname */ }
@@ -82,19 +93,50 @@ function openNicknameGateIfNeeded() {
   try { hasSavedName = !!localStorage.getItem("tactical.nickname"); } catch { /* no persistence */ }
   nicknameGate.classList.toggle("hidden", bypass || (!nicknamePreview && hasSavedName));
   if (!nicknameGate.classList.contains("hidden")) {
+    configureNicknameGate(false);
     requestAnimationFrame(() => { nicknameInput?.focus(); nicknameInput?.select(); });
   }
+}
+
+function configureNicknameGate(editing) {
+  nicknameEditing = !!editing;
+  if (nicknameTitle) nicknameTitle.textContent = editing ? "修改游戏昵称" : "设置游戏昵称";
+  if (nicknameHint) nicknameHint.textContent = editing
+    ? "新昵称会立即用于大厅、战绩、击杀信息，并只保存在本机。"
+    : "昵称只保存在本机，用于大厅、战绩与训练记录。";
+  if (nicknameEnter) nicknameEnter.textContent = editing ? "保存昵称" : "进入大厅";
+  if (nicknameCancel) nicknameCancel.hidden = !editing;
+}
+
+function openNicknameEditor() {
+  if (!nicknameGate) return;
+  configureNicknameGate(true);
+  if (nicknameInput) nicknameInput.value = playerNickname;
+  nicknameGate.classList.remove("hidden");
+  requestAnimationFrame(() => { nicknameInput?.focus(); nicknameInput?.select(); });
 }
 
 function confirmNickname() {
   applyPlayerNickname(nicknameInput?.value, true);
   nicknameGate?.classList.add("hidden");
   nicknameInput?.blur();
+  nicknameEditing = false;
+}
+function cancelNicknameEdit() {
+  if (!nicknameEditing) return;
+  if (nicknameInput) nicknameInput.value = playerNickname;
+  nicknameGate?.classList.add("hidden");
+  nicknameInput?.blur();
+  nicknameEditing = false;
 }
 nicknameEnter?.addEventListener("click", confirmNickname);
+nicknameCancel?.addEventListener("click", cancelNicknameEdit);
+renameNicknameBtn?.addEventListener("click", openNicknameEditor);
+renameNicknameCardBtn?.addEventListener("click", openNicknameEditor);
 nicknameInput?.addEventListener("keydown", (event) => {
   event.stopPropagation();
   if (event.code === "Enter") { event.preventDefault(); confirmNickname(); }
+  else if (event.code === "Escape" && nicknameEditing) { event.preventDefault(); cancelNicknameEdit(); }
 });
 const bootWeights = { assets: .59, skins: .15, audio: .22, ready: .04 };
 const bootParts = { assets: 0, skins: 0, audio: 0, ready: 0 };
@@ -406,6 +448,7 @@ const MAP_META = {
   bio: { name: '黑色城镇（生化）', poster: './assets/map-posters/blacktown.jpg' },
 };
 let selectedMapId = "transport";
+let lastArenaMapId = "transport";
 let selectedModeId = "tdm";
 let bioMode = null;
 let pendingMapStart = false;
@@ -432,7 +475,7 @@ async function ensureMapLoaded(id, onProgress = () => {}) {
     survivor: () => import('./survivor_map.js?v=map-filter-quality-1').then(m => m.buildSurvivorMap),
     blacktown: () => import('./blacktown_map.js?v=map-filter-quality-1').then(m => m.buildBlacktownMap),
     bio: () => import('./bio_map.js?v=map-filter-quality-1').then(m => m.buildBioMap),
-    lingyin: () => import('./lingyin_map.js?v=32').then(m => m.buildLingyinMap),
+    lingyin: () => import('./lingyin_map.js?v=36').then(m => m.buildLingyinMap),
   };
   if (!loaders[id]) throw new Error('未知地图：' + id);
   onProgress(.06);
@@ -544,6 +587,8 @@ let lastBioCountdownSecond = null;
 const bioMatch = () => selectedModeId === "bio";
 const trainingMatch = () => selectedModeId === "training";
 const tdmMatch = () => selectedModeId === "tdm";
+const mapAvailableForMode = (id, mode = selectedModeId) =>
+  !!MAP_META[id] && (mode === "bio" ? id === "bio" : id !== "bio");
 const sniperOnlyMatch = () => selectedMapId === "prison";
 const prisonWeaponAllowed = (id) => ["sniper", "melee"].includes(WEAPON_DEFS[id]?.type);
 let obstacleMeshes = [];
@@ -736,6 +781,10 @@ let lastWeaponId = null;
 let recoilPitch = 0;
 let recoilYaw = 0;
 const D2R = Math.PI / 180;
+// 开枪震动只在最终相机上叠加，不参与射线、准星、player.pitch/yaw 或 aimPunch。
+// sequence 只用来交替左右震动，自动连发不会每发都向同一侧机械偏摆。
+const shotShake = createShotShakeState();
+let shotShakeSequence = 0;
 // 开镜状态
 let scoped = false;
 
@@ -1285,7 +1334,7 @@ const TDM_TIME = 600;     // 回合时长（秒）；时间到按比分判胜负
 // 会留到下一局，菜单上也看得到）。它一变，名册（roster）与在场的实例必须跟着
 // 原子地一起变 —— 见 setEnemyTarget()。
 const ENEMY_MIN = 1;
-const ENEMY_MAX = 8;      // 上限 8；ENEMY_NAMES 共 16 个代号，这个范围内不会重名
+const ENEMY_MAX = 8;
 let enemyTarget = 8;
 
 // 难度：只缩放敌人强度，**不动 ENEMY_HP** —— 血量固定才保住「AK 三枪死」的数值。
@@ -1379,6 +1428,7 @@ function renderTrainingPanel() {
   trainingPanel?.classList.toggle("hidden", !active);
   document.body.classList.toggle("training-playing", active);
   if (!trainingPanel) return;
+  document.getElementById("trainingMapLabel").textContent = MAP_META[selectedMapId].name;
   trainingDamageTotal.textContent = String(trainingStats.total);
   trainingHitCount.textContent = String(trainingStats.hits);
   trainingHeadCount.textContent = String(trainingStats.heads);
@@ -1597,10 +1647,13 @@ function showHitDir(wx, wz) {
 }
 
 // ---------- 战绩名册（按住 Tab 显示）----------
-// 敌人对象是**池化**的、名字每次出场由 nextName() 重抽，所以战绩不能挂在 Enemy 上。
+// 敌人对象是**池化**的，所以战绩不能挂在 Enemy 上；昵称固定在本局 roster 槽位上。
 // 这里维护一份持久的红队名册（长度跟随 enemyTarget），敌人只是某条目当前在场的那具身体：
 // 条目认得名字与累计战绩，身体死了就解绑、下次补员再绑到同一条目上。
 let roster = [];
+// 大厅先展示一批本局候选昵称；正式开局时重新生成并固化到 roster。
+// 这样每局看到的人不同，但同一局的战绩、击杀信息和聊天称呼不会随复活跳变。
+let lobbyNpcNames = createNpcNamePool(Math.max(ENEMY_MAX, BIO_NPC_COUNT));
 let playerDeaths = 0;
 let PLAYER_NAME = playerNickname;
 
@@ -1634,8 +1687,9 @@ const chat = new Chat({
 
 function initRoster() {
   roster = [];
+  lobbyNpcNames = createNpcNamePool(Math.max(ENEMY_MAX, BIO_NPC_COUNT));
   for (let i = 0; i < enemyTarget; i++) {
-    roster.push({ name: ENEMY_NAMES[i % ENEMY_NAMES.length], kills: 0, deaths: 0, enemy: null });
+    roster.push({ name: lobbyNpcNames[i], kills: 0, deaths: 0, enemy: null });
   }
   playerDeaths = 0;
 }
@@ -1648,7 +1702,11 @@ function initRoster() {
 function resizeRoster(n) {
   while (roster.length < n) {
     const i = roster.length;
-    roster.push({ name: ENEMY_NAMES[i % ENEMY_NAMES.length], kills: 0, deaths: 0, enemy: null });
+    if (!lobbyNpcNames[i]) {
+      lobbyNpcNames.push(...createNpcNamePool(1, Math.random,
+        [...lobbyNpcNames, ...roster.map((entry) => entry.name)]));
+    }
+    roster.push({ name: lobbyNpcNames[i], kills: 0, deaths: 0, enemy: null });
   }
   // 先摘空闲条目（从尾部往回找，不动战绩）
   for (let i = roster.length - 1; i >= 0 && roster.length > n; i--) {
@@ -2869,6 +2927,10 @@ function switchWeapon(id, force, opts) {
     showToast("守望之城仅限狙击枪与近身武器", true);
     return;
   }
+  // The outgoing weapon's authored draw/select clip ends here. Cancel only
+  // deploy sounds whose event frame has not been reached; an event that already
+  // happened belongs to a visible action and is allowed to finish naturally.
+  sfx.cancelPendingDeploy();
   cancelMelee();cancelGrenade();
   const draw = !!(opts && opts.draw);
   const previousId = currentId;
@@ -3501,9 +3563,7 @@ function buildMenuMatch() {
 function updateMapChoiceUi() {
   const name = MAP_META[selectedMapId]?.name || "运输船";
   document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
-    const available = !!MAP_META[button.dataset.map] && (trainingMatch()
-      ? button.dataset.map === 'blacktown'
-      : bioMatch() ? button.dataset.map === 'bio' : button.dataset.map !== 'bio');
+    const available = mapAvailableForMode(button.dataset.map);
     button.disabled = !available || state === "playing";
     button.classList.toggle("active", button.dataset.map === selectedMapId);
     button.setAttribute("aria-pressed", button.dataset.map === selectedMapId ? "true" : "false");
@@ -3547,10 +3607,10 @@ function updateMapChoiceUi() {
 }
 
 function activateMap(id) {
-  if (state === "playing" || !mapCatalog[id] ||
-      (trainingMatch() ? id !== 'blacktown' : bioMatch() ? id !== 'bio' : id === 'bio')) return false;
+  if (state === "playing" || !mapCatalog[id] || !mapAvailableForMode(id)) return false;
   impactVfx.clear();
   selectedMapId = id;
+  if (id !== 'bio') lastArenaMapId = id;
   if (mapData && mapData !== mapCatalog[id]) mapData.setActive?.(false);
   mapData = mapCatalog[id];
   mapData.setActive?.(true);
@@ -3594,8 +3654,9 @@ function activateMap(id) {
 
 function selectMode(id) {
   if (state === 'playing' || mapLoading || !['tdm', 'bio', 'training'].includes(id)) return false;
+  if (selectedMapId !== 'bio') lastArenaMapId = selectedMapId;
   selectedModeId = id;
-  selectedMapId = id === 'bio' ? 'bio' : id === 'training' ? 'blacktown' : 'transport';
+  selectedMapId = id === 'bio' ? 'bio' : lastArenaMapId;
   updateMapChoiceUi();
   buildMenuMatch();
   if (lobby) lobby.refresh();
@@ -3679,13 +3740,13 @@ function lobbyData() {
   return {
     room: {
       enemies: Array.from({ length: roomEnemyCount }, (_, i) => ({
-        name: roster[i]?.name || ENEMY_NAMES[i % ENEMY_NAMES.length],
+        name: roster[i]?.name || lobbyNpcNames[i] || createNpcNamePool(1)[0],
         role: "电脑", status: state === "playing" ? "对局中" : "准备",
       })),
       players: [{ name: PLAYER_NAME, role: "房主", status: state === "playing" ? "对局中" : "准备" }],
     },
     ticker: trainingMatch()
-      ? '训练模式 · 黑色城镇 · 按 N 在准心落点放置不死 NPC · 按 B 随时更换背包 · 右侧面板记录伤害'
+      ? `训练模式 · ${MAP_META[selectedMapId].name} · 按 N 在准心落点放置不死 NPC · 按 B 随时更换背包 · 右侧面板记录伤害`
       : bioMatch()
       ? `经典生化 · 黑色城镇（雨夜） · ${BIO_NPC_COUNT} 名 NPC / ${BIO_INITIAL_ZOMBIES} 名初始幽灵 · 坚守 3 分钟 · 按 Enter 打开战场聊天`
       : "团队竞技 · " + MAP_META[selectedMapId].name + " · 先到 " + TDM_LIMIT + " 击杀获胜 · 回合时限 " +
@@ -3850,6 +3911,18 @@ function updateSmokes(dt) {
 const _seg = new THREE.Vector3();
 const _mz = new THREE.Vector3();   // 敌人枪口（_seg 被 smokeBlocks 占用，别混用）
 const _whiz = new THREE.Vector3(); // 打偏的弹道掠耳点（enemiesShoot 专用）
+const _enemyMissDir = new THREE.Vector3();
+const _enemyTraceEnd = new THREE.Vector3();
+const _playerTraceStart = new THREE.Vector3();
+const _playerTraceEnd = new THREE.Vector3();
+const _playerMuzzleCamera = new THREE.Vector3();
+const _playerTraceLaunchDir = new THREE.Vector3();
+const _playerShotEuler = new THREE.Euler(0,0,0,'YXZ');
+let playerMuzzleKey = null;
+function cachePlayerMuzzle(point,key){
+  if(!key)return;
+  _playerMuzzleCamera.copy(point);playerMuzzleKey=key;
+}
 function smokeBlocks(ax, ay, az, bx, by, bz) {
   if (!smokes.length) return false;
   _seg.set(bx - ax, by - ay, bz - az);
@@ -4293,7 +4366,7 @@ function resolveKnifeHit(h,dir,mode) {
   const enemy=h.object.userData.enemy;
   const meleeSkin=activeSkinId("knife"),silentEnemyImpact=meleeSkin==="dragon";
   if(enemy&&!enemy.dead) {
-    const head=h.object.userData.part==='head';
+    const head=isHeadshotIntersection(h);
     const ef=new THREE.Vector3(Math.sin(enemy.group.rotation.y),0,Math.cos(enemy.group.rotation.y));
     const backstab=ef.dot(dir)>.5,golden=head&&enemy.health>=enemy.maxHealth;
     const dmg=head?mode.head:backstab?mode.backstab:mode.dmg;
@@ -4348,7 +4421,7 @@ function updateIronbeastMelee(dt) {
       action.hit=true;
       const enemy=h.object.userData.enemy;
       if(enemy&&!enemy.dead) {
-        const head=h.object.userData.part==='head';
+        const head=isHeadshotIntersection(h);
         const golden=head&&enemy.health>=enemy.maxHealth;
         enemy.combatAt=time;spawnBlood(h.point,dir);flashCrosshairHit();
         if(head)sfx.headshot();
@@ -4499,10 +4572,9 @@ function fire() {
   const hipShot = def.type === "sniper" && !scoped;
   const offset = sampleShotOffset(movementShotSpread(def),
     hipShot ? SNIPER_HIP_SPREAD_MIN : 0, hipShot ? SNIPER_HIP_SPREAD_MAX : 0);
-  const dir = new THREE.Vector3(offset.x, offset.y, -1).normalize();
-  dir.applyEuler(
-    new THREE.Euler(player.pitch + recoilPitch, player.yaw + recoilYaw, 0, "YXZ")
-  );
+  const localShotDir = new THREE.Vector3(offset.x, offset.y, -1).normalize();
+  _playerShotEuler.set(player.pitch + recoilPitch, player.yaw + recoilYaw, 0);
+  const dir = localShotDir.clone().applyEuler(_playerShotEuler);
   const origin = new THREE.Vector3();
   camera.getWorldPosition(origin);
   raycaster.set(origin, dir);
@@ -4513,11 +4585,34 @@ function fire() {
     penetratesEnemies: !!def.penetratesEnemies,
     woodDamageMultiplier: def.woodPenetration,
   });
+  // 曳光段只负责表现，终点严格取本发已经算出的真实命中序列；不会再采样一次散布。
+  // 可穿透目标/木箱且后方没有实体时继续飞向远处，其余情况停在实际碰撞点。
+  const terminalImpact = impacts[impacts.length - 1];
+  const continuesAfterImpact = terminalImpact &&
+    (terminalImpact.woodEntry || (terminalImpact.object.userData.enemy && def.penetratesEnemies));
+  if (terminalImpact && !continuesAfterImpact) _playerTraceEnd.copy(terminalImpact.point);
+  else _playerTraceEnd.copy(origin).addScaledVector(dir, 90);
+  const tracerKey=tracerMuzzleKey(currentId,activeSkinId(currentId));
+  const tracerProfile=tracerMuzzleProfile(currentId,activeSkinId(currentId));
+  if(tracerProfile&&playerMuzzleKey===tracerKey){
+    camera.updateMatrixWorld();
+    _playerTraceStart.copy(_playerMuzzleCamera);
+    _playerTraceStart.x+=tracerProfile.offset.x;
+    _playerTraceStart.y+=tracerProfile.offset.y;
+    _playerTraceStart.z+=tracerProfile.offset.z;
+    _playerTraceStart.applyMatrix4(camera.matrixWorld);
+  } else if (scoped) _playerTraceStart.copy(origin).addScaledVector(dir, .28);
+  else {
+    camera.updateMatrixWorld();
+    _playerTraceStart.set(.18, -.18, -.52).applyMatrix4(camera.matrixWorld);
+  }
+  applyTracerLaunchCorrection(localShotDir,tracerProfile,_playerTraceLaunchDir).applyEuler(_playerShotEuler);
+  impactVfx.tracer(_playerTraceStart,_playerTraceEnd,"player",{launchDirection:_playerTraceLaunchDir});
   for (const h of impacts) {
     if (h.object.userData.enemy) {
       const enemy = h.object.userData.enemy;
       if (!enemy.dead) {
-        const head = h.object.userData.part === "head";
+        const head = isHeadshotIntersection(h);
         // 穿箱命中只有伤害、血效和声音，不把准心染红；直接命中仍保留 0.11s 红闪。
         if (!h.penetratedWood) flashCrosshairHit();
         // 普通枪身体伤害继续按距离衰减；巴雷特身体伤害与四枪爆头走各自的 ±10% 随机区间。
@@ -4547,6 +4642,10 @@ function fire() {
       sfx.impact(h.point, "wall");
     }
   }
+
+  // 当前子弹已经用 player.pitch/yaw + recoilPitch/yaw 完成命中结算；现在才触发纯视觉震动，
+  // 因此画面有枪口冲击，而本发落点与原后坐规则完全不变。
+  triggerShotShake(shotShake, currentId, scoped, shotShakeSequence++);
 
   // 本枪后坐按确定性的弹道表推进；移动随机散布只作用于本发射线，不污染后坐表。
   // `advancePunch()` 内部会 `syncRecoil()`，
@@ -4809,8 +4908,11 @@ function enemiesShoot() {
       : Math.max(0.12, 0.72 - dist / 46);
     const hitProb = Math.max(0.05, Math.min(0.95,
       baseHit * Math.max(0.5, 1 - pSpeed * 0.05) * ENEMY_TUNING.acc));
-    if (Math.random() < hitProb) damagePlayer(e.damage, true, e);
-    else {
+    if (Math.random() < hitProb) {
+      // 命中弹道从敌人真实枪口抵达玩家眼胸区域；伤害规则保持原样。
+      impactVfx.tracer(mz, eye, "enemy");
+      damagePlayer(e.damage, true, e);
+    } else {
       // 打偏：子弹从耳边掠过。取「玩家眼睛沿弹道反向那一点」再**横向挪开**——
       // 正贴着耳朵反而是「打中了」的听感，挪开半米才是「擦过去」。
       // 水平面的垂直方向 `(-dz, dx)` 是 `dir` 在 xz 平面上的法向。
@@ -4818,6 +4920,21 @@ function enemiesShoot() {
       const off = (Math.random() < 0.5 ? -1 : 1) * (0.35 + Math.random() * 0.55);
       _whiz.set(eye.x + ox * off, eye.y + (Math.random() - 0.5) * 0.5, eye.z + oz * off);
       sfx.whiz(_whiz.x, _whiz.y, _whiz.z);
+
+      // 将原来只有声音的“打偏”补成真实世界轨迹。子弹先穿过掠耳点，再继续前进；
+      // 若撞上墙面或地面，就在那个真实交点生成弹孔、扬尘与空间撞击声。
+      _enemyMissDir.copy(_whiz).sub(mz).normalize();
+      raycaster.set(mz, _enemyMissDir);
+      raycaster.far = 140;
+      const missHit = raycaster.intersectObjects(losMeshes, false)[0];
+      if (missHit) {
+        _enemyTraceEnd.copy(missHit.point);
+        impactVfx.surface(missHit);
+        sfx.impact(missHit.point, "wall");
+      } else {
+        _enemyTraceEnd.copy(mz).addScaledVector(_enemyMissDir, 90);
+      }
+      impactVfx.tracer(mz, _enemyTraceEnd, "enemy");
     }
   }
 }
@@ -5008,6 +5125,7 @@ function respawnPlayer() {
   // 「重置循环跑之前」的那一帧也摆正，免得中间任何一处读到一个陈旧的抬枪角。
   recoilPitch = 0;
   recoilYaw = 0;
+  resetShotShake(shotShake);
   player.viewDip = 0;
   player.stepLift = 0;
   // groundY 必须一起清零：它现在由 supportAt() 每帧重算，若上一帧死在集装箱顶
@@ -5558,6 +5676,7 @@ function gameStart() {
   // 「重置循环跑之前」的那一帧也摆正，免得中间任何一处读到一个陈旧的抬枪角。
   recoilPitch = 0;
   recoilYaw = 0;
+  resetShotShake(shotShake);
   camera.rotation.set(0, 0, 0);
   curFov = BASE_FOV;
   camera.fov = BASE_FOV;
@@ -5615,6 +5734,7 @@ function gameStart() {
   enemyManager.enemies = [];
   enemyManager.corpses = [];
   enemyManager.wave = 0;
+  enemyManager.resetNamePool();
   if (bioMatch() || trainingMatch()) roster = [];
   else initRoster();
   refreshEnemyCountUi();
@@ -6224,18 +6344,15 @@ function animateWeapon(dt) {
   const ekYaw = spring(st.ks.yaw);
 
   const hSpeed = Math.hypot(player.vel.x, player.vel.z);
-  const moving = hSpeed > 0.6 && player.onGround;
-  // 静步 / 下蹲的摆动明显更小，奔跑时最大
-  const rate = moving ? (player.crouching || player.sneaking ? 6 : hSpeed > 5.6 ? 12 : 8) : 0;
-  const amp = player.crouching || player.sneaking ? 0.55 : hSpeed > 5.6 ? 1.3 : 1;
-  bobT += dt * rate;
+  const bob = viewmodelBobProfile(hSpeed, player.onGround,
+    player.crouching, player.sneaking, def.type);
+  bobT += dt * bob.rate;
   // 投掷物的双手更靠近镜头：仅把行走摆幅降至 15%（原 30%，用户 2026-10-10 反馈
   // 「手持投掷物移动时手臂摆动过大」，再减一半），原拉环/投掷动画不缩放。
   // 在共用 bob 处处理，使经典视模与加载失败后的回退手臂保持一致 ——
   // 下面 `classicNades[vid]` 那条路也是读同一对 bobX/bobY，所以一处改动两边同时生效。
-  const m = moving ? amp * (def.type === "grenade" ? 0.15 : 1) : 0;
-  const bobX = Math.sin(bobT * 2) * 0.013 * m;
-  const bobY = Math.sin(bobT) * 0.013 * m;
+  const bobX = Math.sin(bobT * 2) * VIEWMODEL_BOB_DISTANCE * bob.amplitude;
+  const bobY = Math.sin(bobT) * VIEWMODEL_BOB_DISTANCE * bob.amplitude;
 
   // 位移：+z 是朝玩家（后坐把枪推向肩膀），+y 向上
   const kBack = ekBack;
@@ -6333,6 +6450,7 @@ function animateWeapon(dt) {
   viewArms.update(reloading, reloadP, _invGroup);
   if(def.type==='grenade'){viewArms.poseGrenade(grenadeAction,_invGroup);c.gun.visible=!(grenadeAction?.thrown)&&(trainingMatch()||c.state.count>0);}
   _muzzleLocal.copy(c.muzzleLocal).applyMatrix4(c.group.matrix);
+  cachePlayerMuzzle(_muzzleLocal,tracerMuzzleKey(vid,activeSkinId(vid)));
   muzzleLight.position.copy(_muzzleLocal);
 
   if(classicNades[vid]) {
@@ -6366,7 +6484,7 @@ function animateWeapon(dt) {
       deploy?(switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*classicView.duration('select'):
       clip==='fire'?classicFireT:time%classicView.duration('idle_0');
     classicView.sample(clip,t);
-    classicView.muzzle(_muzzleLocal);c.group.worldToLocal(_muzzleLocal);
+    classicView.muzzle(_muzzleLocal);cachePlayerMuzzle(_muzzleLocal,'ak');c.group.worldToLocal(_muzzleLocal);
     muzzleShot.position.copy(_muzzleLocal);
     muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
@@ -6389,7 +6507,7 @@ function animateWeapon(dt) {
       deploy?(switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*m4cView.duration('select'):
       M4C_FIRE_CLIPS.includes(clip)?m4cFireT:time%m4cView.duration('idle_0');
     m4cView.sample(clip,t);
-    m4cView.muzzle(_muzzleLocal);c.group.worldToLocal(_muzzleLocal);
+    m4cView.muzzle(_muzzleLocal);cachePlayerMuzzle(_muzzleLocal,'m4');c.group.worldToLocal(_muzzleLocal);
     muzzleShot.position.copy(_muzzleLocal);
     muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
@@ -6416,7 +6534,7 @@ function animateWeapon(dt) {
       deploy?(switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*ironbeastView.duration('select'):
       IRONBEAST_FIRE_CLIPS.includes(clip)?ironbeastFireT:time%ironbeastView.duration('idle_0');
     ironbeastView.sample(clip,t);
-    ironbeastView.muzzle(_muzzleLocal);c.group.worldToLocal(_muzzleLocal);
+    ironbeastView.muzzle(_muzzleLocal);cachePlayerMuzzle(_muzzleLocal,'ironbeast');c.group.worldToLocal(_muzzleLocal);
     muzzleShot.position.copy(_muzzleLocal);muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
   if(barrettView&&vid==='barrett') {
@@ -6439,7 +6557,7 @@ function animateWeapon(dt) {
       deploy?(switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*barrettView.duration('select'):
       clip==='fire'?barrettFireSourceAt(barrettFireT):time%barrettView.duration('idle_0');
     barrettView.sample(clip,t);
-    barrettView.muzzle(_muzzleLocal);c.group.worldToLocal(_muzzleLocal);
+    barrettView.muzzle(_muzzleLocal);cachePlayerMuzzle(_muzzleLocal,'barrett');c.group.worldToLocal(_muzzleLocal);
     muzzleShot.position.copy(_muzzleLocal);
     muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
@@ -6460,7 +6578,7 @@ function animateWeapon(dt) {
       deploy?(switchState.t-switchState.holster)/(switchState.dur-switchState.holster)*deagleFestaView.duration('select'):
       DEAGLE_FIRE_CLIPS.includes(clip)?deagleFireT:time%deagleFestaView.duration('idle_0');
     deagleFestaView.sample(clip,t);
-    deagleFestaView.muzzle(_muzzleLocal);c.group.worldToLocal(_muzzleLocal);
+    deagleFestaView.muzzle(_muzzleLocal);cachePlayerMuzzle(_muzzleLocal,'deagle');c.group.worldToLocal(_muzzleLocal);
     muzzleShot.position.copy(_muzzleLocal);
     muzzleLight.position.copy(_muzzleLocal).applyMatrix4(c.group.matrixWorld);
   }
@@ -6539,6 +6657,7 @@ function animateWeapon(dt) {
       viewArms.followAuthoredRightHand(v.rightHandCamera(_authoredRight),_invGroup);
       if(reloading)viewArms.followAuthoredReloadHand(v.leftHandCamera(_authoredLeft),_invGroup);
       if(v.muzzleCamera(_authoredMuzzle)) {
+        cachePlayerMuzzle(_authoredMuzzle,tracerMuzzleKey(vid,activeSkinId(vid)));
         muzzleShot.position.copy(_authoredMuzzle).applyMatrix4(_invGroup);
         muzzleLight.position.copy(_authoredMuzzle);
       }
@@ -6644,11 +6763,12 @@ function update(dt, rawDt) {
   camera.fov = curFov;
 
   camera.rotation.order = "YXZ";
-  // 死亡视角的偏移和 recoilPitch/recoilYaw 一样，只叠在相机这一行，不写回 player.pitch/yaw
-  camera.rotation.x = player.pitch + recoilPitch + deathCam.pitchOff;
-  camera.rotation.y = player.yaw + recoilYaw + deathCam.yawOff;
-  // 开镜时轻微呼吸晃动（只作用在 roll，不污染瞄准数据源）
-  camera.rotation.z = scoped ? Math.sin(time * 1.6) * 0.006 : 0;
+  const shotView = stepShotShake(shotShake, dt);
+  // 死亡视角、开枪震动和 recoilPitch/recoilYaw 都只叠在最终相机，不写回瞄准数据源。
+  camera.rotation.x = player.pitch + recoilPitch + deathCam.pitchOff + shotView.pitch;
+  camera.rotation.y = player.yaw + recoilYaw + deathCam.yawOff + shotView.yaw;
+  // 开镜呼吸与开枪 roll 都是显示层；射线不读取 camera.rotation。
+  camera.rotation.z = (scoped ? Math.sin(time * 1.6) * 0.006 : 0) + shotView.roll;
   updateDeathKillerMarker();
 
   movePlayer(dt);
@@ -6898,9 +7018,10 @@ async function init() {
   updateMapChoiceUi();
   document.querySelectorAll("#mapSelect [data-map]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (state === "playing" || mapLoading || !MAP_META[button.dataset.map]) return;
+      if (state === "playing" || mapLoading || !mapAvailableForMode(button.dataset.map)) return;
       sfx.ui("click");
       selectedMapId = button.dataset.map;
+      if (selectedMapId !== 'bio') lastArenaMapId = selectedMapId;
       updateMapChoiceUi();
       buildMenuMatch();
       lobby?.refresh();
@@ -6925,6 +7046,7 @@ async function init() {
     if (debugMap === 'bio') selectedModeId = 'bio';
     else if (debugMode !== 'training') selectedModeId = 'tdm';
     selectedMapId = debugMap;
+    if (debugMap !== 'bio') lastArenaMapId = debugMap;
   }
   updateMapChoiceUi();
   bootPhase("actors", "正在部署人物与武器", "加载第一人称视模、敌人和枪械");
@@ -6987,7 +7109,7 @@ async function init() {
       const v=await ClassicView.load('grenades/'+id);
       if(v){classicNades[id]=v;v.root.name='cf-grenade-'+id;v.root.visible=false;v.projectile();vmScene.add(v.root);}
     })())),
-    trackAsset(loadClassicSoldier()),
+    trackAsset(loadFoxSoldier()),
     ...PRIMARY_IDS.map(id=>trackAsset(requiredWeapon(id))),
     ...['deagle','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
   ]);

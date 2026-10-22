@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 const root = new URL('../', import.meta.url);
 const text = path => readFileSync(new URL(path, root), 'utf8');
@@ -18,10 +19,41 @@ assert.match(css, /\.training-panel\{[^}]*right:18px/,
 
 assert.match(main, /const trainingMatch = \(\) => selectedModeId === "training"/,
   'training is an independent game mode');
-assert.match(main, /trainingMatch\(\)[\s\S]{0,80}button\.dataset\.map === 'blacktown'/,
-  'Training Mode only exposes Black Town');
-assert.match(main, /activateMap\(id === 'bio' \? 'bio' : id === 'training' \? 'blacktown' : 'transport'\)/,
-  'selecting Training Mode activates Black Town');
+const mapMeta = main.match(/const MAP_META = (\{[\s\S]*?\n\});/)?.[0];
+const mapRule = main.match(/const mapAvailableForMode = [\s\S]*?;\n/)?.[0];
+const selectMode = main.slice(main.indexOf('function selectMode(id) {'),
+  main.indexOf('// ---------- 大厅数据'));
+assert.ok(mapMeta && mapRule && selectMode.startsWith('function selectMode'),
+  'map catalog, availability rule and mode selection are present');
+const sandbox = vm.createContext({ state: 'lobby', mapLoading: false,
+  updateMapChoiceUi() {}, buildMenuMatch() {}, lobby: null });
+vm.runInContext(`${mapMeta}\nlet selectedMapId = 'transport';\nlet lastArenaMapId = 'transport';
+  let selectedModeId = 'tdm';\n${mapRule}\n${selectMode}`, sandbox);
+const arenaMaps = ['transport', 'prison', 'survivor', 'blacktown', 'lingyin'];
+for (const mode of ['tdm', 'training']) {
+  for (const map of arenaMaps) {
+    assert.equal(vm.runInContext(`mapAvailableForMode('${map}', '${mode}')`, sandbox), true,
+      `${mode} can select ${map}`);
+  }
+  assert.equal(vm.runInContext(`mapAvailableForMode('bio', '${mode}')`, sandbox), false,
+    `${mode} cannot select the bio-only map`);
+}
+assert.equal(vm.runInContext(`mapAvailableForMode('bio', 'bio')`, sandbox), true);
+assert.equal(vm.runInContext(`mapAvailableForMode('transport', 'bio')`, sandbox), false);
+vm.runInContext(`selectedMapId = 'lingyin'; selectMode('training')`, sandbox);
+assert.equal(vm.runInContext('selectedMapId', sandbox), 'lingyin',
+  'switching to Training Mode keeps the selected arena');
+vm.runInContext(`selectMode('bio'); selectMode('training')`, sandbox);
+assert.equal(vm.runInContext('selectedMapId', sandbox), 'lingyin',
+  'the selected arena is restored after visiting Bio Mode');
+assert.match(main, /const available = mapAvailableForMode\(button\.dataset\.map\)/,
+  'lobby map buttons use the shared availability rule');
+assert.match(main, /!mapCatalog\[id\] \|\| !mapAvailableForMode\(id\)/,
+  'game start enforces the same map rule');
+assert.match(index, /id="trainingMapLabel"/,
+  'training HUD has a dynamic map label');
+assert.match(main, /trainingMapLabel"\)\.textContent = MAP_META\[selectedMapId\]\.name/,
+  'training HUD displays the active map');
 
 const swap = main.slice(main.indexOf('function canSwapBackpack()'), main.indexOf('// ---------- 切枪'));
 assert.match(swap, /if \(trainingMatch\(\)\) return true;/,
@@ -76,4 +108,4 @@ assert.match(main, /if \(e\.shiftKey\) clearTrainingTargets\(\)/,
 assert.match(lobby, /训练模式：在准心位置放置静止 NPC[\s\S]*训练模式：清空伤害统计/,
   'the controls are documented in the in-game key guide');
 
-console.log('PASS: Training Mode uses Black Town, immortal stationary targets, unlimited time, unrestricted backpacks, infinite firearm reserves and infinite throwables.');
+console.log('PASS: Training Mode accepts every team map, keeps the selection across modes, and retains immortal targets, unlimited time, unrestricted backpacks and ammunition.');

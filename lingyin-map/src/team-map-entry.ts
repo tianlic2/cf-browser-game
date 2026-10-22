@@ -13,6 +13,7 @@ export { preloadFoliagePhotos } from './world/vegetation';
 export { Details } from './world/details';
 export { Vegetation } from './world/vegetation';
 export { Gate as ForestGate } from './gate-kit/world/gate';
+export { Ground as GateGround } from './gate-kit/world/ground';
 export { Vegetation as GateFramingTrees } from './gate-kit/world/vegetation';
 export { Water } from './world/water';
 export { Crag } from './world/crag';

@@ -15,7 +15,7 @@
 自带扩展名的 stem —— 加载器那条「自带扩展名就原样用」的分支（同一个分支也在给
 `classic/*.wav` 用）只请求这一个 URL，不产生 404。
 开镜与退镜现用 `sw/scope_in_click.wav`、`sw/scope_out_click.wav` 两条单声道 PCM；
-同样在 `SAMPLES` 中写全扩展名、只请求 WAV。旧 `scope_in/out.m4a` 保留作素材备份，
+它们来自专门的狙击镜机械声，退镜版为原声反向。同样在 `SAMPLES` 中写全扩展名、只请求 WAV。旧 `scope_in/out.m4a` 保留作素材备份，
 游戏不再加载。
 `impacts/kill_confirm.wav` 也走同一条单文件 WAV 加载路径，来源见第十节。
 
@@ -81,8 +81,8 @@ sw/deploy                    <- freesound.org/s/725397/  (An M16 Rifle being rel
 sw/holster                   <- freesound.org/s/725403/  (A rifle being moved around and handled w/ magazine removals by serøutōnin--deprivəd)  CC0
 sw/scope_in                  <- freesound.org/s/725403/  (旧开镜素材，轻握持摩擦；现不加载)  CC0
 sw/scope_out                 <- freesound.org/s/725403/  (旧退镜素材；现不加载)  CC0
-sw/scope_in_click.wav        <- freesound.org/s/725402/ + /s/725403/  (真实干击机械卡榫与握持摩擦混合；0.205s、峰值 0.62)  CC0
-sw/scope_out_click.wav       <- freesound.org/s/725402/ + /s/725403/  (同来源，卡榫低通降调与退镜摩擦混合；0.215s、峰值 0.62)  CC0
+sw/scope_in_click.wav        <- freesound.org/s/210018/  (Sniper Scope zoom in by Supakid13；0.226s、单声道 44.1kHz、峰值标准化至 0.94)  CC0
+sw/scope_out_click.wav       <- freesound.org/s/210018/  (同一 CC0 原声反向并加 2.5ms 边缘淡化，用于退镜)  CC0
 sw/deploy_pistol             <- freesound.org/s/725400/  (A pistol being moved around and handled w/ foley by serøutōnin--deprivəd)  CC0
 sw/holster_pistol            <- freesound.org/s/725400/  (同上，另一处)  CC0
 sw/dryfire                   <- freesound.org/s/725402/  (A rifle being dry fired once by serøutōnin--deprivəd)  CC0

@@ -153,7 +153,8 @@ assert.equal(deployAttempt.id, 'barrett_bolt');
 assert.equal(deployAttempt.delay, 30 / 35);
 assert.equal(deployAttempt.rate, 1);
 assert.equal(deployAttempt.rateJitter, 0);
-assert.equal(deployAttempt.schedule, 'bolt');
+assert.equal(deployAttempt.schedule, 'deploy',
+  'Barrett draw foley is owned by the interruptible deploy animation');
 assert.equal(extraSamples, 0, 'Barrett deploy must not layer a second sniper bolt sample');
 const slowedBoltDelay = .20 + (50 / 35 - .20) * 1.20;
 sfx.bolt('barrett', { delay: slowedBoltDelay });

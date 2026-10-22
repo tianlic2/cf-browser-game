@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { makeGLTFLoader } from './gltf.js';
-import { ATMO, Sky, Backdrop, Terrain, HillsideTrail, Temple, ForestGate, GateFramingTrees, createMainHallInterior, preloadTempleTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Crag, Mist } from './lingyin_world.js?v=43';
-import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=forest-gate-1';
+import { ATMO, Sky, Backdrop, Terrain, HillsideTrail, Temple, ForestGate, GateGround, GateFramingTrees, createMainHallInterior, preloadTempleTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Crag, Mist } from './lingyin_world.js?v=47';
+import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=gate-forecourt-3';
 import { triangulatedWalkSurface } from './lingyin_walk_surface.js';
 
 // The imported procedural scene has its own editable visual sources. Keep
@@ -42,6 +42,11 @@ export async function buildLingyinMap(scene, onProgress = () => {}) {
   onProgress(.50);
   await attach(Crag,.54);
   const hillside = await attach(HillsideTrail,.60);
+  const gateGround = new GateGround({gameMap:true});
+  gateGround.group.name = 'lingyin-gate-approach-ground';
+  gateGround.group.position.set(-2,LINGYIN_PLATFORM_Y,40);
+  world.add(gateGround.group);
+  onProgress(.62);
   // The reviewed two-tier facade replaces only the old main hall. Other
   // temple buildings and their gameplay footprint stay in the same place.
   const temple = await attach(Temple,.69,{
@@ -55,7 +60,7 @@ export async function buildLingyinMap(scene, onProgress = () => {}) {
   forestGate.group.name = 'lingyin-forest-gate';
   forestGate.group.position.set(-2,LINGYIN_PLATFORM_Y+.68,40);
   world.add(forestGate.group);
-  const gateTrees = new GateFramingTrees({framingOnly:true});
+  const gateTrees = new GateFramingTrees({gamePerimeter:true});
   gateTrees.group.name = 'lingyin-gate-framing-trees';
   gateTrees.group.position.set(-2,LINGYIN_PLATFORM_Y,40);
   world.add(gateTrees.group);

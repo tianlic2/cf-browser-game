@@ -97,7 +97,9 @@ export class ImpactVfx {
     this.up = new THREE.Vector3(0, 0, 1);
     this.markCursor = 0;
     this.markCount = 0;
-    this.markLimit = 72;
+    // 弹孔使用单个 InstancedMesh 循环覆写：持续交火时画面能留下足够多的战斗痕迹，
+    // 但不会为每一发永久增加一个 Mesh / draw call。
+    this.markLimit = 144;
     this.markMesh = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1),
       new THREE.MeshStandardMaterial({
@@ -115,16 +117,111 @@ export class ImpactVfx {
     const bloodHaze = cloudTexture(true);
     const dust = cloudTexture(false);
     this.particles = [];
-    for (let i = 0; i < 64; i++) {
+    for (let i = 0; i < 96; i++) {
       const material = new THREE.SpriteMaterial({
-        map: i < 42 ? drop : i < 52 ? bloodHaze : dust,
+        map: i < 48 ? drop : i < 64 ? bloodHaze : dust,
         transparent: true, depthWrite: false, opacity: 0,
       });
       const sprite = new THREE.Sprite(material);
       sprite.visible = false;
       scene.add(sprite);
-      this.particles.push({ sprite, t: 1, life: 0, vel: new THREE.Vector3(), gravity: 0, size: 0, grow: 0, kind: i < 42 ? "drop" : i < 52 ? "bloodHaze" : "dust" });
+      this.particles.push({ sprite, t: 1, life: 0, vel: new THREE.Vector3(), gravity: 0, size: 0, grow: 0, kind: i < 48 ? "drop" : i < 64 ? "bloodHaze" : "dust" });
     }
+
+    // 曳光弹是短距离高速移动的亮段，而不是从枪口一直连到落点的激光线。
+    // 每条共用同一个低面数圆柱几何，只保留独立材质以便逐条淡出；池耗尽时循环复用。
+    this.tracerCursor = 0;
+    this.tracerGeometry = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
+    this.tracers = [];
+    this.tracerUp = new THREE.Vector3(0, 1, 0);
+    this.tracerMid = new THREE.Vector3();
+    this.tracerHead = new THREE.Vector3();
+    this.tracerTail = new THREE.Vector3();
+    this.tracerControl = new THREE.Vector3();
+    this.tracerVector = new THREE.Vector3();
+    for (let i = 0; i < 40; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffd28a, transparent: true, opacity: 0,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const mesh = new THREE.Mesh(this.tracerGeometry, material);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 2;
+      scene.add(mesh);
+      this.tracers.push({
+        mesh, start: new THREE.Vector3(), dir: new THREE.Vector3(),
+        end: new THREE.Vector3(), launchDir: new THREE.Vector3(),
+        pathPoints:Array.from({length:13},()=>new THREE.Vector3()),
+        pathLengths:new Float32Array(13),curved:false,
+        distance: 0, t: 1, life: 0, speed: 0, segment: 0, radius: 0,
+      });
+    }
+  }
+
+  _placeTracer(tracer) {
+    // Give the tracer a small head start so even a single 60 Hz frame shows it.
+    const travel = tracer.t * tracer.speed + .42;
+    const head = Math.min(tracer.distance, travel);
+    const tail = Math.max(0, travel - tracer.segment);
+    if (tail >= tracer.distance || head <= tail + .002) {
+      tracer.mesh.visible = false;
+      return;
+    }
+    this._tracerPoint(tracer,tail,this.tracerTail);
+    this._tracerPoint(tracer,head,this.tracerHead);
+    const length=this.tracerHead.distanceTo(this.tracerTail);
+    this.tracerMid.copy(this.tracerHead).add(this.tracerTail).multiplyScalar(.5);
+    tracer.mesh.position.copy(this.tracerMid);
+    tracer.mesh.quaternion.setFromUnitVectors(this.tracerUp,
+      this.tracerVector.copy(this.tracerHead).sub(this.tracerTail).normalize());
+    tracer.mesh.scale.set(tracer.radius, length, tracer.radius);
+    const fade = Math.min(1, Math.max(0, (tracer.life - tracer.t) / .045));
+    tracer.mesh.material.opacity = fade * (tracer.kind === "enemy" ? .82 : .72);
+    tracer.mesh.visible = true;
+  }
+
+  _tracerPoint(tracer,distance,out){
+    if(!tracer.curved)return out.copy(tracer.start).addScaledVector(tracer.dir,distance);
+    const lengths=tracer.pathLengths,points=tracer.pathPoints;
+    let i=1;while(i<lengths.length-1&&lengths[i]<distance)i++;
+    const a=lengths[i-1],b=lengths[i],f=b>a?(distance-a)/(b-a):0;
+    return out.copy(points[i-1]).lerp(points[i],f);
+  }
+
+  tracer(start, end, kind = "player",options={}) {
+    const item = this.tracers[this.tracerCursor];
+    this.tracerCursor = (this.tracerCursor + 1) % this.tracers.length;
+    item.start.copy(start);item.end.copy(end);
+    item.dir.copy(end).sub(start);
+    item.distance = item.dir.length();
+    if (item.distance < .08) return;
+    item.dir.multiplyScalar(1 / item.distance);
+    item.curved=!!options.launchDirection;
+    if(item.curved){
+      item.launchDir.copy(options.launchDirection).normalize();
+      const chord=item.distance;
+      const controlDistance=Math.min(5.5,chord*.45,Math.max(.25,chord*.22));
+      this.tracerControl.copy(item.start).addScaledVector(item.launchDir,controlDistance);
+      let total=0;
+      for(let i=0;i<item.pathPoints.length;i++){
+        const t=i/(item.pathPoints.length-1),u=1-t,p=item.pathPoints[i];
+        p.copy(item.start).multiplyScalar(u*u)
+          .addScaledVector(this.tracerControl,2*u*t).addScaledVector(item.end,t*t);
+        if(i)total+=p.distanceTo(item.pathPoints[i-1]);
+        item.pathLengths[i]=total;
+      }
+      item.distance=total;
+    }
+    item.kind = kind;
+    item.speed = kind === "enemy" ? 175 : 235;
+    item.segment = kind === "enemy" ? 1.25 : 1.65;
+    item.radius = kind === "enemy" ? .012 : .009;
+    item.t = 0;
+    item.life = Math.min(.32, Math.max(.055,
+      (item.distance + item.segment - .42) / item.speed));
+    item.mesh.material.color.setHex(kind === "enemy" ? 0xff6a32 : 0xffd28a);
+    this._placeTracer(item);
   }
 
   normal(hit) {
@@ -204,6 +301,12 @@ export class ImpactVfx {
   }
 
   update(dt) {
+    for (const tracer of this.tracers) {
+      if (tracer.t >= tracer.life) continue;
+      tracer.t += dt;
+      if (tracer.t >= tracer.life) tracer.mesh.visible = false;
+      else this._placeTracer(tracer);
+    }
     for (const p of this.particles) {
       if (p.t >= p.life) continue;
       p.t += dt;
@@ -220,10 +323,15 @@ export class ImpactVfx {
     this.markCursor = 0;
     this.markCount = 0;
     this.markMesh.count = 0;
+    for (const tracer of this.tracers) { tracer.t = tracer.life; tracer.mesh.visible = false; }
     for (const p of this.particles) { p.t = p.life; p.sprite.visible = false; }
   }
 
   stats() {
-    return { marks: this.markCount, active: this.particles.filter((p) => p.t < p.life).length };
+    return {
+      marks: this.markCount,
+      active: this.particles.filter((p) => p.t < p.life).length,
+      tracers: this.tracers.filter((p) => p.t < p.life).length,
+    };
   }
 }

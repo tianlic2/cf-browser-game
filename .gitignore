@@ -70,6 +70,9 @@ counter-strike-in-browser-main/
 !/preview/lingyin-main-hall.html
 !/preview/lingyin-main-hall.css
 !/preview/lingyin-main-hall.js
+!/preview/tracer-muzzle.html
+!/preview/tracer-muzzle.css
+!/preview/tracer-muzzle.js
 /styles/main.css
 # 大厅背景音乐的**原始 wav**：1.25 MB，11025 Hz 立体声。站点上放的是转码后的
 # `audio/ui/lobby_theme.m4a`（233 KB），原文件本地留档、不入库。

@@ -14,7 +14,7 @@
     <!-- 路径一律用「相对当前文档」的写法：本地 http.server 与 GitHub Pages 的项目页
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
-    <link rel="stylesheet" href="./styles/game.css?v=modern-shell-chat-layout-1" />
+    <link rel="stylesheet" href="./styles/game.css?v=modern-shell-nickname-editor-1" />
     <link rel="stylesheet" href="./styles/boot.css?v=deferred-map-loading-1" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
@@ -71,10 +71,13 @@
       <section class="nickname-card">
         <span class="nickname-kicker">WELCOME TO CrossFire</span>
         <h2 id="nicknameTitle">设置游戏昵称</h2>
-        <p>昵称只保存在本机，用于大厅、战绩与训练记录。</p>
+        <p id="nicknameHint">昵称只保存在本机，用于大厅、战绩与训练记录。</p>
         <label for="nicknameInput">玩家昵称</label>
         <input id="nicknameInput" type="text" maxlength="16" autocomplete="off" spellcheck="false" value="新兵" />
-        <button id="nicknameEnter" type="button">进入大厅</button>
+        <div class="nickname-actions">
+          <button id="nicknameCancel" class="nickname-cancel" type="button" hidden>取消</button>
+          <button id="nicknameEnter" type="button">进入大厅</button>
+        </div>
       </section>
     </div>
     <!-- 3D 渲染画布 -->
@@ -125,7 +128,7 @@
       </div>
       <div id="bioHealthLayer" class="bio-health-layer" aria-hidden="true"></div>
       <aside id="trainingPanel" class="training-panel hidden" aria-label="训练模式伤害统计">
-        <header><strong>训练模式</strong><span>BLACKTOWN RANGE</span></header>
+        <header><strong>训练模式</strong><span id="trainingMapLabel">运输船</span></header>
         <div class="training-help"><kbd>N</kbd> 准心位置放置 NPC　<kbd>Delete</kbd> 删除瞄准 NPC<br><kbd>Shift</kbd>+<kbd>Delete</kbd> 清空 NPC　<kbd>F8</kbd> 清空伤害</div>
         <div class="training-stats">
           <span>累计伤害<b id="trainingDamageTotal">0</b></span>
@@ -391,7 +394,7 @@
           <button type="button" class="lobby-tab" data-tab="manual" role="tab" aria-selected="false">作战手册</button>
           <button type="button" class="lobby-tab" data-tab="arsenal" role="tab" aria-selected="false">武器图鉴</button>
         </nav>
-        <div class="lobby-profile"><span class="lobby-credit">CF点 <b>20,000</b></span><span class="lobby-rank" aria-hidden="true">R</span><span id="lobbyNickname">新兵</span></div>
+        <div class="lobby-profile"><span class="lobby-credit">CF点 <b>20,000</b></span><span class="lobby-rank" aria-hidden="true">R</span><span id="lobbyNickname">新兵</span><button id="renameNicknameBtn" class="lobby-rename" type="button">改名</button></div>
       </header>
       <div class="lobby-body">
         <section class="lobby-content">
@@ -429,7 +432,7 @@
               </div>
               <aside class="modern-room-side">
                 <header><span>PLAYER LIST</span><b>房间成员</b></header>
-                <div class="modern-player-card"><span class="modern-avatar">R</span><div><b id="modernPlayerName">新兵</b><small>房主 · 准备</small></div><em>你</em></div>
+                <div class="modern-player-card"><span class="modern-avatar">R</span><div><b id="modernPlayerName">新兵</b><small>房主 · 准备</small></div><button id="renameNicknameCardBtn" class="modern-rename" type="button">修改昵称</button></div>
                 <p>当前为本地单人房间。真人联机将在后端阶段接入；本地电脑不占真人席位。</p>
                 <div class="modern-room-state"><span>服务器</span><b>LOCAL</b><span>状态</span><b class="is-ready">READY</b></div>
               </aside>
@@ -547,6 +550,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-  <script type="module" src="./scripts/main.js?v=omoh-return-1"></script>
+  <script type="module" src="./scripts/main.js?v=tracer-muzzle-1"></script>
   </body>
 </html>

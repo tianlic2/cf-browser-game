@@ -117,9 +117,8 @@ export class Temple {
     for (let i = 0; i < 5; i++) {
       this.add('stone', box(0.55, 0.2, 5.2, P.x1 + 0.4 + i * 0.5, y - 0.2 - i * 0.2, 28));
     }
-    // Keep the outer terrace's stone rail. The section flanking the north
-    // gate is supplied by the new timber fence, with the same six-metre
-    // processional opening and existing collision line.
+    // Keep the outer terrace's stone rail. The updated gate has open planted
+    // flanks, so its central approach remains clear of extra fence geometry.
     this.balustrade(P.x0 + 1, -14, P.z1 - 0.3, y + 0.1, 'x');
     this.balustrade(10, P.x1 - 1, P.z1 - 0.3, y + 0.1, 'x');
   }

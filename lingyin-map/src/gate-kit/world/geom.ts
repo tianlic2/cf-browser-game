@@ -78,9 +78,9 @@ export function plaqueTexture(text: string) {
   })();
   // aged gold ground
   const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, '#c9a45a');
-  grad.addColorStop(0.5, '#b8924b');
-  grad.addColorStop(1, '#9d7a3d');
+  grad.addColorStop(0, '#9b7c3d');
+  grad.addColorStop(0.5, '#85672f');
+  grad.addColorStop(1, '#664c24');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, w, h);
   for (let i = 0; i < 1600; i++) {
@@ -92,8 +92,22 @@ export function plaqueTexture(text: string) {
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
+  // soot, verdigris and rain streaks on the old board
+  for (let i = 0; i < 30; i++) {
+    const x = rng() * w;
+    const sw = rng() * 18 + 2;
+    const sh = rng() * h * 0.7 + 20;
+    const g2 = ctx.createLinearGradient(x, 0, x, sh);
+    g2.addColorStop(0, 'rgba(20,28,20,0.16)');
+    g2.addColorStop(1, 'rgba(20,28,20,0)');
+    ctx.fillStyle = g2;
+    ctx.fillRect(x, 0, sw, sh);
+  }
+  ctx.strokeStyle = 'rgba(19,24,18,0.35)';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(5, 5, w - 10, h - 10);
   // calligraphy, right to left
-  ctx.fillStyle = '#18130d';
+  ctx.fillStyle = '#0f0c08';
   ctx.font = '600 190px "Songti SC", "STSong", "Noto Serif SC", serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

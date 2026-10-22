@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>枪口曳光校准台</title>
+  <link rel="stylesheet" href="./tracer-muzzle.css">
+  <script type="importmap">{"imports":{"three":"../vendor/three/build/three.module.js"}}</script>
+</head>
+<body>
+  <main>
+    <section class="stage" id="stage">
+      <canvas id="view" aria-label="第一人称武器枪口曳光校准预览"></canvas>
+      <div class="stage-head">
+        <span class="tag">MUZZLE LAB</span>
+        <strong id="stageWeapon">AK-47</strong>
+        <span>正式游戏第一人称视模</span>
+      </div>
+      <div class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="legend">
+        <span><i class="dot detected"></i>模型检测点</span>
+        <span><i class="dot tuned"></i>最终发出点</span>
+        <span><i class="line"></i>曳光方向</span>
+      </div>
+      <div class="stage-tip">拖动金色球：左右/上下调整 · 按住 Shift 拖动：前后调整</div>
+      <div class="loading" id="loading"><b>正在读取 AK-47 视模</b><span>枪械切换时只加载对应文件</span></div>
+    </section>
+
+    <aside>
+      <div class="eyebrow">TRACER ORIGIN / DIRECTION</div>
+      <h1>枪口曳光校准</h1>
+      <p class="intro">金色球是最终发出点。它以枪械当前动画中的真实枪口为基准，因此换枪、开火和后坐时会继续跟随枪口移动。</p>
+
+      <div class="section-title">选择武器</div>
+      <div class="weapon-tabs" id="weaponTabs"></div>
+
+      <div class="readout">
+        <div><span>模型检测点</span><strong id="detectedReadout">加载中…</strong></div>
+        <div><span>最终发出点</span><strong id="originReadout">加载中…</strong></div>
+      </div>
+
+      <div class="section-title">枪口修正 <small>相对模型检测点 / 厘米</small></div>
+      <div id="positionControls" class="controls"></div>
+
+      <div class="section-title">曳光方向 <small>相对准心方向 / 度</small></div>
+      <div id="directionControls" class="controls"></div>
+
+      <div class="preview-actions">
+        <button type="button" id="fire">播放一次开火动作</button>
+        <label><input type="checkbox" id="autoFire" checked> 循环开火</label>
+        <label><input type="checkbox" id="showDetected" checked> 显示检测点</label>
+      </div>
+
+      <div class="result" id="result">曳光末端与准心重合时，方向修正为正确；起点应位于枪管最前端。</div>
+      <div class="button-row">
+        <button type="button" class="secondary" id="resetCurrent">重置当前枪</button>
+        <button type="button" class="secondary" id="copyCurrent">复制当前参数</button>
+        <button type="button" class="primary" id="copyAll">复制全部参数</button>
+      </div>
+      <textarea id="output" readonly aria-label="可复制的曳光校准参数"></textarea>
+      <p class="footnote">本页只保存浏览器中的校准草稿，不会修改正式游戏。调整完成后点击“复制全部参数”，把内容发给我即可接入。</p>
+      <div class="status" id="status">等待加载视模…</div>
+    </aside>
+  </main>
+  <script type="module" src="./tracer-muzzle.js?v=1"></script>
+</body>
+</html>

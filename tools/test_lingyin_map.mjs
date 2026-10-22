@@ -5,10 +5,10 @@ import { intersectsBrush } from '../scripts/brush_collision.js';
 import { lingyinLayout } from '../scripts/lingyin_layout.js';
 
 const map = lingyinLayout();
-assert.equal(map.spawns.player.length,36);
-assert.equal(map.spawns.enemy.length,36);
-assert.ok(new Set(map.spawns.player.map(p=>p[3])).size>=12,
-  'respawns cover courtyards, halls, mountain routes and lookouts');
+assert.equal(map.spawns.player.length,30);
+assert.equal(map.spawns.enemy.length,30);
+assert.ok(new Set(map.spawns.player.map(p=>p[3])).size>=9,
+  'respawns cover courtyards, halls, the west ascent and ridge pavilion');
 for (const spawn of [...map.spawns.player,...map.spawns.enemy]) {
   assert.ok(Math.abs(map.surfaceAt(spawn[0],spawn[2],spawn[1]+.05)-spawn[1])<.02,
     `spawn has visible ground at ${spawn}`);
@@ -45,7 +45,7 @@ for(const spawn of [map.spawns.player[0],map.spawns.enemy[0]]) {
 const main = readFileSync(new URL('../scripts/main.js',import.meta.url),'utf8');
 const html = readFileSync(new URL('../index.html',import.meta.url),'utf8');
 assert.match(main,/lingyin: \{ name: '灵隐寺', poster:/);
-assert.match(main,/lingyin: \(\) => import\('\.\/lingyin_map\.js\?v=32'\)/);
+assert.match(main,/lingyin: \(\) => import\('\.\/lingyin_map\.js\?v=[^']+'\)/);
 assert.match(html,/data-map="lingyin"/);
 assert.ok(statSync(new URL('../scripts/lingyin_world.js',import.meta.url)).size>50000);
 assert.ok(statSync(new URL('../assets/lingyin/lotus-mural.jpg',import.meta.url)).size>100000,
@@ -70,9 +70,40 @@ for (const edge of ['min','max']) for (let axis=0;axis<3;axis++) {
 assert.ok(statSync(new URL('../vendor/three/examples/jsm/libs/draco/draco_decoder.wasm',import.meta.url)).size>100000,
   'local Draco decoder is bundled for the scanned statue');
 const lingyinRuntime = readFileSync(new URL('../scripts/lingyin_map.js',import.meta.url),'utf8');
+const lingyinWorldBundle = readFileSync(new URL('../scripts/lingyin_world.js',import.meta.url),'utf8');
+const gateBridge = readFileSync(new URL('../lingyin-map/src/gate-kit/world/gate.ts',import.meta.url),'utf8');
+assert.match(gateBridge,/templePlaqueTexture\('gate'\)/,
+  'the existing Lingyin sign artwork stays on the replacement gate');
+assert.match(gateBridge,/buildCeiling\(\)/);
+assert.match(gateBridge,/buildIvy\(\)/);
+assert.match(gateBridge,/stoneMaterial as templeStoneMaterial/,
+  'gate rails reuse the temple terrace stone material family');
+assert.match(gateBridge,/gate-stone-balustrades/,
+  'the gate-side fence is the same stone balustrade language as the temple');
+assert.doesNotMatch(gateBridge,/box\(0\.05, 0\.85, 0\.05/,
+  'the former dense timber picket fence is removed');
+assert.match(lingyinRuntime,/new GateGround\(\{gameMap:true\}\)/,
+  'the new stone approach is attached to the playable map');
+const gateGroundSource=readFileSync(new URL(
+  '../lingyin-map/src/gate-kit/world/ground.ts',import.meta.url),'utf8');
+assert.match(gateGroundSource,/courtyardPavingExtensionMaterial\(width,depth\)/,
+  'gate interior and exterior use the same photographed courtyard stone');
+assert.doesNotMatch(gateGroundSource,/this\.gameMap \? 45 : 64/,
+  'the gate approach no longer overlaps the courtyard paving');
+assert.match(lingyinRuntime,/new GateFramingTrees\(\{gamePerimeter:true\}\)/,
+  'the new nearby trees and plant layers are attached');
+const gateVegetation=readFileSync(new URL(
+  '../lingyin-map/src/gate-kit/world/vegetation.ts',import.meta.url),'utf8');
+assert.match(gateVegetation,/addBoundaryGrove\(\)/);
+assert.match(gateVegetation,/forecourt-boundary-trunks/,
+  'dense trees visibly explain the outer movement boundary');
+assert.equal(map.colliders.some(c => c.z === 45.7 && c.hz === .14 && c.h === 1.35),false,
+  'the removed timber entry fence leaves no invisible collision');
 assert.match(lingyinRuntime,/setDRACOLoader\(draco\)/);
 assert.match(lingyinRuntime,/createMainHallInterior\(temple/,
   'the reviewed three-figure hall is attached to the playable map');
+for(const name of ['ridge-pavilion-stone','ridge-pavilion-timber','ridge-pavilion-roof'])
+  assert.match(lingyinWorldBundle,new RegExp(name),`${name} is bundled into the playable map`);
 assert.doesNotMatch(lingyinRuntime,/lingyin-buddha-scan|statueLOD\.addLevel/,
   'the old standalone statue is no longer duplicated');
 for(const name of ['dragon-coffer','painted-beam','worn-red-lacquer',

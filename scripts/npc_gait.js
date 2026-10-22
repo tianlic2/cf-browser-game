@@ -1,5 +1,46 @@
-// Quaternius Universal Animation Library 1 Standard, Jog_Fwd_Loop; CC0.
-// Normalized foot travel/lift, sampled at 32 evenly spaced frames.
+// Walking trajectory from Quaternius Universal Animation Library 1 Standard,
+// Jog_Fwd_Loop (CC0). Kept for the slow end of the locomotion blend.
 export const NPC_GAIT = new Float32Array([
   0.830, 0.000, 0.580, 0.000, 0.324, 0.000, 0.088, 0.000, -0.138, 0.000, -0.381, 0.000, -0.611, 0.000, -0.752, 0.088, -0.825, 0.090, -0.873, 0.100, -0.894, 0.111, -0.906, 0.168, -0.923, 0.276, -0.947, 0.425, -0.972, 0.603, -0.991, 0.795, -1.000, 0.987, -0.826, 0.941, -0.508, 0.812, -0.214, 0.823, -0.007, 0.805, 0.155, 0.669, 0.297, 0.475, 0.430, 0.297, 0.553, 0.165, 0.654, 0.080, 0.727, 0.045, 0.773, 0.001, 0.803, 0.000, 0.822, 0.000, 0.833, 0.000, 0.834, 0.000
+]);
+
+// Running trajectory sampled from Fox_BL/untitled.fbx, clip "run.001", in
+// Lem-c/Unity_CrossFire_base. Each frame is left travel/lift, right travel/lift.
+// The imported clip's root motion is removed; the left foot's non-looping
+// 15.8 cm drift is cancelled before normalization so the seam is continuous.
+// The compact foot paths are paired with a separate run.001 upper-body pose
+// in enemy_model.js. The Omoh mesh, weapon, collision and navigation remain.
+export const NPC_RUN_GAIT = new Float32Array([
+   0.231, 0.023, -0.010, 0.742,
+   0.105, 0.001,  0.077, 0.550,
+  -0.027, 0.006,  0.192, 0.397,
+  -0.163, 0.036,  0.331, 0.292,
+  -0.301, 0.091,  0.486, 0.238,
+  -0.440, 0.167,  0.649, 0.235,
+  -0.577, 0.262,  0.810, 0.282,
+  -0.695, 0.346,  0.962, 0.374,
+  -0.707, 0.388,  0.926, 0.333,
+  -0.674, 0.425,  0.808, 0.231,
+  -0.629, 0.467,  0.686, 0.143,
+  -0.572, 0.517,  0.560, 0.072,
+  -0.506, 0.580,  0.434, 0.024,
+  -0.436, 0.658,  0.309, 0.001,
+  -0.365, 0.761,  0.188, 0.007,
+  -0.294, 0.895,  0.073, 0.047,
+  -0.242, 0.940, -0.032, 0.079,
+  -0.218, 0.702, -0.130, 0.039,
+  -0.151, 0.486, -0.233, 0.025,
+  -0.044, 0.304, -0.339, 0.038,
+   0.098, 0.167, -0.447, 0.073,
+   0.267, 0.080, -0.554, 0.127,
+   0.459, 0.053, -0.661, 0.197,
+   0.663, 0.092, -0.764, 0.279,
+   0.865, 0.193, -0.862, 0.369,
+   0.959, 0.266, -0.893, 0.408,
+   0.823, 0.166, -0.768, 0.336,
+   0.709, 0.103, -0.631, 0.298,
+   0.612, 0.062, -0.490, 0.300,
+   0.513, 0.032, -0.352, 0.346,
+   0.417, 0.017, -0.221, 0.436,
+   0.322, 0.019, -0.106, 0.569,
 ]);

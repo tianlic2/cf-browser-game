@@ -113,8 +113,22 @@ assert.deepEqual(sfx.samples.splice(0).map(({ id }) => id), ["axe_festa_put_up"]
   "the axe keeps its authored select event");
 
 sfx.deploy("pistol", { weaponId: "deagle", deagleSelectAt: .01 });
-assert.deepEqual(sfx.samples.splice(0).map(({ id }) => id), ["deagle_festa_select"],
+const deagleDeploy = sfx.samples.splice(0);
+assert.deepEqual(deagleDeploy.map(({ id }) => id), ["deagle_festa_select"],
   "the Festa Desert Eagle keeps its authored select event");
+assert.equal(deagleDeploy[0].schedule, "deploy",
+  "the Desert Eagle select event can be withdrawn when its animation is interrupted");
+
+const cancelled = [];
+sfx.ctx = { currentTime: 10 };
+sfx._scheduled = new Set([
+  { method: "deploy", at: 10.8, cancelPending: () => cancelled.push("future-deploy") },
+  { method: "deploy", at: 9.9, cancelPending: () => cancelled.push("started-deploy") },
+  { method: "bolt", at: 10.8, cancelPending: () => cancelled.push("shot-bolt") },
+]);
+sfx.cancelPendingDeploy();
+assert.deepEqual(cancelled, ["future-deploy"],
+  "switching cancels only an unreached deploy event, while started audio and post-shot bolts remain");
 
 sfx.melee("heavy");
 assert.deepEqual(sfx.samples.splice(0).map(({ id }) => id), ["axe_festa_attack_3"],

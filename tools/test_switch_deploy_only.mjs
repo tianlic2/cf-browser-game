@@ -15,6 +15,8 @@ assert.match(switching, /return \{ holster: 0, deploy: switchDeployDuration\(id\
   'the public timing probe reports zero holster duration');
 assert.doesNotMatch(switching, /if \(!s\.committed/,
   'the update loop no longer waits for a holster boundary before showing the target');
+assert.match(switching, /function switchWeapon\(id, force, opts\)[\s\S]*?sfx\.cancelPendingDeploy\(\);[\s\S]*?commitWeaponVisual\(id\)/,
+  'switching away cancels an unreached draw event before the next weapon schedules its own event');
 
 const poseStart = source.indexOf('const _swEase =');
 const poseEnd = source.indexOf('// 时间线推进。', poseStart);

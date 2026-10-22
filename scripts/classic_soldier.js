@@ -11,6 +11,28 @@ const CI=C.clone().invert();
 const MODEL_SCALE=0.00957;
 const MODEL_FLOOR=109.597 * MODEL_SCALE;
 let asset=null;
+const SHOULDER_LINER_GEO=new THREE.SphereGeometry(1,12,8);
+const SHOULDER_LINER_MAT=new THREE.MeshStandardMaterial({color:0x353833,roughness:1,metalness:0});
+
+function shapeOpenGloveForGrip(geometry, weights, offset) {
+  // This GLB has finger bones, but all visible finger vertices are weighted
+  // to the hand bones. Fold only the forward fingertips in the bind mesh;
+  // rotating the unused finger bones cannot change their silhouette.
+  const positions=geometry.attributes.position;
+  for(let i=0;i<positions.count;i++) {
+    const at=offset+i*8;
+    let handWeight=0;
+    for(let j=0;j<4;j++) if(weights[at+j]===18||weights[at+j]===31)
+      handWeight=Math.max(handWeight,weights[at+4+j]/255);
+    if(handWeight<.3)continue;
+    const y=positions.getY(i),z=positions.getZ(i);
+    const ahead=Math.max(0,Math.min(1,(z-.23)/.14));
+    const below=Math.max(0,Math.min(1,(1.21-y)/.16));
+    const fold=handWeight*ahead*below;
+    if(fold>.01)positions.setXYZ(i,positions.getX(i),y+.11*fold,z-.08*fold);
+  }
+  positions.needsUpdate=true;
+}
 export async function loadClassicSoldier() {
   try {
     const r=await fetch(BASE+'swat/swat.json');if (!r.ok) throw new Error('SWAT 数据缺失');
@@ -39,6 +61,7 @@ export async function loadClassicSoldier() {
       geometry.scale(MODEL_SCALE,MODEL_SCALE,MODEL_SCALE);
       geometry.translate(0,MODEL_FLOOR,0);
       const count=geometry.attributes.position.count;
+      if(i===3)shapeOpenGloveForGrip(geometry,weights,offset);
       const skinIndex=new Uint8Array(count*4),skinWeight=new Uint8Array(count*4);
       for(let v=0;v<count;v++) {
         const at=offset+v*8;
@@ -88,7 +111,7 @@ export class ClassicSoldierRig extends SoldierRig {
     // and palms sit above/in front of the older SWAT bind pose. Set limb bind
     // pivots to the new mesh before recording inverse matrices, so the same
     // weapon IK brings the *visible* gloves to the gun instead of only its
-    // invisible driver hands. Source geometry itself remains untouched.
+    // invisible driver hands. Only the glove tips are reshaped above.
     const armBind={
       16:[.23,1.60,-.04],17:[.37,1.38,-.01],18:[.50,1.15,.25],
       29:[-.23,1.60,-.04],30:[-.37,1.38,-.01],31:[-.50,1.15,.25],
@@ -113,7 +136,26 @@ export class ClassicSoldierRig extends SoldierRig {
       if(entry.part==='head')this.headMats.push(m.material);
       if(entry.helmet)this.helmetMeshes.push(m);
     }
+    // The unrigged source has an opening under each sleeve. Keep a small
+    // cloth insert beneath the animated shoulder so it cannot show the sky.
+    for(const side of [-1,1]) {
+      const liner=new THREE.Mesh(SHOULDER_LINER_GEO,SHOULDER_LINER_MAT);
+      liner.name='classic-swat-shoulder-liner';
+      liner.position.set(side*.175,.17,0);
+      liner.scale.set(.065,.085,.078);
+      liner.raycast=()=>{};
+      this.chest.add(liner);
+    }
     this._retarget();
+    // Record how each glove faces the rifle in the original, stable hold.
+    // During the authored run pose the elbows move, but the palms should keep
+    // this rifle-relative orientation instead of twisting with the forearms.
+    const mountQ=this.mount.getWorldQuaternion(new THREE.Quaternion());
+    const invMountQ=mountQ.clone().invert();
+    this._rifleHandQ={
+      left:invMountQ.clone().multiply(this.armL.hd.getWorldQuaternion(new THREE.Quaternion())).multiply(this.bindQ[18]),
+      right:invMountQ.clone().multiply(this.armR.hd.getWorldQuaternion(new THREE.Quaternion())).multiply(this.bindQ[31]),
+    };
   }
 
   animate(dt,s) { super.animate(dt,s);if(this.skeleton)this._retarget(); }
@@ -167,10 +209,14 @@ export class ClassicSoldierRig extends SoldierRig {
       segment(a,b,leg.hip,leg.knee);segment(b,c,leg.knee,leg.ankle);
       set(c,pos(leg.ankle),rot(leg.ankle).multiply(this.bindQ[c]));
     }
-    for(const [arm,cl,a,b,c] of [[this.armL,15,16,17,18],[this.armR,28,29,30,31]]) {
+    const mountQ=rot(this.mount);
+    for(const [arm,cl,a,b,c,handSide] of [[this.armL,15,16,17,18,'left'],[this.armR,28,29,30,31,'right']]) {
       set(cl,v().copy(chest).lerp(neck,.86).lerp(pos(arm.sh),.22),rot(this.chest).multiply(this.bindQ[cl]));
       segment(a,b,arm.sh,arm.el);segment(b,c,arm.el,arm.hd);
-      set(c,pos(arm.hd),rot(arm.hd).multiply(this.bindQ[c]));
+      const handQ=rot(arm.hd).multiply(this.bindQ[c]);
+      if(this._rifleHandQ && this.upperRunW>0.001)
+        handQ.slerp(q().copy(mountQ).multiply(this._rifleHandQ[handSide]),this.upperRunW);
+      set(c,pos(arm.hd),handQ);
     }
     this.bones.forEach((bone,i)=>{
       const t=targets.get(i),parent=asset.data.bones[i].parent;

@@ -55,6 +55,7 @@ export class Roof {
     this.buildCoverTiles();
     this.buildRidges();
     this.buildEaves();
+    this.buildMossPatches();
   }
 
   private buildField() {
@@ -96,42 +97,49 @@ export class Roof {
     this.group.add(mesh);
   }
 
-  /** Continuous half-round cover tiles, swept along the curved slope. */
+  /** Rows of individual half-round cover tiles with overlapping lips. */
   private buildCoverTiles() {
     const rng = new Rng('roof-tiles');
     const geos: THREE.BufferGeometry[] = [];
-    const addStrip = (kind: Kind, u: number) => {
-      const steps = 18;
-      const seg = 5;
-      const radius = 0.085;
+    const courses = 12;
+    const steps = 3;
+    const seg = 5;
+    const baseRadius = 0.095;
+
+    const addTile = (kind: Kind, u: number, v0: number, v1: number) => {
       const pos: number[] = [];
       const col: number[] = [];
       const idx: number[] = [];
+      const base = new THREE.Color().setHSL(0.12 + rng.range(-0.02, 0.02), 0.035, 0.13 + rng.range(-0.03, 0.045));
+      const mossy = rng.chance(0.32);
       const pts: THREE.Vector3[] = [];
       const sides: THREE.Vector3[] = [];
       const norms: THREE.Vector3[] = [];
       for (let i = 0; i <= steps; i++) {
-        const v = i / steps;
+        const v = v0 + (v1 - v0) * (i / steps);
         const p = roofPoint(kind, u, v);
         const n = roofNormal(kind, u, v);
         const e = 0.01;
-        const p2 = roofPoint(kind, Math.min(1, u + e), v);
-        const side = p2.sub(p).normalize();
+        const side = roofPoint(kind, Math.min(1, u + e), v).sub(roofPoint(kind, Math.max(0, u - e), v)).normalize();
         pts.push(p);
         sides.push(side);
         norms.push(n);
       }
-      const base = new THREE.Color().setHSL(0.32 + rng.range(-0.03, 0.03), 0.05, 0.16 + rng.range(-0.03, 0.04));
       for (let i = 0; i <= steps; i++) {
         const p = pts[i];
         const side = sides[i];
         const n = norms[i];
+        // flare the exposed (lower) end; shrink the hidden upper end
+        const flare = i === 0 ? 1.14 : 0.98;
+        const r = baseRadius * flare;
+        const off = 0.035 + (i === 0 ? 0.02 : 0.0);
         for (let a = 0; a <= seg; a++) {
           const ang = (a / seg) * Math.PI;
-          const q = p.clone().addScaledVector(side, Math.cos(ang) * radius).addScaledVector(n, 0.04 + Math.sin(ang) * radius);
+          const q = p.clone().addScaledVector(side, Math.cos(ang) * r).addScaledVector(n, off + Math.sin(ang) * r);
           pos.push(q.x, q.y, q.z);
-          const moss = i > steps * 0.55 ? 0.35 : 0.1;
-          const c = base.clone().lerp(new THREE.Color(0.16, 0.21, 0.07), moss * rng.value() * 0.5);
+          const moss = i === 0 ? 0.72 : 0.14;
+          const c = base.clone().lerp(new THREE.Color(0.15, 0.21, 0.055), moss * rng.value() * 1.1 + (mossy ? 0.35 : 0));
+          if (i === 0) c.multiplyScalar(0.8);
           col.push(c.r, c.g, c.b);
         }
       }
@@ -142,21 +150,20 @@ export class Roof {
           idx.push(k, k + 1, k2, k + 1, k2 + 1, k2);
         }
       }
-      // eave end cap (a slightly larger round tile end)
+      // exposed lower cap, slightly proud of the tile
       const p0 = pts[0];
       const n0 = norms[0];
       const s0 = sides[0];
-      const t0 = p0.clone().sub(pts[1]).normalize();
-      const capBase = p0.clone().addScaledVector(t0, 0.01);
+      const capBase = p0.clone().addScaledVector(n0, 0.03);
       const centerIdx = pos.length / 3;
       pos.push(capBase.x, capBase.y, capBase.z);
-      col.push(base.r * 0.9, base.g * 0.9, base.b * 0.9);
-      const capR = 0.082;
+      col.push(base.r * 0.7, base.g * 0.7, base.b * 0.7);
+      const capR = baseRadius * 1.16;
       for (let a = 0; a <= 10; a++) {
         const ang = (a / 10) * Math.PI * 2;
         const q = capBase.clone().addScaledVector(s0, Math.cos(ang) * capR).addScaledVector(n0, Math.sin(ang) * capR);
         pos.push(q.x, q.y, q.z);
-        col.push(base.r * 0.8, base.g * 0.8, base.b * 0.8);
+        col.push(base.r * 0.62, base.g * 0.62, base.b * 0.62);
       }
       for (let a = 0; a < 10; a++) idx.push(centerIdx, centerIdx + 1 + a, centerIdx + 2 + a);
 
@@ -168,17 +175,25 @@ export class Roof {
       geos.push(g);
     };
 
-    const nFront = 56;
+    const nFront = 52;
     for (let i = 0; i <= nFront; i++) {
       const u = i / nFront;
-      addStrip('front', u);
-      addStrip('back', u);
+      for (let c = 0; c < courses; c++) {
+        const v0 = c / courses;
+        const v1 = Math.min(1, (c + 1) / courses + 0.018);
+        addTile('front', u, v0, v1);
+        addTile('back', u, v0, v1);
+      }
     }
     const nSide = 20;
     for (let i = 0; i <= nSide; i++) {
       const u = i / nSide;
-      addStrip('left', u);
-      addStrip('right', u);
+      for (let c = 0; c < courses; c++) {
+        const v0 = c / courses;
+        const v1 = Math.min(1, (c + 1) / courses + 0.018);
+        addTile('left', u, v0, v1);
+        addTile('right', u, v0, v1);
+      }
     }
     const mesh = new THREE.Mesh(merge(geos), this.tileMat);
     mesh.castShadow = true;
@@ -190,21 +205,26 @@ export class Roof {
     const geos: THREE.BufferGeometry[] = [];
     const ridgeY = ROOF.eaveY + ROOF.rise;
     // main ridge
-    geos.push(box(rl * 2 + 1.2, 0.72, 0.7, 0, ridgeY + 0.34, 0));
-    // ridge tiles
+    geos.push(box(rl * 2 + 1.2, 0.2, 0.42, 0, ridgeY + 0.2, 0));
+    // ridge tiles and the vertical tile face
     for (let x = -rl - 0.4; x <= rl + 0.4; x += 0.28) {
-      const g = new THREE.CylinderGeometry(0.15, 0.15, 0.24, 10);
-      g.translate(x, ridgeY + 0.76, 0);
+      const g = new THREE.CylinderGeometry(0.16, 0.16, 0.22, 10);
+      g.translate(x, ridgeY + 0.36, 0);
       geos.push(g);
     }
-    // ridge-end ornaments (abstract curling chiwen)
+    for (let x = -rl - 0.3; x <= rl + 0.3; x += 0.34) {
+      for (const sz of [-1, 1]) {
+        geos.push(box(0.24, 0.18, 0.04, x, ridgeY + 0.2, sz * 0.22));
+      }
+    }
+    // ridge-end ornaments: a low curling chiwen
     for (const s of [-1, 1]) {
-      geos.push(box(0.3, 0.7, 0.36, s * (rl + 0.5), ridgeY + 0.62, 0, 0, 0, s * -0.1));
-      const tail = box(0.26, 0.58, 0.3, s * (rl + 0.68), ridgeY + 1.0, 0.02);
-      tail.rotateZ(s * -0.55);
+      geos.push(box(0.4, 0.32, 0.46, s * (rl + 0.48), ridgeY + 0.18, 0));
+      const tail = box(0.3, 0.5, 0.34, s * (rl + 0.6), ridgeY + 0.5, 0.02);
+      tail.rotateZ(s * -0.8);
       geos.push(tail);
-      const tip = new THREE.ConeGeometry(0.13, 0.45, 8);
-      tip.translate(s * (rl + 0.8), ridgeY + 1.2, 0.02);
+      const tip = box(0.2, 0.28, 0.28, s * (rl + 0.78), ridgeY + 0.7, 0.02);
+      tip.rotateZ(s * -1.25);
       geos.push(tip);
     }
     // hip ridges
@@ -236,13 +256,69 @@ export class Roof {
     this.group.add(mesh);
   }
 
+  private buildMossPatches() {
+    const rng = new Rng('roof-moss-patches');
+    const geos: THREE.BufferGeometry[] = [];
+    const colors: number[] = [];
+    for (let i = 0; i < 120; i++) {
+      const kind: Kind = (['front', 'back', 'left', 'right'] as Kind[])[i % 4];
+      const u = rng.range(0.06, 0.94);
+      const v = rng.chance(0.55) ? rng.range(0.03, 0.3) : rng.range(0.55, 0.96);
+      const p = roofPoint(kind, u, v);
+      const n = roofNormal(kind, u, v);
+      const t = roofPoint(kind, Math.min(1, u + 0.01), v).sub(roofPoint(kind, Math.max(0, u - 0.01), v)).normalize();
+      const b = new THREE.Vector3().crossVectors(n, t).normalize();
+      const r = rng.range(0.14, 0.45);
+      const npts = rng.int(6, 9);
+      const idxCenter = geos.length; // not used; each patch is its own fan
+      const pos: number[] = [];
+      const idx: number[] = [];
+      pos.push(p.x + n.x * 0.012, p.y + n.y * 0.012, p.z + n.z * 0.012);
+      for (let k = 0; k <= npts; k++) {
+        const a = (k / npts) * Math.PI * 2;
+        const rr = r * rng.range(0.6, 1.0);
+        const q = p
+          .clone()
+          .addScaledVector(t, Math.cos(a) * rr)
+          .addScaledVector(b, Math.sin(a) * rr * rng.range(0.55, 1.0))
+          .addScaledVector(n, 0.012);
+        pos.push(q.x, q.y, q.z);
+        if (k < npts) idx.push(0, k + 1, k + 2);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      geos.push(g);
+      const c = new THREE.Color().setHSL(0.22 + rng.range(-0.02, 0.02), 0.5, 0.09 + rng.range(0, 0.04));
+      for (let k = 0; k < pos.length / 3; k++) colors.push(c.r, c.g, c.b);
+      void idxCenter;
+    }
+    const merged = merge(geos.map((g) => {
+      g.setAttribute('color', new THREE.Float32BufferAttribute(colors.slice(0, g.getAttribute('position').count * 3), 3));
+      return g;
+    }));
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x536b38,
+      roughness: 1,
+      vertexColors: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(merged, mat);
+    mesh.receiveShadow = true;
+    this.group.add(mesh);
+  }
+
   private buildEaves() {
     const wood = timberMaterial(1);
     const geos: THREE.BufferGeometry[] = [];
     // fascia boards
     for (const s of [-1, 1]) {
-      geos.push(box(hw * 2, 0.24, 0.18, 0, ROOF.eaveY - 0.08, s * hd));
-      geos.push(box(0.18, 0.24, hd * 2, s * hw, ROOF.eaveY - 0.08, 0));
+      geos.push(box(hw * 2, 0.2, 0.16, 0, ROOF.eaveY - 0.26, s * hd));
+      geos.push(box(0.16, 0.2, hd * 2, s * hw, ROOF.eaveY - 0.26, 0));
     }
     // rafters under the front and back eaves
     for (let x = -hw + 0.3; x <= hw - 0.3; x += 0.34) {

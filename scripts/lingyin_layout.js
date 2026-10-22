@@ -1,9 +1,9 @@
 // Gameplay footprint of the authored Lingyin scene. Source coordinates are kept
 // intact in X/Z; the temple platform (source Y=3.25) becomes gameplay Y=0.
-import { RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_TRAILS,
-  ridgeGuardSections, ridgeTrailSurfaceAt } from './lingyin_hillside_route.js?v=hillside-6';
+import { FRONT_GATE_FORECOURT, RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_TRAILS,
+  ridgeGuardSections, ridgeTrailSurfaceAt } from './lingyin_hillside_route.js?v=hillside-7';
 
-export const LINGYIN_BOUNDS = { hw: 84, hl: 70 };
+export const LINGYIN_BOUNDS = { hw: 84, hl: 76 };
 export const LINGYIN_PLATFORM_Y = 3.25;
 
 const brush = (x, z, hx, hz, y0, h, walkable = false) =>
@@ -49,10 +49,15 @@ export function lingyinLayout() {
   add(27.5, 39, .19, 6, .35, 1.85);
   add(27.5, 28, .19, 5, .35, 3.1);
   add(-24.75,45.7,10.75,.14,.1,1.14); // outer stone terrace rail
-  add(-9.5,45.7,4.5,.14,0,1.35);      // new gate timber fence
-  add(5.5,45.7,4.5,.14,0,1.35);
   add(18.75,45.7,8.75,.14,.1,1.14);
-  for(const x of [-5,1])add(x,45.7,.19,.19,0,1.35);
+
+  // The outer flagstone court ends in a dense three-sided grove. Continuous
+  // brushes sit on the tree line, not in the visible walking lane, so the
+  // playable limit reads as forest rather than an arbitrary invisible wall.
+  const F=FRONT_GATE_FORECOURT;
+  add(F.x0,(F.z0+F.z1)/2,.25,(F.z1-F.z0)/2,-1,12);
+  add(F.x1,(F.z0+F.z1)/2,.25,(F.z1-F.z0)/2,-1,12);
+  add((F.x0+F.x1)/2,F.z1,(F.x1-F.x0)/2+.25,.25,-1,12);
 
   // Generate collision from precisely the same visible rail sections. At a
   // junction only the interior branch rail opens; the outer edge stays fenced.
@@ -84,16 +89,36 @@ export function lingyinLayout() {
           .09,.09,deckY+.72,deckY+1.08);
       }
     };
-    overlookEdge(lookout.x-lookout.hx,lookout.z,.17,lookout.hz);
-    overlookEdge(lookout.x+lookout.hx,lookout.z,.17,lookout.hz);
-    overlookEdge(lookout.x,lookout.z-lookout.hz,lookout.hx,.17);
-    const left=lookout.x-lookout.hx,right=lookout.x+lookout.hx;
-    const gap0=Math.max(left,lookout.entryX-1.5);
-    const gap1=Math.min(right,lookout.entryX+1.5);
-    if(gap0-left>.2)overlookEdge((left+gap0)/2,lookout.z+lookout.hz,
-      (gap0-left)/2,.17);
-    if(right-gap1>.2)overlookEdge((gap1+right)/2,lookout.z+lookout.hz,
-      (right-gap1)/2,.17);
+    const splitVertical=(x,entryZ)=>{
+      const south=lookout.z-lookout.hz,north=lookout.z+lookout.hz;
+      const gap0=Math.max(south,entryZ-1.5),gap1=Math.min(north,entryZ+1.5);
+      if(gap0-south>.2)overlookEdge(x,(south+gap0)/2,.17,(gap0-south)/2);
+      if(north-gap1>.2)overlookEdge(x,(gap1+north)/2,.17,(north-gap1)/2);
+    };
+    const splitHorizontal=(z,entryX)=>{
+      const left=lookout.x-lookout.hx,right=lookout.x+lookout.hx;
+      const gap0=Math.max(left,entryX-1.5),gap1=Math.min(right,entryX+1.5);
+      if(gap0-left>.2)overlookEdge((left+gap0)/2,z,(gap0-left)/2,.17);
+      if(right-gap1>.2)overlookEdge((gap1+right)/2,z,(right-gap1)/2,.17);
+    };
+    if(lookout.entrySide==='west')splitVertical(lookout.x-lookout.hx,lookout.entryZ);
+    else overlookEdge(lookout.x-lookout.hx,lookout.z,.17,lookout.hz);
+    if(lookout.entrySide==='east')splitVertical(lookout.x+lookout.hx,lookout.entryZ);
+    else overlookEdge(lookout.x+lookout.hx,lookout.z,.17,lookout.hz);
+    if(lookout.entrySide==='south')splitHorizontal(lookout.z-lookout.hz,lookout.entryX);
+    else overlookEdge(lookout.x,lookout.z-lookout.hz,lookout.hx,.17);
+    if(lookout.entrySide==='north')splitHorizontal(lookout.z+lookout.hz,lookout.entryX);
+    else overlookEdge(lookout.x,lookout.z+lookout.hz,lookout.hx,.17);
+
+    // Match the eight visible pavilion columns. Their broad gaps stay open,
+    // while the high roof proxy catches bullets without becoming a player wall.
+    const pavilionZ=lookout.z-.45,postRadius=2.9;
+    for(let i=0;i<8;i++) {
+      const angle=i/8*Math.PI*2+Math.PI/8;
+      add(lookout.x+Math.cos(angle)*postRadius,
+        pavilionZ+Math.sin(angle)*postRadius,.22,.22,deckY+.22,deckY+3.5);
+    }
+    add(lookout.x,pavilionZ,3.95,3.95,deckY+3.35,deckY+4.9);
   }
 
   // The five halls are real rooms. Their plinths and stair treads are walkable;
@@ -235,6 +260,8 @@ export function lingyinLayout() {
     const ridgeHeights=trailHeightsAt(x,z);
     const lookout=RIDGE_LOOKOUTS.find(p=>Math.abs(x-p.x)<=p.hx&&Math.abs(z-p.z)<=p.hz);
     const heights=maxHeight>=0&&insideTemple(x,z)?[0]:[];
+    if(maxHeight>=F.y&&x>=F.x0&&x<=F.x1&&z>=F.z0&&z<=F.z1)
+      heights.push(F.y);
     for(const y of ridgeHeights)if(y<=maxHeight)heights.push(y);
     if(lookout&&lookout.y<=maxHeight)heights.push(lookout.y);
     for(const f of floors) {
@@ -263,11 +290,9 @@ export function lingyinLayout() {
     [-2,40,1.05,'gate-hall'],[-25.5,7,.95,'west-hall'],[19,7,.95,'east-hall'],
     [-2,-5,1.35,'main-hall'],[-8,-8,1.35,'main-hall'],[5,-8,1.35,'main-hall'],
     [-2,-38,1.15,'rear-hall'],
-    [-40,7,1.4,'west-ascent'],[-44,22,6.2,'west-ascent'],
-    [-49,33,10,'west-ascent'],[-37,46,11.8,'west-ascent'],
-    [-5,58,6.3,'north-ascent'],[-22,64,8.5,'north-ascent'],[-35,67,10.2,'north-ascent'],
-    [-58,58,15.8,'upper-ridge'],[-72,63,16.5,'upper-ridge'],
-    [-58,49,15.8,'lower-lookout'],[-75,50,19.8,'upper-lookout'],
+    [-40,7,1.25,'west-ascent'],[-43,25,5.15,'west-ascent'],
+    [-47,30,6.25,'west-ascent'],[-43,48,9.95,'west-ascent'],
+    [-50,62,13,'ridge-pavilion'],
   ];
   const player=spawnCandidates.map(([x,z,y,zone])=>[x,y,z,zone]);
   const enemy=spawnCandidates.map(([x,z,y,zone])=>[x,y,z,zone]);
@@ -287,6 +312,19 @@ export function lingyinLayout() {
       hx:Math.abs(Math.cos(rot))*w/2+Math.abs(Math.sin(rot))*d/2,
       hz:Math.abs(Math.sin(rot))*w/2+Math.abs(Math.cos(rot))*d/2})),
     {kind:'house',x:-31,z:33,hx:3,hz:3},
+    {kind:'walk',x:(FRONT_GATE_FORECOURT.x0+FRONT_GATE_FORECOURT.x1)/2,
+      z:(FRONT_GATE_FORECOURT.z0+FRONT_GATE_FORECOURT.z1)/2,
+      hx:(FRONT_GATE_FORECOURT.x1-FRONT_GATE_FORECOURT.x0)/2,
+      hz:(FRONT_GATE_FORECOURT.z1-FRONT_GATE_FORECOURT.z0)/2},
+    {kind:'hull',x:FRONT_GATE_FORECOURT.x0,
+      z:(FRONT_GATE_FORECOURT.z0+FRONT_GATE_FORECOURT.z1)/2,
+      hx:.25,hz:(FRONT_GATE_FORECOURT.z1-FRONT_GATE_FORECOURT.z0)/2},
+    {kind:'hull',x:FRONT_GATE_FORECOURT.x1,
+      z:(FRONT_GATE_FORECOURT.z0+FRONT_GATE_FORECOURT.z1)/2,
+      hx:.25,hz:(FRONT_GATE_FORECOURT.z1-FRONT_GATE_FORECOURT.z0)/2},
+    {kind:'hull',x:(FRONT_GATE_FORECOURT.x0+FRONT_GATE_FORECOURT.x1)/2,
+      z:FRONT_GATE_FORECOURT.z1,
+      hx:(FRONT_GATE_FORECOURT.x1-FRONT_GATE_FORECOURT.x0)/2+.25,hz:.25},
     ...RIDGE_TRAILS.flatMap(route=>route.slice(0,-1).map((a,i)=>{
       const b=route[i+1];
       return {kind:'walk',x:(a[0]+b[0])/2,z:(a[1]+b[1])/2,

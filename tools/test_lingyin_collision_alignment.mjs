@@ -13,7 +13,8 @@ const blocked = (x, z, feet = 0) => map.colliders.some(c =>
 assert.ok(blocked(27.5, 28), 'closed bridge doors must stop the player');
 assert.equal(blocked(-2, 45.7, .88), false,
   'the north terrace opens over the visible gate staircase');
-assert.ok(blocked(6, 45.7), 'north terrace rail still guards the side');
+assert.equal(blocked(6, 45.7), false,
+  'the removed gate-side timber fence leaves no invisible barrier');
 assert.equal(blocked(-35.5,7,.98),false,'west gate must be open at the raised hall passage');
 assert.ok(blocked(-35.5,14),'west perimeter stays solid outside the new gate');
 assert.equal(blocked(0, 42.9, 1.05), false, 'gate room centre remains open');
@@ -35,6 +36,9 @@ assert.ok(blocked(-6.3,42,1.05)&&blocked(2.3,42,1.05),
   'closed timber side bays have matching collision');
 assert.ok(blocked(-10.5,47,.38)&&blocked(7.5,45.5,.64),
   'new tree trunks are physical obstacles beside the open stair');
+for(const [x,z] of [[-23.8,58],[19.8,58],[-2,74.3]])
+  assert.ok(blocked(x,z),'the outer air wall stays inside the visible boundary grove');
+assert.equal(blocked(-2,58),false,'the centre of the outer flagstone court remains open');
 
 // Visible props are solid where they are drawn, without their old phantom
 // blockers near the main-hall steps and the middle of the courtyard.

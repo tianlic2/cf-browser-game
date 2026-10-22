@@ -1,7 +1,7 @@
 // The valley's analytic height field and water layout.
 // One function drives terrain meshing, placement, water depth and every prop's footing.
 import { clamp, distToPolyline, fbm2, gauss, lerp, ridged2, smoothstep } from '../core/math';
-import { RIDGE_GRADED_WIDTH, RIDGE_HALF_WIDTH, RIDGE_JUNCTION, RIDGE_LOOKOUTS, RIDGE_SHOULDER, ridgeTrailAt,
+import { FRONT_GATE_FORECOURT, RIDGE_GRADED_WIDTH, RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_SHOULDER, ridgeTrailAt,
   ridgeTrailDistance } from '../../../scripts/lingyin_hillside_route.js';
 
 export const WORLD = {
@@ -149,16 +149,22 @@ export function heightAt(x: number, z: number) {
     h = lerp(Math.min(h, bedP), h, smoothstep(-2, 11, pd));
   }
 
+  // The former climb directly outside the mountain gate has been removed.
+  // Keep its lower arrival area as a continuous level forecourt, feathered
+  // into the surrounding terrain; the surviving west-gate trail lies well
+  // outside this footprint and is still graded below.
+  const F=FRONT_GATE_FORECOURT;
+  const frontForecourt = rectMask(x, z, F.x0, F.z0, F.x1, F.z1, 7);
+  h = lerp(P.y, h, frontForecourt);
+
   // Grade a narrow bench into the existing mountainside. The authored path
   // and the FPS floor use the same centreline, so the view and feet agree.
   const trail = ridgeTrailAt(x,z);
-  const turnoutDist=Math.hypot(x-RIDGE_JUNCTION.x,z-RIDGE_JUNCTION.z);
   // Keep the entire paving and rail footing on the graded bench. The old
   // fade began at the paving edge; the coarse terrain triangles then crossed
   // over the path by as much as a metre on the west ascent.
   const trailBlend=1-smoothstep(RIDGE_GRADED_WIDTH,RIDGE_SHOULDER,trail.distance);
-  const turnoutBlend=1-smoothstep(RIDGE_JUNCTION.radius,RIDGE_SHOULDER,turnoutDist);
-  const grade=Math.max(trailBlend,turnoutBlend);
+  const grade=trailBlend;
   if(grade>0)h=lerp(h,WORLD.platform.y+trail.y,grade);
   for(const lookout of RIDGE_LOOKOUTS) {
     const deckDist=Math.hypot(

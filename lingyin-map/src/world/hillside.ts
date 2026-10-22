@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { merge, textTexture } from './geom';
+import { merge } from './geom';
 import { heightAt, terrainRenderedHeightAt, WORLD } from './heightfield';
-import { gateApproachPavingMaterial, stoneMaterial, woodMaterial } from './materials';
+import { roofMaterial, stoneMaterial, woodMaterial } from './materials';
 import { RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_SURFACE_LIFT, RIDGE_TRAILS,
   ridgeGuardSections, ridgeRouteFrames } from '../../../scripts/lingyin_hillside_route.js';
 
@@ -16,7 +16,7 @@ function railBeam(a: THREE.Vector3,b: THREE.Vector3,width=.16,height=.14) {
   return g;
 }
 
-/** One batched stone path, timber rails and a small defensive overlook. */
+/** One batched stone path, timber rails and a mountaintop pavilion overlook. */
 export class HillsideTrail {
   readonly group=new THREE.Group();
 
@@ -26,14 +26,11 @@ export class HillsideTrail {
     const pathPositions: number[]=[];
     const pathUvs: number[]=[];
     const pathIndices: number[]=[];
-    const approachPositions: number[]=[];
-    const approachUvs: number[]=[];
-    const approachColors: number[]=[];
     const guard: THREE.BufferGeometry[]=[];
     const curbs: THREE.BufferGeometry[]=[];
     const roadY=(x:number,z:number)=>
       Math.max(heightAt(x,z)+RIDGE_SURFACE_LIFT,terrainRenderedHeightAt(x,z)+.055);
-    for(const [routeIndex,route] of RIDGE_TRAILS.entries()) {
+    for(const route of RIDGE_TRAILS) {
       const frames=ridgeRouteFrames(route);
       const base=pathPositions.length/3;
       for(const [j,frame] of frames.entries()) {
@@ -43,18 +40,6 @@ export class HillsideTrail {
           const y=roadY(x,z);
           pathPositions.push(x,y,z);
           pathUvs.push(frame.along/2.2,(side+1)*1.1);
-          // The first metres immediately outside the main gate share the
-          // exact walkable trail geometry. A 2 cm offset keeps its scanned
-          // stone surface above the older rock shader without a second road
-          // cutting across the terrain or collision path.
-          if(routeIndex===0&&frame.along<=11.7) {
-            approachPositions.push(x,y+.024,z);
-            // About one-metre stones read correctly from walking height;
-            // the main court keeps its broader paving scale.
-            approachUvs.push(x/30,-z/20);
-            const edge=side===0?1:.86;
-            approachColors.push(edge,edge*.994,edge*.982);
-          }
         }
         if(j<frames.length-1) {
           const k=base+j*3;
@@ -103,23 +88,6 @@ export class HillsideTrail {
     paving.receiveShadow=true;
     this.group.add(paving);
 
-    const approach=new THREE.BufferGeometry();
-    approach.setAttribute('position',new THREE.Float32BufferAttribute(approachPositions,3));
-    approach.setAttribute('uv',new THREE.Float32BufferAttribute(approachUvs,2));
-    approach.setAttribute('color',new THREE.Float32BufferAttribute(approachColors,3));
-    const approachIndices:number[]=[];
-    for(let j=0;j<approachPositions.length/9-1;j++) {
-      const k=j*3;
-      approachIndices.push(k,k+1,k+3,k+1,k+4,k+3,
-        k+1,k+2,k+4,k+2,k+5,k+4);
-    }
-    approach.setIndex(approachIndices);
-    approach.computeVertexNormals();
-    const gateRoad=new THREE.Mesh(approach,gateApproachPavingMaterial());
-    gateRoad.name='front-gate-stone-approach';
-    gateRoad.receiveShadow=true;
-    this.group.add(gateRoad);
-
     // Two rests offer different decisions: the lower terrace has a broad
     // courtyard sightline; the upper ridge reveals the roofs and skyline.
     for(const [index,p] of RIDGE_LOOKOUTS.entries()) {
@@ -151,13 +119,26 @@ export class HillsideTrail {
           openRail.push(post);
         }
       };
-      block(p.x-p.hx,p.z,.34,p.hz*2);
-      block(p.x+p.hx,p.z,.34,p.hz*2);
-      block(p.x,p.z-p.hz,p.hx*2,.34);
-      const north=p.z+p.hz,left=p.x-p.hx,right=p.x+p.hx;
-      const gap0=Math.max(left,p.entryX-1.5),gap1=Math.min(right,p.entryX+1.5);
-      if(gap0-left>.2)block((left+gap0)/2,north,gap0-left,.34);
-      if(right-gap1>.2)block((gap1+right)/2,north,right-gap1,.34);
+      const splitVertical=(x:number,entryZ:number) => {
+        const south=p.z-p.hz,north=p.z+p.hz;
+        const gap0=Math.max(south,entryZ-1.5),gap1=Math.min(north,entryZ+1.5);
+        if(gap0-south>.2)block(x,(south+gap0)/2,.34,gap0-south);
+        if(north-gap1>.2)block(x,(gap1+north)/2,.34,north-gap1);
+      };
+      const splitHorizontal=(z:number,entryX:number) => {
+        const left=p.x-p.hx,right=p.x+p.hx;
+        const gap0=Math.max(left,entryX-1.5),gap1=Math.min(right,entryX+1.5);
+        if(gap0-left>.2)block((left+gap0)/2,z,gap0-left,.34);
+        if(right-gap1>.2)block((gap1+right)/2,z,right-gap1,.34);
+      };
+      if(p.entrySide==='west')splitVertical(p.x-p.hx,p.entryZ);
+      else block(p.x-p.hx,p.z,.34,p.hz*2);
+      if(p.entrySide==='east')splitVertical(p.x+p.hx,p.entryZ);
+      else block(p.x+p.hx,p.z,.34,p.hz*2);
+      if(p.entrySide==='south')splitHorizontal(p.z-p.hz,p.entryX);
+      else block(p.x,p.z-p.hz,p.hx*2,.34);
+      if(p.entrySide==='north')splitHorizontal(p.z+p.hz,p.entryX);
+      else block(p.x,p.z+p.hz,p.hx*2,.34);
       const edge=new THREE.Mesh(merge(parapet),stone);
       edge.castShadow=true;
       edge.receiveShadow=true;
@@ -167,6 +148,62 @@ export class HillsideTrail {
       railing.castShadow=true;
       railing.name=`overlook-open-rail-${index+1}`;
       this.group.add(railing);
+
+      // An open octagonal pavilion gives the ascent a destination without
+      // sacrificing the panoramic firing/view lanes through the platform.
+      const pavilionZ=p.z-.45;
+      const pavilionStone: THREE.BufferGeometry[]=[];
+      const pavilionTimber: THREE.BufferGeometry[]=[];
+      const postRadius=2.9,postCount=8;
+      const dais=new THREE.CylinderGeometry(3.35,3.55,.24,8);
+      dais.translate(p.x,deckY+.12,pavilionZ);
+      pavilionStone.push(dais);
+      const topPoints: THREE.Vector3[]=[];
+      for(let i=0;i<postCount;i++) {
+        const angle=i/postCount*Math.PI*2+Math.PI/8;
+        const x=p.x+Math.cos(angle)*postRadius;
+        const z=pavilionZ+Math.sin(angle)*postRadius;
+        const base=new THREE.CylinderGeometry(.29,.34,.24,12);
+        base.translate(x,deckY+.34,z);
+        pavilionStone.push(base);
+        const column=new THREE.CylinderGeometry(.17,.2,3.05,12);
+        column.translate(x,deckY+1.98,z);
+        pavilionTimber.push(column);
+        topPoints.push(v3(x,deckY+3.48,z));
+      }
+      for(let i=0;i<postCount;i++)
+        pavilionTimber.push(railBeam(topPoints[i],topPoints[(i+1)%postCount],.24,.28));
+      const ceiling=new THREE.CircleGeometry(3.48,8);
+      ceiling.rotateZ(Math.PI/8);
+      ceiling.rotateX(Math.PI/2);
+      ceiling.translate(p.x,deckY+3.55,pavilionZ);
+      pavilionTimber.push(ceiling);
+      const hub=v3(p.x,deckY+3.49,pavilionZ);
+      for(const point of topPoints)
+        pavilionTimber.push(railBeam(hub,point,.11,.12));
+      const stoneMesh=new THREE.Mesh(merge(pavilionStone),stone);
+      stoneMesh.name=`ridge-pavilion-stone-${index+1}`;
+      stoneMesh.castShadow=true;
+      stoneMesh.receiveShadow=true;
+      this.group.add(stoneMesh);
+      const timberMesh=new THREE.Mesh(merge(pavilionTimber),timber);
+      timberMesh.name=`ridge-pavilion-timber-${index+1}`;
+      timberMesh.castShadow=true;
+      timberMesh.receiveShadow=true;
+      this.group.add(timberMesh);
+      const pavilionRoof=roofMaterial();
+      const roof=new THREE.Mesh(new THREE.ConeGeometry(3.95,1.35,8,2),pavilionRoof);
+      roof.position.set(p.x,deckY+4.15,pavilionZ);
+      roof.rotation.y=Math.PI/8;
+      roof.name=`ridge-pavilion-roof-${index+1}`;
+      roof.castShadow=true;
+      roof.receiveShadow=true;
+      this.group.add(roof);
+      const finial=new THREE.Mesh(new THREE.CylinderGeometry(.08,.13,.75,10),timber);
+      finial.position.set(p.x,deckY+5.15,pavilionZ);
+      finial.name=`ridge-pavilion-finial-${index+1}`;
+      finial.castShadow=true;
+      this.group.add(finial);
     }
 
     for(const [name,geos,material] of [
@@ -180,18 +217,5 @@ export class HillsideTrail {
       this.group.add(m);
     }
 
-    // The trail starts behind a real opening in the northern terrace rail;
-    // one small sign makes the route discoverable without adding HUD clutter.
-    const signPost=new THREE.Mesh(new THREE.BoxGeometry(.16,2.25,.16),timber);
-    signPost.position.set(3.35,heightAt(3.35,47)+1.125,47);
-    signPost.castShadow=true;
-    this.group.add(signPost);
-    const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.65,.5),
-      new THREE.MeshStandardMaterial({map:textTexture('登山道',512,160,
-        {bg:'#302923',fg:'#d4b674',border:'#8f7755'}),side:THREE.DoubleSide,
-        roughness:.9}));
-    sign.rotation.y=Math.PI;
-    sign.position.set(3.35,heightAt(3.35,47)+2.02,46.9);
-    this.group.add(sign);
   }
 }

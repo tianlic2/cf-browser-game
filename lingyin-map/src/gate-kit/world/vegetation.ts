@@ -647,7 +647,7 @@ function paintAtlas(): THREE.Texture {
     drawCell('fallen', paintFallen);
   });
   tex.name = 'lingyin-veg-leaf-atlas';
-  tex.anisotropy = 8;
+  tex.anisotropy = 16;
   tex.needsUpdate = true;
   return tex;
 }
@@ -1174,8 +1174,8 @@ function randomCardQuat(rng: Rng, outward?: THREE.Vector3): THREE.Quaternion {
 
 /** Linear-space instance tint; dark shade vs sunlit yellow-green. */
 function leafTint(exposure: number, rng: Rng, dark: boolean): THREE.Color {
-  const deep: RGB = [0.22, 0.33, 0.17];
-  const sun: RGB = [0.68, 0.84, 0.42];
+  const deep: RGB = [0.10, 0.20, 0.08];
+  const sun: RGB = [0.38, 0.56, 0.2];
   const k = clamp(exposure, 0, 1);
   const warm = rng.chance(0.16) ? 1.1 : 1;
   const r = lerp(deep[0], sun[0], k) * warm + rng.range(-0.045, 0.045);
@@ -1218,7 +1218,7 @@ export class Vegetation {
   private readonly depthMat: THREE.MeshDepthMaterial;
   private readonly buckets = new Map<string, CardBucket>();
 
-  constructor(options: { framingOnly?: boolean } = {}) {
+  constructor(options: { gamePerimeter?: boolean } = {}) {
     this.group.name = 'vegetation';
     this.atlas = paintAtlas();
 
@@ -1227,7 +1227,7 @@ export class Vegetation {
       params: {
         color: 0xffffff,
         map: this.atlas,
-        alphaTest: 0.4,
+        alphaTest: 0.32,
         side: THREE.DoubleSide,
         roughness: 0.84,
         metalness: 0,
@@ -1304,7 +1304,7 @@ export class Vegetation {
       color: /* glsl */ `
         float bStripe = cgNoise2(vec2((cgP.x + cgP.z) * 18.0, cgP.y * 3.4));
         float bGrime = cgFbm2(vec2(cgP.x * 2.6 + cgP.z * 1.8, cgP.y * 0.9));
-        vec3 bCol = mix(vec3(0.09, 0.145, 0.05), vec3(0.24, 0.30, 0.10), smoothstep(0.25, 0.9, bStripe * 0.5 + 0.5));
+        vec3 bCol = mix(vec3(0.045, 0.075, 0.028), vec3(0.13, 0.17, 0.052), smoothstep(0.25, 0.9, bStripe * 0.5 + 0.5));
         bCol *= 0.78 + 0.36 * bGrime;
         float bPowder = smoothstep(0.7, 0.95, cgNoise2(vec2(cgP.y * 1.3, (cgP.x + cgP.z) * 2.0)) * 0.5 + 0.5);
         bCol = mix(bCol, vec3(0.34, 0.36, 0.27), bPowder * 0.22);
@@ -1326,12 +1326,22 @@ export class Vegetation {
     });
 
     this.depthMat = this.makeCardDepthMaterial();
-    if (options.framingOnly) {
+    if (options.gamePerimeter) {
+      // The FPS uses ACES at 1.18 exposure; the standalone gate's custom
+      // grading is darker. Compensate only the imported foliage palette.
+      this.leafMat.color.setRGB(.52, .62, .50);
+      this.bambooMat.color.setRGB(.64, .72, .57);
+      // The FPS already has its own distant forest. Import the updated gate's
+      // nearby tree, bamboo, shrub and ground layers without duplicating it.
       this.addFramingTrees();
+      this.addBamboo();
+      this.addShrubs();
+      this.addUnderstory();
+      this.addGroundDetails();
+      this.addCanopyCeiling();
+      this.addBoundaryGrove();
       this.flushCards();
-    } else {
-      this.populate();
-    }
+    } else this.populate();
   }
 
   /** Leaf cards cast real, dappled shadows through the same atlas alpha. */
@@ -1339,7 +1349,7 @@ export class Vegetation {
     const mat = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
       map: this.atlas,
-      alphaTest: 0.4,
+      alphaTest: 0.32,
       side: THREE.DoubleSide,
     });
     mat.onBeforeCompile = (shader) => {
@@ -1418,9 +1428,9 @@ export class Vegetation {
     const quat = randomCardQuat(rng, outward);
     // Keep every canopy card inside the requested 1.5-4 m envelope.
     const scale = new THREE.Vector3(
-      Math.min(2.2, size * 0.9 * rng.range(0.9, 1.15)),
-      Math.min(1.9, size * 0.9 * rng.range(0.68, 0.94)),
-      Math.min(2.2, size * 0.9 * rng.range(0.9, 1.15)),
+      Math.min(1.1, size * 0.62 * rng.range(0.9, 1.15)),
+      Math.min(1.0, size * 0.62 * rng.range(0.68, 0.94)),
+      Math.min(1.1, size * 0.62 * rng.range(0.9, 1.15)),
     );
     this.pushCard('canopy', 'canopy', cell, pos, quat, scale, leafTint(exposure, rng, false));
   }
@@ -1546,7 +1556,7 @@ export class Vegetation {
       // Layered ellipsoid shells around the lobes: bias toward the outer shell
       // but keep some inner cards for depth between the dark masses and the rim.
       for (const lobe of tree.lobes) {
-        for (let i = 0; i < 240; i++) {
+        for (let i = 0; i < 380; i++) {
           const u = rng.range(-1, 1);
           const theta = rng.range(0, TAU);
           const s = Math.sqrt(1 - u * u);
@@ -1872,20 +1882,20 @@ export class Vegetation {
         new THREE.Euler(0, rng.range(0, TAU), 0),
       );
       const coreScale = new THREE.Vector3(
-        p.scale * rng.range(0.9, 1.25),
-        p.scale * rng.range(0.5, 0.85),
-        p.scale * rng.range(0.9, 1.25),
+        p.scale * rng.range(0.16, 0.26),
+        p.scale * rng.range(0.12, 0.2),
+        p.scale * rng.range(0.16, 0.26),
       );
       const shade = rng.range(0.55, 1.15);
       cores.push({
         pos: new THREE.Vector3(p.x, 0, p.z),
         quat,
         scale: coreScale,
-        color: new THREE.Color().setRGB(shade * 0.8, shade, shade * 0.72),
+        color: new THREE.Color().setRGB(shade * 0.42, shade * 0.56, shade * 0.38),
       });
 
       // Cards around the top and sides of the opaque core.
-      const cardCount = rng.int(5, 8);
+      const cardCount = rng.int(14, 20);
       const h = p.scale * rng.range(0.85, 1.2);
       for (let i = 0; i < cardCount; i++) {
         const a = rng.range(0, TAU);
@@ -1897,8 +1907,8 @@ export class Vegetation {
         );
         if (this.isPath(pos.x, pos.z, 0.05)) continue;
         if (this.isPlatform(pos.x, pos.z, 0.15)) continue;
-        const size = rng.range(0.65, 1.2) * p.scale;
-        const tintK = rng.range(0.42, 0.95);
+        const size = rng.range(0.3, 0.62) * p.scale;
+        const tintK = rng.range(0.34, 0.8);
         this.pushCard(
           'shrub',
           'spray',
@@ -1932,7 +1942,7 @@ export class Vegetation {
     // Grass tufts along the paving kerbs and the platform edge.
     let grass = 0;
     let tries = 0;
-    while (grass < 150 && tries < 5000) {
+    while (grass < 260 && tries < 7000) {
       tries++;
       const nearKerb = rng.chance(0.72);
       const side = rng.chance(0.5) ? -1 : 1;
@@ -1957,7 +1967,7 @@ export class Vegetation {
     // Ferns in the shaded edges near the planting beds.
     let ferns = 0;
     tries = 0;
-    while (ferns < 62 && tries < 3000) {
+    while (ferns < 110 && tries < 5000) {
       tries++;
       const side = rng.chance(0.5) ? -1 : 1;
       const x = side * rng.range(3.5, 6.6);
@@ -2026,7 +2036,7 @@ export class Vegetation {
       }
 
       if (!withCards) return;
-      const cardCount = rng.int(5, 8);
+      const cardCount = rng.int(14, 20);
       for (let i = 0; i < cardCount; i++) {
         const a = rng.range(0, TAU);
         const r = crownR * rng.range(0.3, 1.0);
@@ -2150,13 +2160,63 @@ export class Vegetation {
     }
   }
 
+  /** Dense trees that make the playable forecourt boundary visually explicit. */
+  private addBoundaryGrove() {
+    const rng=new Rng('lingyin-game-boundary-grove');
+    const trees:Array<{x:number;z:number;h:number;r:number}>=[];
+    for(const x of [-22,22])for(let z=7;z<=34;z+=2.45)
+      trees.push({x:x+rng.range(-.28,.28),z:z+rng.range(-.35,.35),
+        h:rng.range(7.4,11.2),r:rng.range(.38,.58)});
+    for(let x=-19.5;x<=19.5;x+=2.45)
+      trees.push({x:x+rng.range(-.35,.35),z:34.5+rng.range(-.25,.28),
+        h:rng.range(7.8,11.8),r:rng.range(.4,.62)});
+
+    const trunkGeo=buildBackgroundTrunk();
+    const trunks=new THREE.InstancedMesh(trunkGeo,this.barkMat,trees.length);
+    const crownMass:BlobSlot[]=[];
+    for(const [index,t] of trees.entries()) {
+      const yaw=rng.range(0,TAU);
+      trunks.setMatrixAt(index,new THREE.Matrix4().compose(
+        new THREE.Vector3(t.x,0,t.z),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0,yaw,0)),
+        new THREE.Vector3(t.r,t.h,t.r)));
+      trunks.setColorAt(index,new THREE.Color().setRGB(
+        rng.range(.58,.82),rng.range(.55,.76),rng.range(.5,.68)));
+      const crownY=t.h*rng.range(.72,.82);
+      for(let lobe=0;lobe<2;lobe++) {
+        const s=t.h*rng.range(.20,.28);
+        crownMass.push({
+          pos:new THREE.Vector3(t.x+rng.range(-1.2,1.2),crownY+rng.range(-.6,1.1),
+            t.z+rng.range(-1.1,1.1)),
+          quat:randomCardQuat(rng),
+          scale:new THREE.Vector3(s*rng.range(.9,1.25),s*rng.range(.65,.9),s),
+          color:new THREE.Color().setRGB(rng.range(.38,.55),rng.range(.58,.78),rng.range(.3,.48)),
+        });
+      }
+      for(let card=0;card<7;card++) {
+        const a=rng.range(0,TAU),radius=rng.range(.5,2.3);
+        this.addCanopyCard(rng,new THREE.Vector3(
+          t.x+Math.cos(a)*radius,crownY+rng.range(-1.1,2.0),t.z+Math.sin(a)*radius),
+          rng.range(2.5,4));
+      }
+    }
+    trunks.instanceMatrix.needsUpdate=true;
+    if(trunks.instanceColor)trunks.instanceColor.needsUpdate=true;
+    trunks.castShadow=true;
+    trunks.receiveShadow=true;
+    trunks.name='forecourt-boundary-trunks';
+    trunks.computeBoundingSphere();
+    this.group.add(trunks);
+    this.addBlobInstances(crownMass,makeBlobGeometry(1),false,'forecourt-boundary-canopy');
+  }
+
   private addGroundDetails() {
     const rng = new Rng('lingyin-veg-ground');
 
     // Fallen leaves scattered on the paving edges and under the trees.
     let leaves = 0;
     let tries = 0;
-    while (leaves < 74 && tries < 2000) {
+    while (leaves < 130 && tries < 3000) {
       tries++;
       const side = rng.chance(0.5) ? -1 : 1;
       const x = side * rng.range(3.35, 7.6);

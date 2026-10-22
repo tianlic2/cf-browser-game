@@ -14,7 +14,7 @@
 // 所以「腿往前抬」是负的 rotation.x，「上身前倾」是正的 rotation.x。
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { NPC_GAIT } from './npc_gait.js';
+import { NPC_GAIT, NPC_RUN_GAIT } from './npc_gait.js?v=fox-run-001';
 
 let enemyMuzzleTexture = null;
 export function setEnemyMuzzleTexture(texture) { enemyMuzzleTexture = texture; }
@@ -417,6 +417,27 @@ const MOUNT_AIM = Object.freeze({
   z: HUMAN_NPC_POSE.aimZ, pitch: HUMAN_NPC_POSE.aimPitch,
 });
 
+// Fox_BL "run.001" upper-body pose retargeted into this rig's chest space.
+// Source landmarks at the running keyframe (metres, relative to its spine):
+// L/R shoulder ≈ (.096,.470,.248)/(-.195,.473,.096),
+// L/R hand ≈ (-.094,.483,.663)/(-.170,.404,.422).
+// The actor skeleton has different limb lengths, so the corresponding chest
+// pivots and gun mount below are solved for the Omoh rig. The gun is yawed back
+// by the torso twist, keeping the barrel aligned with the actor's aim; both
+// hands continue to follow its grip/foregrip via the existing IK.
+const FOX_RUN_UPPER = Object.freeze({
+  spineLean: 0.22, spineYaw: -0.23,
+  mountX: -0.049, mountY: 0.356, mountZ: 0.370,
+  mountPitch: -0.30, mountYaw: 0.23,
+});
+const _foxRunShoulderR = new THREE.Vector3(-0.185, 0.205, 0);
+const _foxRunShoulderL = new THREE.Vector3(0.165, 0.215, 0.025);
+const _foxRunPoleR = new THREE.Vector3(-0.526, -0.833, 0.170);
+const _foxRunPoleL = new THREE.Vector3(0.694, -0.666, 0.273);
+const _foxRunGrip = new THREE.Vector3(0, 0.130, -0.050);
+const _foxRunSupport = new THREE.Vector3(0.035, 0.070, 0.020);
+const _foxRunMount = new THREE.Vector3();
+
 // 步频松驰系数：严格「支撑脚世界坐标不动」要求步幅与走过路程严格相等，
 // 而腿长把跨步锁死在 ±0.32m → 3.4m/s 下要 5Hz 的步频，看着像小碎步。
 // 这里让步幅与腿长脱钩 28%（支撑脚会缓慢前滑），换回接近真人的 ~3.7Hz。
@@ -676,6 +697,7 @@ export class SoldierRig {
     this.breath = 0;
     this.deathBlend = 0;
     this.walkW = 0;
+    this.upperRunW = 0;
     this.motionSpeed = 0;
     this.motionSide = 0;
     this.motionForward = 1;
@@ -712,6 +734,7 @@ export class SoldierRig {
     if (this.muzzleFlash) this.muzzleFlash.visible = false;
     this.deathBlend = 0;
     this.walkW = 0;
+    this.upperRunW = 0;
     this.motionSpeed = 0;
     this.motionSide = 0;
     this.motionForward = 1;
@@ -844,15 +867,30 @@ export class SoldierRig {
     const halfStride = Math.min(HALF_STRIDE_MAX, Math.max(0.06, this.motionSpeed * 0.10));
     this.phase += (Math.PI * moved * CADENCE_SLIP) / (2 * halfStride);
 
-    // ② The contact/swing curve comes from a CC0 authored jog clip. Only its
-    //    normalized foot trajectory is used; IK still fixes feet to this game's
-    //    terrain and the collision controller still owns all root movement.
-    const strideOf = (ph, out) => {
+    // ② Blend the existing walk into the Unity CrossFire Fox "run.001" foot
+    //    trajectory as actual movement speed rises. Both are root-motion-free;
+    //    the Omoh mesh and rifle/aim IK still use the game's existing rig.
+    const runW = clamp01((this.motionSpeed - 1.35) / 1.5);
+    const reload = Number.isFinite(s.reload) ? clamp01(s.reload) : 0;
+    const upperRunTarget = (s.runUpperEnabled === false ? 0 : 1) * runW * walkW * (1 - this.deathBlend) *
+      (reload > 0 && reload < 1 ? 0 : 1) * (1 - blind);
+    this.upperRunW += (upperRunTarget - this.upperRunW) * (1 - Math.exp(-dt * 8));
+    const upperRunW = this.upperRunW;
+    const strideOf = (ph, right, out) => {
       const q = ((ph % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
       const frame = q * (32 / (Math.PI * 2));
-      const i = Math.floor(frame), next = (i + 1) & 31, blend = frame - i;
-      out.z = halfStride * THREE.MathUtils.lerp(NPC_GAIT[i * 2], NPC_GAIT[next * 2], blend);
-      out.lift = .15 * THREE.MathUtils.lerp(NPC_GAIT[i * 2 + 1], NPC_GAIT[next * 2 + 1], blend);
+      const walkFrame = (frame + (right ? 16 : 0)) % 32;
+      const wi = Math.floor(walkFrame), wn = (wi + 1) & 31;
+      const walkZ = THREE.MathUtils.lerp(NPC_GAIT[wi * 2], NPC_GAIT[wn * 2], walkFrame - wi);
+      const walkLift = THREE.MathUtils.lerp(NPC_GAIT[wi * 2 + 1], NPC_GAIT[wn * 2 + 1], walkFrame - wi);
+      // +24 aligns the run clip's left forward/right back contact with the
+      // existing walk phase, so a speed change cannot flip the legs abruptly.
+      const runFrame = (frame + 24) % 32;
+      const ri = Math.floor(runFrame), rn = (ri + 1) & 31, offset = right ? 2 : 0;
+      const runZ = THREE.MathUtils.lerp(NPC_RUN_GAIT[ri * 4 + offset], NPC_RUN_GAIT[rn * 4 + offset], runFrame - ri);
+      const runLift = THREE.MathUtils.lerp(NPC_RUN_GAIT[ri * 4 + offset + 1], NPC_RUN_GAIT[rn * 4 + offset + 1], runFrame - ri);
+      out.z = halfStride * THREE.MathUtils.lerp(walkZ, runZ, runW);
+      out.lift = THREE.MathUtils.lerp(.15 * walkLift, .21 * runLift, runW);
       const travel = out.z;
       // The two feet travel along the actual local movement vector. A strafe
       // must visibly step sideways while the rifle and chest keep facing out.
@@ -861,8 +899,8 @@ export class SoldierRig {
       out.lift *= walkW;
       return out;
     };
-    const sR = strideOf(this.phase + Math.PI, this._sR);
-    const sL = strideOf(this.phase, this._sL);
+    const sR = strideOf(this.phase, true, this._sR);
+    const sL = strideOf(this.phase, false, this._sL);
 
     // ③ 骨盆高度：取两条腿「刚刚够得着」的上界 —— 自然生成走路时的一起一伏，
     //    且永远不会把腿拉脱臼（超出伸展范围时 IK 会把脚拽离地面）。
@@ -912,13 +950,17 @@ export class SoldierRig {
     solveLeg(this.legR, fR);
     solveLeg(this.legL, fL);
 
-    // ⑤ Upper body is an aiming platform: gait phase and travel direction do
-    // not rotate it. Flash, hit and recoil are intentional one-shot reactions.
-    this.spine.rotation.x = HUMAN_NPC_POSE.spineLean + (pose.torsoLean || 0)
+    // ⑤ Retarget the authored running torso/shoulder posture, while the gun's
+    // counter-yaw keeps the barrel facing the actor's actual target. Motion
+    // weight is filtered above, so starting, stopping and reloading do not snap.
+    this.spine.rotation.x = THREE.MathUtils.lerp(HUMAN_NPC_POSE.spineLean,
+      FOX_RUN_UPPER.spineLean, upperRunW) + (pose.torsoLean || 0)
       + 0.05 * blind - flinch * 0.26;
-    this.spine.rotation.y = (pose.torsoYaw || 0) - flinch * 0.14;
+    this.spine.rotation.y = FOX_RUN_UPPER.spineYaw * upperRunW
+      + (pose.torsoYaw || 0) - flinch * 0.14;
     this.spine.rotation.z = (pose.torsoRoll || 0)
-      + blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06);
+      + blind * (0.08 + Math.sin(this.breath * 1.7) * 0.06)
+      + Math.sin(this.phase) * 0.012 * upperRunW;
     this.chest.rotation.x = -this.kick * 0.04 * (1 - this.deathBlend);
 
     // ⑥ 头：跑动时抬起来一点、致盲时低头乱晃、受击时向后甩
@@ -944,10 +986,17 @@ export class SoldierRig {
     const aimed = MOUNT_AIM;
     this.mountPos.set(
       carry.x + (aimed.x - carry.x) * k + (pose.weaponX || 0),
-      carry.y + (aimed.y - carry.y) * k + (pose.weaponY || 0) - kick * 0.012,
-      carry.z + (aimed.z - carry.z) * k + (pose.weaponZ || 0) - kick * 0.035
-    );
-    this.mountPitch = carry.pitch + (aimed.pitch - carry.pitch) * k
+      carry.y + (aimed.y - carry.y) * k + (pose.weaponY || 0),
+      carry.z + (aimed.z - carry.z) * k + (pose.weaponZ || 0)
+    ).lerp(_foxRunMount.set(
+      FOX_RUN_UPPER.mountX + (pose.weaponX || 0),
+      FOX_RUN_UPPER.mountY + (pose.weaponY || 0),
+      FOX_RUN_UPPER.mountZ + (pose.weaponZ || 0)), upperRunW);
+    this.mountPos.y -= kick * 0.012;
+    this.mountPos.z -= kick * 0.035;
+    this.mountPitch = THREE.MathUtils.lerp(
+      carry.pitch + (aimed.pitch - carry.pitch) * k,
+      FOX_RUN_UPPER.mountPitch, upperRunW)
       + (pose.weaponPitch || 0) - kick * 0.10
       - aimPitch * (0.35 + 0.65 * k) + blind * 0.30;   // 注意是**减**：↑符号约定见文件头，负 pitch = 抬枪口
     // 致命伤时持枪节点已隐藏；仍更新挂点姿势，让双臂的 IK 顺畅过渡到松手状态。
@@ -957,14 +1006,14 @@ export class SoldierRig {
     }
     if (this.rifle) this.rifle.rotation.y = this.rifleYaw + RIFLE_DEATH_YAW * db;
     this.mount.position.copy(this.mountPos);
-    this.mount.rotation.set(this.mountPitch, 0, 0);
+    this.mount.rotation.set(this.mountPitch, FOX_RUN_UPPER.mountYaw * upperRunW, 0);
     this.mount.updateMatrix();
 
     // ⑧ 双臂 IK：手要一直黏在握把与护木上（「看起来真的在持枪」的关键）。
     //    挂点在胸腔系里 → 肩也在胸腔系里，两边同系，IK 直接在这个系里解。
     _gripT.copy(this.anchors.grip).applyMatrix4(this.mount.matrix);
     _hgT.copy(this.anchors.handguard).applyMatrix4(this.mount.matrix);
-    const reload = Number.isFinite(s.reload) ? Math.max(0, Math.min(1, s.reload)) : 0;
+    _gripT.addScaledVector(_foxRunGrip, upperRunW);
     if (reload > 0 && reload < 1 && this.deathBlend < .02) {
       // One continuous support-hand path: release the foregrip, fetch a mag,
       // seat it, then return. The rifle stays anchored to the right hand.
@@ -976,6 +1025,7 @@ export class SoldierRig {
         _reloadReturn.copy(this.anchors.handguard).applyMatrix4(this.mount.matrix),
         smooth((reload - .68) / .32));
     }
+    _hgT.addScaledVector(_foxRunSupport, upperRunW);
     if (blind > 0.02) _hgT.lerp(_faceT, blind * 0.85);          // 致盲：左手抬起来捂脸
     if (this.deathBlend > 0.02) {                               // 倒地：双手松开垂在身侧
       _gripT.lerp(_dropR, this.deathBlend);
@@ -983,14 +1033,20 @@ export class SoldierRig {
     }
     const shoulderOut = pose.shoulderOut || 0;
     const shoulderRaise = pose.shoulderRaise || 0;
-    this.armR.sh.position.set(-SHOULDER_X - shoulderOut, SHOULDER_Y + shoulderRaise, 0);
-    this.armL.sh.position.set(SHOULDER_X + shoulderOut, SHOULDER_Y + shoulderRaise, 0);
+    this.armR.sh.position.set(-SHOULDER_X, SHOULDER_Y, 0).lerp(_foxRunShoulderR, upperRunW);
+    this.armL.sh.position.set(SHOULDER_X, SHOULDER_Y, 0).lerp(_foxRunShoulderL, upperRunW);
+    this.armR.sh.position.x -= shoulderOut;
+    this.armL.sh.position.x += shoulderOut;
+    this.armR.sh.position.y += shoulderRaise;
+    this.armL.sh.position.y += shoulderRaise;
     if (reload <= 0 || reload >= 1) _hgT.add(_reloadReturn.set(
       pose.supportX || 0, pose.supportY || 0, pose.supportZ || 0));
     this._posePoleR.set(_poleR.x - (pose.elbowOut || 0),
-      _poleR.y - (pose.elbowDrop || 0), _poleR.z).normalize();
+      _poleR.y - (pose.elbowDrop || 0), _poleR.z)
+      .normalize().lerp(_foxRunPoleR, upperRunW).normalize();
     this._posePoleL.set(_poleL.x + (pose.elbowOut || 0),
-      _poleL.y - (pose.elbowDrop || 0), _poleL.z).normalize();
+      _poleL.y - (pose.elbowDrop || 0), _poleL.z)
+      .normalize().lerp(_foxRunPoleL, upperRunW).normalize();
     ik2(this.armR.sh.position, _gripT, this._posePoleR, UPPER, FORE,
       this.armR.sh.quaternion, this.armR.el.quaternion);
     ik2(this.armL.sh.position, _hgT, this._posePoleL, UPPER, FORE,

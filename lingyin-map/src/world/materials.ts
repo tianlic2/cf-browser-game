@@ -90,6 +90,21 @@ export function courtyardPavingMaterial() {
   return courtyardMaterial;
 }
 
+/** Same photographed slabs as the courtyard, with matching world-metre scale. */
+export function courtyardPavingExtensionMaterial(width: number, depth: number) {
+  const material=courtyardPavingMaterial().clone();
+  material.name='courtyard-photogrammetry-extension';
+  for(const key of ['map','normalMap','roughnessMap'] as const) {
+    const source=material[key];
+    if(!source)continue;
+    const texture=source.clone();
+    texture.repeat.set(width/5.1,depth/5.1);
+    texture.needsUpdate=true;
+    material[key]=texture;
+  }
+  return material;
+}
+
 // The gate road shares the court's scanned stone maps and GPU textures. Its
 // world-space UVs are denser so joints read at walking height on the slope.
 export function gateApproachPavingMaterial() {

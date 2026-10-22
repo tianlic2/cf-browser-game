@@ -1,33 +1,27 @@
-// Authored mountain route shared by the terrain mesh and the FPS collision.
-// Y is relative to the temple terrace (source world Y=3.25m).
-export const RIDGE_TRAIL = [
-  [-2,47.2,.24],[-2,49,1.1],[-2,52,3.0],[-3,55,4.75],[-5,58,6.3],
-  [-10,61,7.4],[-22,64,8.5],[-35,67,10.2],[-44,66,11.75],
-  [-50,58,13.8],[-58,58,15.8],[-63,65,15.25],[-72,63,16.5],
-  [-78,58,19],[-78,55,19.6],[-78,52,19.8],[-75,50,19.8],
-];
-export const RIDGE_SPUR = [
-  [-58,58,15.8],[-58,55,15.8],[-58,52,15.8],[-58,50,15.8],
-];
-// The west-side temple hall opens onto a second climb. Its long contouring
-// traverse avoids a direct, implausibly steep cut through the mountain.
+// The only retained mountain route starts outside the west-side temple hall.
+// Y is relative to the temple terrace (source world Y=3.25m). The former
+// front-gate climb, spur and lookout decks were removed so the gate forecourt
+// can remain a simple flat arrival space.
 export const WEST_RIDGE_TRAIL = [
-  [-36.4,7,.95],[-40,7,1.4],[-44,8,2.6],[-47,12,4],
-  [-47,18,5.3],[-44,22,6.2],[-47,27,8],[-49,33,10],
-  [-49,40,11.5],[-37,46,11.8],[-37,57,12.4],[-50,58,13.8],
+  [-36.4,7,.95],[-40,7,1.25],[-44,9,2],[-47,14,3],
+  [-47,20,4.05],[-43,25,5.15],[-47,30,6.25],[-50,36,7.45],
+  [-49,43,8.65],[-43,48,9.95],[-37,54,11.05],[-40,59,12],
+  [-44.8,62,13],
 ];
-export const RIDGE_TRAILS = [RIDGE_TRAIL,RIDGE_SPUR,WEST_RIDGE_TRAIL];
+export const RIDGE_TRAILS = [WEST_RIDGE_TRAIL];
 
 export const RIDGE_HALF_WIDTH = 2.45;
 export const RIDGE_RAIL_OFFSET = RIDGE_HALF_WIDTH + .27;
 export const RIDGE_GRADED_WIDTH = RIDGE_HALF_WIDTH + 1.45;
 export const RIDGE_SHOULDER = 7.2;
 export const RIDGE_SURFACE_LIFT = .14;
-export const RIDGE_JUNCTION = {x:-50,z:58,radius:4.5};
 export const RIDGE_LOOKOUTS = [
-  {x:-58,z:49,hx:4,hz:2.5,y:15.8,entryX:-58},
-  {x:-75,z:50,hx:5,hz:4.5,y:19.8,entryX:-78},
+  {x:-50,z:62,y:13,hx:5.2,hz:4.2,entrySide:'east',entryX:-44.8,entryZ:62},
 ];
+// Match the complete visible gate paving. Keeping the support footprint smaller
+// than the stone plane creates an apparent air wall that can only be crossed
+// while airborne because grounded movement consults canTraverse().
+export const FRONT_GATE_FORECOURT = {x0:-24,x1:20,z0:45.5,z1:74.5,y:0};
 
 // A single mitered centreline supplies both the paving and the physical rails.
 // Adjacent segments share a corner frame, so they cannot leave triangular holes
@@ -92,7 +86,7 @@ export function ridgeGuardSections(routeIndex,spacing=.9) {
       const q={x:b.x+b.nx*side*RIDGE_RAIL_OFFSET,
         z:b.z+b.nz*side*RIDGE_RAIL_OFFSET,y:b.y,along:b.along};
       const x=(p.x+q.x)/2,z=(p.z+q.z)/2,along=(p.along+q.along)/2;
-      const atEntrance=(routeIndex===0&&along<2.2)||(routeIndex===2&&along<2.4);
+      const atEntrance=along<2.4;
       const onTerrace=RIDGE_LOOKOUTS.some(t=>
         Math.abs(x-t.x)<t.hx+.3&&Math.abs(z-t.z)<t.hz+.3);
       const insideBranch=RIDGE_TRAILS.some((route,index)=>index!==routeIndex&&
@@ -138,9 +132,7 @@ export function ridgeTrailSurfaceAt(x,z) {
   const lookout=ridgeLookoutContains(x,z);
   if(lookout)return lookout.y;
   const p=ridgeTrailAt(x,z);
-  return p.distance<=RIDGE_HALF_WIDTH||
-    Math.hypot(x-RIDGE_JUNCTION.x,z-RIDGE_JUNCTION.z)<=RIDGE_JUNCTION.radius?
-      p.y+RIDGE_SURFACE_LIFT:null;
+  return p.distance<=RIDGE_HALF_WIDTH?p.y+RIDGE_SURFACE_LIFT:null;
 }
 
 export function ridgeTrailDistance(x,z) {

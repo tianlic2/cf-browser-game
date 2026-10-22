@@ -1,20 +1,48 @@
 import assert from 'node:assert/strict';
 import { GroundNavigation } from '../scripts/navigation.js';
-import { canMoveThroughBrushes } from '../scripts/brush_collision.js';
+import { canMoveThroughBrushes, intersectsBrush } from '../scripts/brush_collision.js';
 import { lingyinLayout } from '../scripts/lingyin_layout.js';
-import { RIDGE_LOOKOUTS, RIDGE_SURFACE_LIFT, RIDGE_TRAILS, WEST_RIDGE_TRAIL,
+import { FRONT_GATE_FORECOURT, RIDGE_LOOKOUTS, RIDGE_SURFACE_LIFT, RIDGE_TRAILS, WEST_RIDGE_TRAIL,
   ridgeGuardSections, ridgeRouteFrames } from '../scripts/lingyin_hillside_route.js';
 
 const map=lingyinLayout();
 assert.ok(map.bounds.hw>=80&&map.bounds.hl>=68,'mountain lies inside playable bounds');
 assert.ok(Math.abs(map.surfaceAt(-2,45.7,1.5)-.64)<.01,
   'the gate staircase leads through the terrace opening');
-assert.ok(map.surfaceAt(-2,47.2,.52)!==null,'stairs meet the graded trail');
+assert.equal(RIDGE_TRAILS.length,1,'only the west-gate mountain route remains');
+assert.equal(RIDGE_TRAILS[0],WEST_RIDGE_TRAIL);
+assert.equal(RIDGE_LOOKOUTS.length,1,'the west ascent ends at one pavilion terrace');
+const pavilion=RIDGE_LOOKOUTS[0];
+assert.equal(pavilion.entrySide,'east','the final trail enters the pavilion from its east edge');
+assert.deepEqual(WEST_RIDGE_TRAIL.at(-1).slice(0,2),[pavilion.entryX,pavilion.entryZ],
+  'the visible stone road terminates exactly at the pavilion opening');
+for(const [x,z] of [[-2,47.2],[-2,58],[10,67]])
+  assert.ok(map.surfacesAt(x,z,.52).includes(FRONT_GATE_FORECOURT.y),
+    'the former front climb is a level supported forecourt');
+assert.equal(map.surfaceAt(-20,58,.52),FRONT_GATE_FORECOURT.y,
+  'the removed front hillside is replaced by the same level forecourt');
+for(const [x,z] of [[-23.2,58],[19.2,58],[-2,73.7]]) {
+  assert.equal(map.surfaceAt(x,z,.52),FRONT_GATE_FORECOURT.y,
+    'every visible outer paving edge has level walk support');
+  assert.ok(map.canTraverse(x,z,0,.52),
+    'outer paving never becomes a grounded-movement air wall');
+}
+for(let x=-23.2;x<18.8;x+=.25)
+  assert.ok(canMoveThroughBrushes(map.colliders,x,58,x+.25,58,
+    0,.45,.52,1.78,map.surfaceAt),`outer paving is laterally open at x=${x}`);
+for(let z=48;z<73.5;z+=.25)
+  assert.ok(canMoveThroughBrushes(map.colliders,-2,z,-2,z+.25,
+    map.surfaceAt(-2,z,.52),.45,.52,1.78,map.surfaceAt),
+  `outer paving is continuously walkable without jumping at z=${z}`);
+for(const [x,z] of [[-23.8,58],[19.8,58],[-2,74.3]])
+  assert.equal(canMoveThroughBrushes(map.colliders,-2,58,x,z,
+    0,.45,.52,1.78,map.surfaceAt),false,
+  'the dense tree line has a continuous movement boundary');
 assert.ok(Math.abs(map.surfaceAt(-35.5,7,1.5)-(.95+RIDGE_SURFACE_LIFT))<.02,
   'the west hall bridge continues through its perimeter gate');
 
 // The continuous mitered strip must have exactly one cross-section at each
-// authored bend; rail bays on that strip stop at the lookout deck entrance.
+// authored bend; only the west-gate route contributes paving and rails.
 for(const [routeIndex,route] of RIDGE_TRAILS.entries()) {
   const frames=ridgeRouteFrames(route);
   for(const corner of route)assert.equal(frames.filter(p=>
@@ -33,6 +61,32 @@ for(const [routeIndex,route] of RIDGE_TRAILS.entries()) {
     }
   }
 }
+
+let maxGrade=0;
+for(let i=0;i<WEST_RIDGE_TRAIL.length-1;i++) {
+  const a=WEST_RIDGE_TRAIL[i],b=WEST_RIDGE_TRAIL[i+1];
+  const grade=Math.abs(b[2]-a[2])/Math.hypot(b[0]-a[0],b[1]-a[1]);
+  maxGrade=Math.max(maxGrade,grade);
+}
+assert.ok(maxGrade<=.185,`west ascent remains a walkable gentle grade (${maxGrade})`);
+
+for(let x=pavilion.entryX;x>=pavilion.entryX-1.4;x-=.25) {
+  const feet=map.surfaceAt(x,pavilion.entryZ,30);
+  const next=map.surfaceAt(x-.25,pavilion.entryZ,30);
+  assert.ok(Number.isFinite(feet)&&Number.isFinite(next),
+    `pavilion entry has continuous support at x=${x}`);
+  assert.ok(canMoveThroughBrushes(map.colliders,x,pavilion.entryZ,x-.25,pavilion.entryZ,
+    feet,.45,.52,1.78,map.surfaceAt),
+  `pavilion entry has no rail air wall at x=${x}`);
+}
+const blocked=(x,z,feet=pavilion.y)=>map.colliders.some(c=>
+  intersectsBrush(c,x,z,feet,.36,.5,1.78,map.colliders,map.surfaceAt));
+assert.equal(blocked(pavilion.x,pavilion.z),false,
+  'the pavilion centre remains open and usable');
+const columnAngle=Math.PI/8;
+assert.equal(blocked(pavilion.x+Math.cos(columnAngle)*2.9,
+  pavilion.z-.45+Math.sin(columnAngle)*2.9),true,
+  'a visible pavilion column has matching collision');
 
 // The west hall is a real passage rather than a decorative door: a full
 // capsule must cross its front bay, rear bay, stone link and western gate.

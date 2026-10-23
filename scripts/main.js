@@ -12,7 +12,7 @@ import { BioMode } from "./bio_mode.js?v=human-names-1";
 import { BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT, refillTwoMagazines } from "./bio_rules.js?v=bio-population-damage-1";
 import { HUMAN_RUN_SPEED, weaponMoveScale } from "./move_speed.js?v=bio-arena-1";
 import { ImpactVfx } from "./impact_vfx.js?v=tracer-muzzle-1";
-import { loadFoxSoldier } from "./fox_soldier.js?v=fox-native-4";
+import { loadFoxSoldier } from "./fox_soldier.js?v=fox-published-1";
 import { VIEWMODEL_BOB_DISTANCE, viewmodelBobProfile } from "./viewmodel_bob.js";
 import { GroundNavigation } from "./navigation.js?v=goldsrc-visible-wall-1";
 import { intersectsBrush, brushSupport, brushSupportIsExposed, brushBottom, canMoveThroughBrushes,

@@ -1,7 +1,7 @@
 // ===== 敌人系统（Fox 原生人物动作 + 点射走位 AI + 倒地尸体 + 对象池）=====
 import * as THREE from "three";
 import { createNpcNamePool } from './npc_names.js';
-import { FoxSoldierRig as SoldierRig } from "./fox_soldier.js?v=fox-native-4";
+import { FoxSoldierRig as SoldierRig } from "./fox_soldier.js?v=fox-published-1";
 import { makeBlobShadow } from "./blobshadow.js";
 import { intersectsBrush } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";

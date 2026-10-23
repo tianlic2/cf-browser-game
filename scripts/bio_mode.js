@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
-import { FoxSoldierRig } from './fox_soldier.js?v=fox-native-4';
+import { FoxSoldierRig } from './fox_soldier.js?v=fox-published-1';
 import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
 import { enemyModel } from './guncatalog.js?v=enemy-loadouts-1';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';

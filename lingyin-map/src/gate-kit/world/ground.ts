@@ -3,6 +3,8 @@ import { Rng } from '../core/math';
 import { box, merge, tint } from './geom';
 import { flagstoneMaterial, graniteMaterial } from './textures';
 import { courtyardPavingExtensionMaterial } from '../../world/materials';
+import { FRONT_GATE_FORECOURT } from '../../../../scripts/lingyin_hillside_route.js';
+import { projectedTempleUV } from '../../world/geom';
 
 export class Ground {
   readonly group = new THREE.Group();
@@ -15,8 +17,15 @@ export class Ground {
     if (!this.gameMap) this.buildBase();
     this.buildPaving();
     this.buildKerbs();
-    this.buildMoss();
+    // Photographed paving already contains wear and joints. Raised green
+    // polyhedra on top read as debris and add geometry/another draw call.
+    if(!this.gameMap)this.buildMoss();
     this.buildRocks();
+    this.group.traverse(object=>{
+      if(!(object instanceof THREE.Mesh)||Array.isArray(object.material)||
+        object.material.name!=='granite-photogrammetry')return;
+      object.geometry=projectedTempleUV(object.geometry,1.25);
+    });
   }
 
   private buildBase() {
@@ -29,17 +38,17 @@ export class Ground {
   }
 
   private buildPaving() {
-    // In the game, continue the courtyard's photographed stone from its
-    // northern edge instead of laying a second procedural sheet beneath it.
-    // The old 4.5 m overlap was coplanar and caused depth flicker.
-    const width=this.gameMap?44:64;
-    const depth=this.gameMap?40.5:64;
+    // In the game, begin exactly outside the temple enclosure. The enclosure
+    // owns its full interior paving, so the two photographed-stone sheets meet
+    // at the gate without a coplanar overlap or a strip of forest material.
+    const width=this.gameMap?FRONT_GATE_FORECOURT.x1-FRONT_GATE_FORECOURT.x0:64;
+    const depth=this.gameMap?FRONT_GATE_FORECOURT.z1-FRONT_GATE_FORECOURT.z0:64;
     const mat=this.gameMap?courtyardPavingExtensionMaterial(width,depth):
       flagstoneMaterial(3.6,true,0,0);
     const paving = new THREE.Mesh(new THREE.PlaneGeometry(width,depth), mat);
     paving.rotation.x = -Math.PI / 2;
     paving.position.set(0, this.gameMap ? 0.025 : 0.015,
-      this.gameMap ? 14.25 : 8);
+      this.gameMap ? (FRONT_GATE_FORECOURT.z0+FRONT_GATE_FORECOURT.z1)/2-40 : 8);
     paving.receiveShadow = true;
     paving.name = 'flagstone-path';
     this.group.add(paving);

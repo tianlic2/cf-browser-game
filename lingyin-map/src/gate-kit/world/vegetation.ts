@@ -24,6 +24,12 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ATMO } from '../core/atmosphere';
 import { clamp, fbm2, lerp, noise2, Rng, smoothstep } from '../core/math';
 import { canvasTexture, procMaterial } from '../core/materials';
+import { box, merge, projectedTempleUV } from '../../world/geom';
+import { plasterMaterial as gatePlasterMaterial, timberMaterial as gateTimberMaterial } from './materials';
+import { graniteMaterial } from './textures';
+import { photographedBarkMaterial } from '../../world/materials';
+import { bakeSurfaceFinish } from '../../world/surface_finish';
+import { runtimeTexture } from '../../world/runtime_textures';
 
 const ATLAS_SIZE = 1024;
 const CELLS = 4;
@@ -1220,7 +1226,7 @@ export class Vegetation {
 
   constructor(options: { gamePerimeter?: boolean } = {}) {
     this.group.name = 'vegetation';
-    this.atlas = paintAtlas();
+    this.atlas = runtimeTexture('gate-atlas') ?? paintAtlas();
 
     this.leafMat = procMaterial({
       name: 'lingyin-leaf-card',
@@ -1228,6 +1234,7 @@ export class Vegetation {
         color: 0xffffff,
         map: this.atlas,
         alphaTest: 0.32,
+        alphaToCoverage:true,
         side: THREE.DoubleSide,
         roughness: 0.84,
         metalness: 0,
@@ -1256,7 +1263,7 @@ export class Vegetation {
       `,
     });
 
-    this.barkMat = procMaterial({
+    this.barkMat = photographedBarkMaterial() ?? procMaterial({
       name: 'lingyin-bark',
       params: { color: 0xffffff, roughness: 0.94, metalness: 0 },
       color: /* glsl */ `
@@ -1329,7 +1336,7 @@ export class Vegetation {
     if (options.gamePerimeter) {
       // The FPS uses ACES at 1.18 exposure; the standalone gate's custom
       // grading is darker. Compensate only the imported foliage palette.
-      this.leafMat.color.setRGB(.52, .62, .50);
+      this.leafMat.color.setRGB(.60, .75, .52);
       this.bambooMat.color.setRGB(.64, .72, .57);
       // The FPS already has its own distant forest. Import the updated gate's
       // nearby tree, bamboo, shrub and ground layers without duplicating it.
@@ -1337,9 +1344,9 @@ export class Vegetation {
       this.addBamboo();
       this.addShrubs();
       this.addUnderstory();
-      this.addGroundDetails();
+      this.addGroundDetails(true);
       this.addCanopyCeiling();
-      this.addBoundaryGrove();
+      this.addBoundaryWall();
       this.flushCards();
     } else this.populate();
   }
@@ -1381,9 +1388,10 @@ export class Vegetation {
 
   private nearFramingTrunk(x: number, z: number, pad: number): boolean {
     return (
-      Math.hypot(x + 8.5, z - 7) < pad ||
-      Math.hypot(x - 9.5, z - 5.5) < pad ||
-      Math.hypot(x + 11, z + 4) < pad
+      Math.hypot(x + 8.5, z - 8.7) < pad ||
+      Math.hypot(x - 9.5, z - 8.7) < pad ||
+      Math.hypot(x + 12.8, z + 0.5) < pad ||
+      Math.hypot(x - 12.6, z + 1.7) < pad
     );
   }
 
@@ -1471,39 +1479,39 @@ export class Vegetation {
       {
         seed: 'lingyin-veg-tree-left',
         side: 'left',
-        base: [-8.5, 7],
+        base: [-8.5, 8.7],
         height: 12.8,
         radius: 0.8,
-        crown: [-2.2, 9.6, 4.0],
+        crown: [-2.2, 9.6, 5.7],
         crownRadius: 4.8,
-        reach: [-0.6, 10.4, 1.8],
-        frame: [-4.2, 5.9, 7.7],
+        reach: [-0.6, 10.4, 3.5],
+        frame: [-4.2, 5.9, 9.4],
         branches: 6,
         lean: [1.1, -0.5],
       },
       {
         seed: 'lingyin-veg-tree-right',
         side: 'right',
-        base: [9.5, 5.5],
+        base: [9.5, 8.7],
         height: 12.2,
         radius: 0.72,
-        crown: [2.8, 9.1, 3.0],
+        crown: [2.8, 9.1, 6.2],
         crownRadius: 4.5,
-        reach: [0.8, 9.9, 1.0],
-        frame: [4.3, 5.8, 7.8],
+        reach: [0.8, 9.9, 4.2],
+        frame: [4.3, 5.8, 11.0],
         branches: 6,
         lean: [-1.2, -0.3],
       },
       {
         seed: 'lingyin-veg-tree-back',
         side: 'back',
-        base: [-11, -4],
+        base: [-12.8, -0.5],
         height: 13.6,
         radius: 0.86,
-        crown: [-5.2, 9.2, -3.4],
+        crown: [-7.0, 9.2, 0.1],
         crownRadius: 4.8,
-        reach: [-2.6, 10.6, -1.8],
-        frame: [-8.0, 8.0, 1.5],
+        reach: [-4.4, 10.6, 1.7],
+        frame: [-9.8, 8.0, 5.0],
         branches: 5,
         lean: [0.9, 0.6],
       },
@@ -1512,13 +1520,13 @@ export class Vegetation {
         // what actually fills the upper-right corner of the hero frame.
         seed: 'lingyin-veg-tree-right-back',
         side: 'back',
-        base: [12.6, -5.2],
+        base: [12.6, -1.7],
         height: 12.6,
         radius: 0.8,
-        crown: [7.4, 9.9, -5.4],
+        crown: [7.4, 9.9, -1.9],
         crownRadius: 4.7,
-        reach: [5.0, 10.4, -2.6],
-        frame: [9.6, 8.0, 1.0],
+        reach: [5.0, 10.4, 0.9],
+        frame: [9.6, 8.0, 4.5],
         branches: 5,
         lean: [-0.7, 0.2],
       },
@@ -1666,7 +1674,10 @@ export class Vegetation {
       }
     }
 
-    const trunkMesh = new THREE.Mesh(mergeParts(trunkParts), this.barkMat);
+    let trunkGeometry=mergeParts(trunkParts);
+    if(this.barkMat.name==='bark-photogrammetry')
+      trunkGeometry=bakeSurfaceFinish(projectedTempleUV(trunkGeometry,2.4),'bark');
+    const trunkMesh = new THREE.Mesh(trunkGeometry, this.barkMat);
     trunkMesh.name = 'framing-trunks';
     trunkMesh.castShadow = true;
     trunkMesh.receiveShadow = true;
@@ -2129,7 +2140,10 @@ export class Vegetation {
       });
     }
 
-    const trunkMesh = new THREE.InstancedMesh(buildBackgroundTrunk(), this.barkMat, trunkSlots.length);
+    let trunkGeometry=buildBackgroundTrunk();
+    if(this.barkMat.name==='bark-photogrammetry')
+      trunkGeometry=bakeSurfaceFinish(projectedTempleUV(trunkGeometry,2.4),'bark');
+    const trunkMesh = new THREE.InstancedMesh(trunkGeometry, this.barkMat, trunkSlots.length);
     for (let i = 0; i < trunkSlots.length; i++) {
       trunkMesh.setMatrixAt(i, trunkSlots[i].matrix);
       trunkMesh.setColorAt(i, trunkSlots[i].color);
@@ -2160,57 +2174,73 @@ export class Vegetation {
     }
   }
 
-  /** Dense trees that make the playable forecourt boundary visually explicit. */
-  private addBoundaryGrove() {
-    const rng=new Rng('lingyin-game-boundary-grove');
-    const trees:Array<{x:number;z:number;h:number;r:number}>=[];
-    for(const x of [-22,22])for(let z=7;z<=34;z+=2.45)
-      trees.push({x:x+rng.range(-.28,.28),z:z+rng.range(-.35,.35),
-        h:rng.range(7.4,11.2),r:rng.range(.38,.58)});
-    for(let x=-19.5;x<=19.5;x+=2.45)
-      trees.push({x:x+rng.range(-.35,.35),z:34.5+rng.range(-.25,.28),
-        h:rng.range(7.8,11.8),r:rng.range(.4,.62)});
+  /**
+   * Extend the mountain gate's repaired ochre side-wing language around the
+   * three closed sides of the forecourt.  The temple-facing side remains open.
+   * All repeated bays are merged by material, so the taller wall still costs
+   * only four architectural draw calls.
+   */
+  private addBoundaryWall() {
+    const bases:THREE.BufferGeometry[]=[];
+    const panels:THREE.BufferGeometry[]=[];
+    const roofs:THREE.BufferGeometry[]=[];
+    const timbers:THREE.BufferGeometry[]=[];
+    const segments=[
+      {x0:-22,z0:5.5,x1:-22,z1:34.5},
+      {x0:22,z0:5.5,x1:22,z1:34.5},
+      {x0:-22,z0:34.5,x1:22,z1:34.5},
+    ];
+    // Match the repaired side wing after its .68m runtime placement offset:
+    // stone -.02..1.11, plaster 1.03..3.33, roof ridge at 3.69m.
+    const footingBottom=-.02,footingTop=1.11;
+    const wallBottom=1.03,wallTop=3.33;
+    for(const s of segments) {
+      const dx=s.x1-s.x0,dz=s.z1-s.z0,len=Math.hypot(dx,dz);
+      const cx=(s.x0+s.x1)/2,cz=(s.z0+s.z1)/2,rot=Math.atan2(dx,dz);
+      const nx=Math.cos(rot),nz=-Math.sin(rot);
+      bases.push(box(.86,footingTop-footingBottom,len+.25,cx,
+        (footingBottom+footingTop)/2,cz,rot));
+      panels.push(box(.34,wallTop-wallBottom,len-.08,cx,
+        (wallBottom+wallTop)/2,cz,rot));
 
-    const trunkGeo=buildBackgroundTrunk();
-    const trunks=new THREE.InstancedMesh(trunkGeo,this.barkMat,trees.length);
-    const crownMass:BlobSlot[]=[];
-    for(const [index,t] of trees.entries()) {
-      const yaw=rng.range(0,TAU);
-      trunks.setMatrixAt(index,new THREE.Matrix4().compose(
-        new THREE.Vector3(t.x,0,t.z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(0,yaw,0)),
-        new THREE.Vector3(t.r,t.h,t.r)));
-      trunks.setColorAt(index,new THREE.Color().setRGB(
-        rng.range(.58,.82),rng.range(.55,.76),rng.range(.5,.68)));
-      const crownY=t.h*rng.range(.72,.82);
-      for(let lobe=0;lobe<2;lobe++) {
-        const s=t.h*rng.range(.20,.28);
-        crownMass.push({
-          pos:new THREE.Vector3(t.x+rng.range(-1.2,1.2),crownY+rng.range(-.6,1.1),
-            t.z+rng.range(-1.1,1.1)),
-          quat:randomCardQuat(rng),
-          scale:new THREE.Vector3(s*rng.range(.9,1.25),s*rng.range(.65,.9),s),
-          color:new THREE.Color().setRGB(rng.range(.38,.55),rng.range(.58,.78),rng.range(.3,.48)),
-        });
+      // Continuous bearing beam and paired front/back fascia boards.
+      timbers.push(box(.5,.18,len+.22,cx,wallTop+.015,cz,rot));
+      for(const side of [-1,1])
+        timbers.push(box(.1,.16,len+.48,cx+side*nx*.88,wallTop+.06,
+          cz+side*nz*.88,rot));
+
+      // Two shallow roof pitches meet at one continuous ridge. Build in the
+      // segment's local frame, then rotate the complete piece around Y.
+      for(const side of [-1,1]) {
+        const slab=new THREE.BoxGeometry(.95,.1,len+.5);
+        slab.rotateZ(side*.34);
+        slab.rotateY(rot);
+        slab.translate(cx+nx*side*.38,wallTop+.2,cz+nz*side*.38);
+        roofs.push(slab);
       }
-      for(let card=0;card<7;card++) {
-        const a=rng.range(0,TAU),radius=rng.range(.5,2.3);
-        this.addCanopyCard(rng,new THREE.Vector3(
-          t.x+Math.cos(a)*radius,crownY+rng.range(-1.1,2.0),t.z+Math.sin(a)*radius),
-          rng.range(2.5,4));
+      roofs.push(box(.18,.14,len+.52,cx,wallTop+.36,cz,rot));
+
+      // Dark bay posts repeat the original 6.4m side-wing rhythm without
+      // introducing fake doors that could be mistaken for playable exits.
+      const count=Math.max(2,Math.ceil(len/6.4));
+      for(let i=0;i<=count;i++) {
+        const t=i/count;
+        timbers.push(box(.46,wallTop-wallBottom+.12,.46,
+          s.x0+dx*t,(wallBottom+wallTop)/2,s.z0+dz*t,rot));
       }
     }
-    trunks.instanceMatrix.needsUpdate=true;
-    if(trunks.instanceColor)trunks.instanceColor.needsUpdate=true;
-    trunks.castShadow=true;
-    trunks.receiveShadow=true;
-    trunks.name='forecourt-boundary-trunks';
-    trunks.computeBoundingSphere();
-    this.group.add(trunks);
-    this.addBlobInstances(crownMass,makeBlobGeometry(1),false,'forecourt-boundary-canopy');
+    const add=(geos:THREE.BufferGeometry[],material:THREE.Material,name:string,uvScale:number)=>{
+      const mesh=new THREE.Mesh(projectedTempleUV(merge(geos),uvScale),material);
+      mesh.castShadow=true;mesh.receiveShadow=true;mesh.name=name;this.group.add(mesh);
+    };
+    add(bases,graniteMaterial(.12),'forecourt-boundary-stone-base',1.25);
+    add(panels,gatePlasterMaterial(),'forecourt-boundary-plaster',1.8);
+    add(roofs,new THREE.MeshStandardMaterial({color:new THREE.Color('#2c322d'),
+      roughness:.95,metalness:0}),'forecourt-boundary-roof-cap',.72);
+    add(timbers,gateTimberMaterial(1),'forecourt-boundary-timber-posts',.7);
   }
 
-  private addGroundDetails() {
+  private addGroundDetails(gamePaving=false) {
     const rng = new Rng('lingyin-veg-ground');
 
     // Fallen leaves scattered on the paving edges and under the trees.
@@ -2238,6 +2268,9 @@ export class Vegetation {
       leaves++;
     }
 
+    // Keep flat leaf litter, but do not put bright low-poly moss lumps on
+    // the game's photographed stone court/forecourt. Source study is intact.
+    if(gamePaving)return;
     // Moss clumps at tree bases and along the platform kerb.
     const moss: BlobSlot[] = [];
     for (let i = 0; i < 46; i++) {
@@ -2250,14 +2283,18 @@ export class Vegetation {
         x = 9.5 + rng.range(-1.4, 1.4);
         z = 5.5 + rng.range(-1.4, 1.4);
       } else if (i < 34) {
-        x = -11 + rng.range(-1.6, 1.6);
-        z = -4 + rng.range(-1.6, 1.6);
+        x = -12.8 + rng.range(-1.6, 1.6);
+        z = -0.5 + rng.range(-1.6, 1.6);
       } else {
         const side = rng.chance(0.5) ? -1 : 1;
         x = side * rng.range(8.2, 10.5);
         z = rng.range(-3.4, 3.6);
         if (this.isPlatform(x, z, 0.05)) continue;
       }
+      // In the game this group is placed at world z=40.  Local z<5.7 is
+      // therefore inside the temple enclosure, where raised low-poly moss
+      // blobs look like debris on the photographed flagstones.
+      if (z < 5.7) continue;
       const s = rng.range(0.22, 0.55);
       moss.push({
         pos: new THREE.Vector3(x, 0.02, z),

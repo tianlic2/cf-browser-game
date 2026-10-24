@@ -1,7 +1,12 @@
 import * as THREE from 'three';
 import { box, cyl, merge, projectedTempleUV } from './geom';
 import { WORLD } from './heightfield';
+import { woodMaterial, dougongMaterial } from './materials';
+import { bakeSurfaceFinish } from './surface_finish';
 import type { Temple } from './temple';
+import { MAIN_HALL, MAIN_HALL_SCALE } from '../../../scripts/lingyin_main_hall.js';
+import { distantScan,configureProjectedLOD } from './distant_geometry';
+import { MAIN_INTERIOR_COLUMNS, MAIN_COLUMN_PARTS, MAIN_CENSER, MAIN_CENSER_PROFILE,MAIN_HALL_FIXTURES } from '../../../scripts/lingyin_columns.js';
 
 export type MainHallStudyAssets = {
   coffer: THREE.Texture;
@@ -24,7 +29,10 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   // Preview-only taller eave: the original 5 m interior compressed the
   // columns, windows and three-figure altar into one low horizontal band.
   const ceiling = WORLD.platform.y + 9.72;
-  const roomW = 23.75, roomD = 13.75;
+  // The shell retains metre-sized wall insets. Compensate before the layout
+  // transform so the new floor and soffit still meet its inner perimeter.
+  const roomW = (MAIN_HALL.w-3.25)/MAIN_HALL_SCALE.x;
+  const roomD = (MAIN_HALL.d-3.25)/MAIN_HALL_SCALE.z;
 
   // The facade is part of the hall replacement. The original hall's
   // lower blank wall and unpainted eaves made the correctly modeled roof read
@@ -36,8 +44,10 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     if (roof instanceof THREE.MeshStandardMaterial) {
       roof.map = assets.redRoof;
       roof.normalMap = null;
+      roof.bumpMap = assets.redRoof;
+      roof.bumpScale = .035;
       roof.color.set('#f3dfd4');
-      roof.roughness = .79;
+      roof.roughness = .88;
       roof.needsUpdate = true;
     }
     const upperY = eave + 1.55;
@@ -61,6 +71,7 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
       name: 'hall-exterior-blue-gold-caihua', map: fasciaArt,
       roughness: .78, metalness: .02, side: THREE.DoubleSide,
     });
+    const paintedFaces:THREE.BufferGeometry[]=[];
     for (const [width, height, y, z] of [
       [27.8, .72, eave - .48, 9.58],
       [26.5, .62, eave + 2.85, 8.77],
@@ -69,11 +80,11 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
       add('teal', width + .1, height + .06, .16, 0, y, z - .1);
       add('gilt', width + .12, .035, .17, 0, y - height / 2 - .04, z - .09);
       add('gilt', width + .12, .035, .17, 0, y + height / 2 + .04, z - .09);
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(width, height), painted);
-      face.name = 'hall-exterior-painted-eaves';
-      face.position.set(cx, y, cz + z);
-      group.add(face);
+      const face=new THREE.PlaneGeometry(width,height);
+      face.translate(cx,y,cz+z);paintedFaces.push(face);
     }
+    const paintedEaves=new THREE.Mesh(merge(paintedFaces),painted);
+    paintedEaves.name='hall-exterior-painted-eaves';group.add(paintedEaves);
     for (const x of [-9.2, 9.2]) {
       const medallion = new THREE.Mesh(new THREE.CircleGeometry(1.28, 32),
         new THREE.MeshStandardMaterial({color:'#244448', roughness:.82,
@@ -104,12 +115,10 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     name: 'hall-worn-cinnabar-lacquer', map: assets.redLacquer,
     roughness: .51, metalness: .02,
   });
-  const darkWood = new THREE.MeshStandardMaterial({
-    name: 'hall-carved-dark-wood', color: '#44251d', roughness: .68,
-  });
-  const teal = new THREE.MeshStandardMaterial({
-    name: 'hall-painted-dougong', color: '#2b4b4d', roughness: .72,
-  });
+  const darkWood=woodMaterial(true);
+  darkWood.name='hall-carved-dark-wood';darkWood.color.set('#aa9381');darkWood.roughness=.9;
+  const teal=dougongMaterial();
+  teal.name='hall-painted-dougong';teal.color.set('#8bafa7');teal.roughness=.92;
   const gilt = new THREE.MeshStandardMaterial({
     name: 'hall-aged-gilt', color: '#b98737', metalness: .54,
     roughness: .39, emissive: '#2d1907', emissiveIntensity: .12,
@@ -134,18 +143,19 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   // Polished, irregular gray stone conceals the existing pale floor tiles.
   const floorMat = (temple.materials.stone as THREE.MeshStandardMaterial).clone();
   floorMat.name = 'hall-weathered-stone-floor';
+  // The shared stone shell has baked vertex colours, but this photographed
+  // plane does not. Do not inherit a colour attribute that it cannot supply.
+  floorMat.vertexColors=false;
   floorMat.color.set('#e3dfd6');
-  floorMat.roughness = .72;
+  floorMat.roughness = .9;
   floorMat.map = assets.stoneFloor;
   floorMat.map.wrapS = floorMat.map.wrapT = THREE.RepeatWrapping;
-  floorMat.map.repeat.set(7, 4);
+  floorMat.map.repeat.set(7*MAIN_HALL_SCALE.x,4*MAIN_HALL_SCALE.z);
   floorMat.map.needsUpdate = true;
-  if (floorMat.normalMap) {
-    floorMat.normalMap = floorMat.normalMap.clone();
-    floorMat.normalMap.wrapS = floorMat.normalMap.wrapT = THREE.RepeatWrapping;
-    floorMat.normalMap.repeat.set(8, 5);
-    floorMat.normalMap.needsUpdate = true;
-  }
+  // The previous normal/roughness scans belonged to different stone. Use
+  // this floor's own relief, sharing its albedo rather than cloning a GPU map.
+  floorMat.normalMap=null;floorMat.roughnessMap=null;
+  floorMat.bumpMap=assets.stoneFloor;floorMat.bumpScale=.024;
   const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(roomW - .08, roomD - .08), floorMat);
   floorMesh.name = 'hall-stone-floor';
   floorMesh.rotation.x = -Math.PI / 2;
@@ -197,17 +207,9 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
 
   // Three pairs of massive lacquered columns. Stone shoes and layered
   // bracket arms visibly transfer the roof load to the shafts.
-  const columns = [
-    [-7.7, -4.75], [7.7, -4.75],
-    [-7.7, -2.0], [7.7, -2.0],
-    [-5.5, .5], [5.5, .5],
-  ];
-  for (const [x, z] of columns) {
-    addCyl('bronze', .79, .85, .24, x, floor + .12, z, 32);
-    addCyl('lacquer', .58, .66, ceiling - floor - .7,
-      x, floor + (ceiling - floor) / 2, z, 32);
-    addCyl('gilt', .63, .63, .075, x, floor + .38, z, 32);
-    addCyl('gilt', .66, .62, .12, x, ceiling - .53, z, 32);
+  for (const [x, z] of MAIN_INTERIOR_COLUMNS) {
+    for(const part of MAIN_COLUMN_PARTS)
+      addCyl(part.role,part.rt,part.rb,part.h,x,WORLD.platform.y+part.y,z,part.segments);
     for (let layer = 0; layer < 3; layer++) {
       const y = ceiling - .44 + layer * .16;
       const reach = .85 + layer * .25;
@@ -258,7 +260,8 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   }
 
   // Deep altar backdrop and stepped timber dais at the actual rear wall.
-  add('darkWood', 17.4, 7.65, .22, 0, floor + 3.89, -6.67);
+  for(const part of MAIN_HALL_FIXTURES)
+    add(part.role,part.w,part.h,part.d,part.x,floor+part.y,part.z);
   add('teal', 18.0, .8, .42, 0, ceiling - .65, -6.23);
   for (const x of [-6.9, -2.3, 2.3, 6.9]) {
     add('lacquer', .18, 6.95, .13, x, floor + 4.1, -6.48);
@@ -268,18 +271,9 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     add('teal', 17.1, .24, .2, 0, y, -6.45);
     add('gilt', 17.1, .035, .22, 0, y - .13, -6.45);
   }
-  add('darkWood', 16.2, .38, 3.5, 0, floor + .19, -4.72);
-  add('darkWood', 14.4, .28, 2.8, 0, floor + .48, -4.8);
   for (const x of [-8.75, 8.75]) {
     add('lacquer', .4, 4.8, .36, x, floor + 2.5, -6.35);
     add('gilt', .07, 4.4, .04, x + (x < 0 ? .23 : -.23), floor + 2.52, -6.12);
-  }
-  for (const x of [-4.6, 0, 4.6]) {
-    const mid = x === 0;
-    add('bronze', mid ? 3.85 : 3.0, .24, 2.1,
-      x, floor + .71, -4.85);
-    add('gilt', mid ? 3.7 : 2.88, .07, 2.0,
-      x, floor + .87, -4.85);
   }
 
   // The generated image is an original ornamental texture, not a flattened
@@ -289,6 +283,7 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     name: 'hall-gilt-halos', map: haloTexture, transparent: true,
     depthWrite: false, side: THREE.DoubleSide,
   });
+  const distantBuddha=distantScan(assets.buddhaSideLod);
   for (const x of [-4.6, 0, 4.6]) {
     const mid = x === 0;
     const halo = new THREE.Mesh(
@@ -296,16 +291,22 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     halo.name = 'hall-statue-halo';
     halo.position.set(cx + x, floor + (mid ? 4.05 : 3.56), cz - 6.37);
     group.add(halo);
-    const figure = placeScan(mid ? assets.buddhaScan : assets.buddhaSideLod,
-      gilt, mid ? 1.35 : 1.05,
-      cx + x, floor + .9, cz - 4.82);
+    const figure = new THREE.LOD();
+    figure.position.set(cx + x, floor + .9, cz - 4.82);
+    figure.addLevel(placeScan(mid ? assets.buddhaScan : assets.buddhaSideLod,
+      gilt, mid ? 1.35 : 1.05, 0, 0, 0), 0);
+    if (mid) {
+      // Preserve the scanned silhouette and gilding outside the hall. Dense
+      // facial detail is useful only close to the altar, not across the court.
+      figure.addLevel(placeScan(assets.buddhaSideLod, gilt, 1.35, 0, 0, 0), 20, .12);
+    }
+    figure.addLevel(placeScan(distantBuddha,gilt,mid?1.35:1.05,0,0,0),40,.12);
+    configureProjectedLOD(figure);
     figure.name = mid ? 'hall-central-buddha' : 'hall-flanking-buddha';
     group.add(figure);
   }
 
   // Altar, dense but batched offerings, and a clear red processional route.
-  add('darkWood', 13.5, .2, 1.25, 0, floor + 1.2, -2.06);
-  add('darkWood', 13.3, .48, .22, 0, floor + .84, -1.44);
   add('gilt', 13.4, .035, .06, 0, floor + 1.07, -1.3);
   add('gilt', 13.4, .035, .06, 0, floor + .59, -1.3);
   const carvedArt = assets.carvedAltar.clone();
@@ -315,10 +316,10 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   const altarFront = new THREE.Mesh(new THREE.PlaneGeometry(13.26, .7),
     new THREE.MeshStandardMaterial({name:'hall-carved-altar-front', map: carvedArt,
       roughness:.68, metalness:.04, side:THREE.DoubleSide}));
+  altarFront.name='hall-carved-altar-front';
   altarFront.position.set(cx, floor + .84, cz - 1.31);
   group.add(altarFront);
   for (const x of [-6.3, -3.2, 0, 3.2, 6.3]) {
-    add('lacquer', .34, 1.0, .37, x, floor + .57, -2.55);
     add('gilt', .08, .45, .08, x, floor + .87, -1.15);
   }
   const flames: THREE.BufferGeometry[] = [];
@@ -343,9 +344,10 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   carpet.rotation.x = -Math.PI / 2;
   carpet.position.set(cx, floor + .055, cz + 1.38);
   group.add(carpet);
-  const incense = makeIncenseBurner(bronze, gilt, cx, floor, cz - .55);
-  incense.scale.setScalar(.66);
-  incense.position.set(cx * .34, floor * .34, (cz - .55) * .34);
+  const incense = makeIncenseBurner(bronze, gilt, cx+MAIN_CENSER.x, floor, cz+MAIN_CENSER.z);
+  incense.scale.setScalar(MAIN_CENSER.scale);
+  incense.position.set((cx+MAIN_CENSER.x)*(1-MAIN_CENSER.scale),floor*(1-MAIN_CENSER.scale),
+    (cz+MAIN_CENSER.z)*(1-MAIN_CENSER.scale));
   group.add(incense);
 
   // Keep additional illumination cheap: these small lights do not cast
@@ -363,12 +365,34 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     if (!pooled[role].length) continue;
     const original = merge(pooled[role]);
     const geo = role === 'lacquer' ? projectedTempleUV(original, 2.4)
-      : role === 'darkWood' ? projectedTempleUV(original, .9) : original;
+      : role === 'darkWood' || role==='teal' ? projectedTempleUV(original, .9) : original;
+    if(role==='lacquer'||role==='darkWood'||role==='teal') {
+      bakeSurfaceFinish(geo,'wood',floor);materials[role].vertexColors=true;
+    }
     const mesh = new THREE.Mesh(geo, materials[role]);
     mesh.name = 'hall-structure-' + role;
     mesh.receiveShadow = true;
     group.add(mesh);
   }
+  // Keep the authored interior coherent with the larger shell. The outer
+  // editable group stays identity so stale editor snapshots cannot undo this.
+  const layout=new THREE.Group();layout.name='main-hall-expanded-layout';
+  const {x:sx,z:sz}=MAIN_HALL_SCALE;
+  const preserve=(object:THREE.Object3D,anchor:THREE.Vector3)=>{
+    const pivot=new THREE.Group();pivot.name=`${object.name}-proportion-pivot`;
+    pivot.position.copy(anchor);pivot.scale.set(1/sx,1,1/sz);
+    object.position.sub(anchor);group.remove(object);pivot.add(object);group.add(pivot);
+  };
+  for(const object of [...group.children]) {
+    if(object instanceof THREE.LOD||object.name==='hall-statue-halo'||object.name==='hall-exterior-round-window'||
+      (object instanceof THREE.Mesh&&object.geometry.type==='RingGeometry'))
+      preserve(object,object.position.clone());
+  }
+  preserve(incense,new THREE.Vector3(cx+MAIN_CENSER.x,floor,cz+MAIN_CENSER.z));
+  for(const object of [...group.children]){group.remove(object);layout.add(object);}
+  layout.scale.set(sx,1,sz);layout.position.set(cx*(1-sx),0,cz*(1-sz));
+  group.add(layout);
+  group.userData.expandedLayout={width:MAIN_HALL.w,depth:MAIN_HALL.d,centerZ:cz,statueProportionsPreserved:true};
   return group;
 }
 
@@ -458,12 +482,7 @@ function makeIncenseBurner(bronze: THREE.Material, gold: THREE.Material,
   x: number, floor: number, z: number) {
   const group = new THREE.Group();
   group.name = 'hall-tripod-incense-burner';
-  const profile = [
-    new THREE.Vector2(.43, 0), new THREE.Vector2(.72, .14),
-    new THREE.Vector2(.92, .48), new THREE.Vector2(1.02, .78),
-    new THREE.Vector2(.92, .86), new THREE.Vector2(.74, .77),
-    new THREE.Vector2(.66, .52), new THREE.Vector2(.3, .47),
-  ];
+  const profile = MAIN_CENSER_PROFILE.map(([radius,y])=>new THREE.Vector2(radius,y));
   const bowl = new THREE.Mesh(new THREE.LatheGeometry(profile, 28), bronze);
   bowl.position.set(x, floor + .4, z);
   group.add(bowl);

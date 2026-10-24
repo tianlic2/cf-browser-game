@@ -1,19 +1,21 @@
 // Index the actual rendered mountain paving triangles in X/Z. The authored
 // centreline is useful for grading and rails, but its constant-width distance
 // test does not cover mitered corners or the terrain-adjusted vertex heights.
-export function triangulatedWalkSurface(geometry, verticalOffset = 0, cellSize = 2) {
+export function triangulatedWalkSurface(geometry, verticalOffset = 0, cellSize = 2, upwardOnly = false) {
   const positions = geometry.getAttribute('position');
   const indices = geometry.getIndex();
   const cells = new Map();
   const triangles = [];
   const key = (ix, iz) => `${ix},${iz}`;
-  for (let i = 0; i < indices.count; i += 3) {
-    const ia = indices.getX(i), ib = indices.getX(i + 1), ic = indices.getX(i + 2);
+  for (let i = 0; i < (indices?.count ?? positions.count); i += 3) {
+    const ia = indices ? indices.getX(i) : i;
+    const ib = indices ? indices.getX(i + 1) : i + 1;
+    const ic = indices ? indices.getX(i + 2) : i + 2;
     const ax = positions.getX(ia), az = positions.getZ(ia), ay = positions.getY(ia) + verticalOffset;
     const bx = positions.getX(ib), bz = positions.getZ(ib), by = positions.getY(ib) + verticalOffset;
     const cx = positions.getX(ic), cz = positions.getZ(ic), cy = positions.getY(ic) + verticalOffset;
     const area = (bz - cz) * (ax - cx) + (cx - bx) * (az - cz);
-    if (Math.abs(area) < 1e-8) continue;
+    if (Math.abs(area) < 1e-8 || (upwardOnly && area >= 0)) continue;
     const triangle = {ax, az, ay, bx, bz, by, cx, cz, cy, invArea: 1 / area};
     const id = triangles.push(triangle) - 1;
     const x0 = Math.floor(Math.min(ax, bx, cx) / cellSize);

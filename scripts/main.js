@@ -14,13 +14,15 @@ import { HUMAN_RUN_SPEED, weaponMoveScale } from "./move_speed.js?v=bio-arena-1"
 import { ImpactVfx } from "./impact_vfx.js?v=tracer-muzzle-1";
 import { loadFoxSoldier } from "./fox_soldier.js?v=fox-published-1";
 import { VIEWMODEL_BOB_DISTANCE, viewmodelBobProfile } from "./viewmodel_bob.js";
-import { GroundNavigation } from "./navigation.js?v=goldsrc-visible-wall-1";
+import { GroundNavigation } from "./navigation.js?v=lingyin-game-update-1";
 import { intersectsBrush, brushSupport, brushSupportIsExposed, brushBottom, canMoveThroughBrushes,
   brushHorizontalEscape, jumpVelocityForHeightScale, shouldSnapDownToSupport,
-  preserveCameraAcrossGroundStep, decayGroundViewOffset } from "./brush_collision.js?v=goldsrc-visible-wall-1";
+  preserveCameraAcrossGroundStep, decayGroundViewOffset } from "./brush_collision.js?v=lingyin-jump-1";
 import { sweepActorAxis, overlapsActors, findActorSpawn } from "./actor_collision.js";
 import { chooseDistributedSpawnIndex } from './distributed_spawns.js';
 import { ViewArms, ARM_ANCHORS, ELBOWS, MAGWELL } from "./viewarms.js?v=orient5";
+import { prepareMapMaterials, prepareMapTextures } from "./map_material_warmup.js?v=2";
+import { RenderBudget } from './render_budget.js?v=1';
 import {
   SKINS, STOCK, DEFAULT_SKIN, DEFAULT_MUZZLE,
   skinsFor, findSkin, isSkinned, skinLabel, paintSkin, modelOf, allModelSkins,
@@ -310,7 +312,8 @@ const SCOPE_FOV2 = 7.5; // 二级镜
 
 // ---------- 渲染器 / 场景 / 相机 ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderBudget=new RenderBudget();
+renderer.setPixelRatio(renderBudget.setViewport(window.innerWidth,window.innerHeight,window.devicePixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -475,7 +478,7 @@ async function ensureMapLoaded(id, onProgress = () => {}) {
     survivor: () => import('./survivor_map.js?v=map-filter-quality-1').then(m => m.buildSurvivorMap),
     blacktown: () => import('./blacktown_map.js?v=map-filter-quality-1').then(m => m.buildBlacktownMap),
     bio: () => import('./bio_map.js?v=map-filter-quality-1').then(m => m.buildBioMap),
-    lingyin: () => import('./lingyin_map.js?v=36').then(m => m.buildLingyinMap),
+    lingyin: () => import('./lingyin_map.js?v=static-solids-1').then(m => m.buildLingyinMap),
   };
   if (!loaders[id]) throw new Error('未知地图：' + id);
   onProgress(.06);
@@ -506,7 +509,7 @@ async function ensureMapLoaded(id, onProgress = () => {}) {
   }
 }
 async function prepareSelectedMap(id, report = () => {}) {
-  await ensureMapLoaded(id, report);
+  await ensureMapLoaded(id, id === 'lingyin' ? value => report(value * .94) : report);
   if (id === 'bio' && bioMode && !bioMode.loaded) {
     await bioMode.load();
     bioSkin.map = bioMode.skinTexture;
@@ -530,6 +533,14 @@ async function prepareSelectedMap(id, report = () => {}) {
     }
   });
   renderer.shadowMap.needsUpdate = true;
+  const selected = mapCatalog[id];
+  if (id === 'lingyin') {
+    // Prepare Lingyin surface variants behind the loading page rather than
+    // on the first turn. Only this map, not cached maps, is compiled.
+    await prepareMapMaterials(selected, renderer, camera, scene);
+    await prepareMapTextures(selected,renderer);
+  }
+  if (id === 'lingyin') report(1);
 }
 async function startSelectedMap() {
   if (mapLoading || state === 'playing') return;
@@ -3620,12 +3631,21 @@ function activateMap(id) {
   renderer.shadowMap.needsUpdate = true;
   scene.background = mapData.background;
   scene.fog = mapData.fog || null;
-  worldHemi.intensity = id === 'lingyin' ? 1.22 : 1.25;
+  const renderLook = mapData.renderLook;
+  worldHemi.color.setHex(renderLook?.hemiSky ?? 0xe0dcd2);
+  worldHemi.groundColor.setHex(renderLook?.hemiGround ?? 0x726a5a);
+  worldHemi.intensity = renderLook?.hemiIntensity ?? (id === 'lingyin' ? 1.22 : 1.25);
   sun.position.set(id === 'lingyin' ? 100 : -34, id === 'lingyin' ? 39 : 78,
     id === 'lingyin' ? 52 : 30);
   sun.color.setHex(id === 'lingyin' ? 0xffd8ae : 0xfff4e0);
   sun.intensity = id === "lingyin" ? 2.45 : id === "prison" ? 2.15 : id === 'bio' ? 1.5 : id === 'survivor' ? 1.8 : id === 'blacktown' ? 1.9 : 3.05;
   renderer.toneMappingExposure = id === "lingyin" ? 1.1 : id === "prison" ? 1.12 : id === 'bio' ? 1.4 : id === 'survivor' ? 1.08 : id === 'blacktown' ? 1.1 : 1.18;
+  if (renderLook) {
+    sun.position.fromArray(renderLook.sunPosition);
+    sun.color.setHex(renderLook.sunColor);
+    sun.intensity=renderLook.sunIntensity;
+    renderer.toneMappingExposure=renderLook.exposure;
+  }
   scene.environment = Object.hasOwn(mapData, 'environment') ? mapData.environment :
     (mapData.background?.isTexture ? mapData.background : mapCatalog.transport?.environment);
   colliders = mapData.colliders;
@@ -3643,7 +3663,7 @@ function activateMap(id) {
   if (mapData.source && !mapData.navigation)
     mapData.navigation = new GroundNavigation(colliders, bounds,
       { maxHeight: mapData.navigationMaxHeight, step: mapData.navigationStep,
-        climb: mapData.stepHeight, surfaceAt: mapData.surfaceAt,
+        climb: mapData.stepHeight, linkClimb:mapData.navigationLinkClimb, surfaceAt: mapData.surfaceAt,
         surfacesAt: mapData.surfacesAt, blockerAt: mapData.blockerAt });
   enemyManager.navigation = mapData.navigation || null;
   if (minimap) minimap.setLayout(mapData.topdown, bounds);
@@ -5961,8 +5981,10 @@ function updateTimerHud() {
 // 舱室屋顶）才需要写 y0 —— 那种东西的下方是要能走人的。少了这一条，一座 4.9m 高的
 // 天桥会把桥下的整条通道堵死（碰撞模型里没有「从下面穿过去」这个概念）。
 // 判据用「底面高过玩家头顶」而不是「高过脚底」：只要 y0 ≥ 脚底 + 身高，人就从底下过。
-function blockedBy(x, z, feetY, stepHeight = mapData?.stepHeight ?? STEP_H) {
+function blockedBy(x, z, feetY, stepHeight = mapData?.stepHeight ?? STEP_H,
+    ignoreRisingSteps = false) {
   for (const c of colliders) {
+    if(ignoreRisingSteps && c.stepSurface)continue;
     if (intersectsBrush(c,x,z,feetY,PLAYER_RADIUS,stepHeight,PLAYER_TOP,colliders,
       mapData?.surfaceAt,mapData?.blockerAt)) return c;
   }
@@ -5975,9 +5997,14 @@ function blockedBy(x, z, feetY, stepHeight = mapData?.stepHeight ?? STEP_H) {
 function depenetratePlayerFromBrushes(stepHeight = 0) {
   let moved = false;
   for (let i = 0; i < 6; i++) {
-    const c = blockedBy(player.pos.x, player.pos.z, player.pos.y, stepHeight);
+    // A grounded capsule may already overlap the next tread by its legal step
+    // allowance. Let an upward jump clear that old toe contact vertically;
+    // horizontal movement still uses zero-step collision and cannot enter it.
+    const c = blockedBy(player.pos.x, player.pos.z, player.pos.y, stepHeight,
+      player.vel.y>0);
     if (!c) return moved;
-    const push = brushHorizontalEscape(c, player.pos.x, player.pos.z, PLAYER_RADIUS);
+    const push = brushHorizontalEscape(c, player.pos.x, player.pos.z, PLAYER_RADIUS,
+      player.pos.y, stepHeight, PLAYER_TOP);
     if (!push || (!push.x && !push.z)) return moved;
     player.pos.x += push.x;
     player.pos.z += push.z;
@@ -6034,9 +6061,8 @@ function placePlayerAtClearSpawn() {
 // 脚底落在哪 = 当前位置能站上去的最高台面，经典图也包括甲板以下的地道。
 // 普通表面不外扩；只有导入的窄踏面使用 0.12m 脚掌接触区，避免被下一阶卡住。
 // 只取够得着的（c.h <= 脚底 + 一个台阶）—— 2.43m 高的集装箱顶不该在当前帧接住你。
-function supportAt(x, z, feetY) {
+function supportAt(x, z, feetY, stepHeight = mapData?.stepHeight ?? STEP_H) {
   let top = mapData?.floorY ?? 0;
-  const stepHeight = mapData?.stepHeight ?? STEP_H;
   if (mapData?.surfaceAt) {
     const visibleSurface=mapData.surfaceAt(x,z,feetY+stepHeight);
     return Number.isFinite(visibleSurface)?visibleSurface:top;
@@ -6139,9 +6165,18 @@ function movePlayer(dt) {
   // 垂直 / 落地。groundY 每帧按脚下实际台面重算，不再是常量 0 ——
   // 地图特意叠了双层集装箱当架枪高点，以前永远站不上去（groundY 写死 0）。
   const prevY = player.pos.y;
-  player.groundY = supportAt(player.pos.x, player.pos.z, player.pos.y);
+  // In flight, a tread ABOVE the previous feet is a side contact, not a floor.
+  // Grounded walking keeps its normal step allowance. This opt-in also avoids
+  // cancelling a rising jump by snapping onto a higher stair behind the feet.
+  const supportStep = mapData?.strictAirborneSupport && !player.onGround ?
+    .001 : (mapData?.stepHeight ?? STEP_H);
+  player.groundY = supportAt(player.pos.x, player.pos.z, player.pos.y, supportStep);
   const vyBefore = player.vel.y;
   player.pos.y += player.vel.y * dt;
+  if(vyBefore<=0&&mapData?.landingSurfaceAt){
+    const tread=mapData.landingSurfaceAt(player.pos.x,player.pos.z,prevY,PLAYER_RADIUS);
+    if(Number.isFinite(tread))player.groundY=Math.max(player.groundY,tread);
+  }
   // Landing on a live character is vertical contact, not permission to fall
   // through their torso from an upper deck.
   if (vyBefore <= 0) {
@@ -6170,7 +6205,7 @@ function movePlayer(dt) {
       depenetratePlayerFromBrushes(0)) {
     player.pos.x = Math.max(-bounds.hw, Math.min(bounds.hw, player.pos.x));
     player.pos.z = Math.max(-bounds.hl, Math.min(bounds.hl, player.pos.z));
-    player.groundY = supportAt(player.pos.x, player.pos.z, player.pos.y);
+    player.groundY = supportAt(player.pos.x, player.pos.z, player.pos.y, supportStep);
   }
   // 走下斜坡/楼梯时做经典 step-down：上一帧在地面、落差又不超过爬阶高度，
   // 就直接贴到新台面，而不是先变成空中状态、再靠重力落下一小截。
@@ -6947,6 +6982,9 @@ function loop(now) {
       renderer.render(vmScene, vmCamera);
       vmFrames++;
     }
+    const nextRatio=renderBudget.sample(rawDt*1000,now,
+      state==='playing'&&!mapLoading&&!lobbyCover&&!document.hidden&&!matchPaused);
+    if(nextRatio!==null)renderer.setPixelRatio(nextRatio);
   } catch (err) {
     renderer.setRenderTarget(null);
     noteLoopError(err, "渲染");
@@ -7007,7 +7045,7 @@ async function init() {
   const plus = document.getElementById("enemyPlus");
   if (minus) minus.onclick = () => { sfx.ui("click"); setEnemyTarget(enemyTarget - 1); buildMenuMatch(); };
   if (plus) plus.onclick = () => { sfx.ui("click"); setEnemyTarget(enemyTarget + 1); buildMenuMatch(); };
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(renderBudget.setViewport(window.innerWidth,window.innerHeight,window.devicePixelRatio));
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -7894,6 +7932,7 @@ async function init() {
           programs: r.programs ? r.programs.length : 0,
           shadowAuto: renderer.shadowMap.autoUpdate,
           anisoSet: anisoCountTotal, // 改写了多少张贴图的 anisotropy（应是正数，0 = 空跑）
+          resolutionBudget:renderBudget.stats(),
         };
         statsBaseFrame = frameCount;
         r.reset();
@@ -8178,6 +8217,7 @@ async function init() {
   }
 }
 window.addEventListener("resize", () => {
+  renderer.setPixelRatio(renderBudget.setViewport(window.innerWidth,window.innerHeight,window.devicePixelRatio));
   renderer.setSize(window.innerWidth, window.innerHeight);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();

@@ -161,3 +161,9 @@
 - [Poly Haven — Pine Tree 01](https://polyhaven.com/a/pine_tree_01)：只使用 1K 松针枝条的漫反射和透明遮罩，裁进现有树叶图集；未导入原站数百万面的树模型。
 - [Poly Haven — Tree Small 02](https://polyhaven.com/a/tree_small_02)：只使用 1K 阔叶的漫反射和透明遮罩，并从同一照片派生秋叶色，裁进现有树叶图集；未导入原站高面数树模型。
 - 三项源素材均为 Poly Haven 的 CC0 资源。运行时松针、阔叶和秋叶仍共用原本的一张 1024² 树叶纹理；树木位置、碰撞、导航和游戏规则未变。
+
+## 灵隐寺轻量运行贴图（2026-10-24）
+
+- `assets/lingyin/runtime-textures/` 中的林地漫反射/法线 WebP 派生自上节同一套 Forest Ground 01 CC0 源图，保留 1K 分辨率。`forest-atlas.webp` 是现有原创叶片绘图与上节松针/阔叶照片裁片的离线合成；`gate-atlas.webp`、`gate-paving.webp` 是项目原有 Canvas 叶片与石板绘图的离线烘焙。由 `tools/build_lingyin_runtime_textures.mjs` 生成，源图仍保留。
+- 山门与院墙木构、灰泥，以及山门瓦面复用前述建筑材质照片；竹林的竹节/纤维贴图由项目生成，无新增外部素材。
+- 第二轮参考图美化中的栈道木板图由既有 Fine Grained Wood 照片与项目绘制的板缝/钉头合成；细波法线和白色瀑流均由项目生成的小纹理。叶片图集改用清洁枝叶裁片并剔除原 UV 灰色岛屿，未引入额外高面数植被模型。

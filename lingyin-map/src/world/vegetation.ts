@@ -3,14 +3,15 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ATMO } from '../core/atmosphere';
 import { lerp, Rng } from '../core/math';
 import { procMaterial } from '../core/materials';
-import { rockMaterial } from './materials';
-import { heightAt, insidePlatform, pathDistance, slopeAt, waterEdge } from './heightfield';
+import { photographedBarkMaterial, rockMaterial } from './materials';
+import { projectedTempleUV } from './geom';
+import { bakeSurfaceFinish } from './surface_finish';
+import { heightAt, insidePlatform, insideTerrainFootprint, pathDistance, slopeAt, waterEdge } from './heightfield';
 import { RIDGE_RAIL_OFFSET, ridgeTrailDistance } from '../../../scripts/lingyin_hillside_route.js';
 import { SHOTS } from '../data/shots';
+import { bambooCulmMaterial, runtimeTexture } from './runtime_textures';
 
 const ATLAS = 1024;
-const WORLD_CENTER_X = -2;
-const WORLD_CENTER_Z = -8;
 const CELL = 256;
 
 type FoliagePhoto = { diffuse: HTMLImageElement; alpha: HTMLImageElement };
@@ -18,6 +19,7 @@ let foliagePhotos: { pine: FoliagePhoto; broad: FoliagePhoto } | null = null;
 let foliagePhotosLoading: Promise<void> | null = null;
 
 export function preloadFoliagePhotos() {
+  if (runtimeTexture('forest-atlas')) return Promise.resolve();
   if (foliagePhotosLoading) return foliagePhotosLoading;
   const load = (name: string) => new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
@@ -46,6 +48,8 @@ function cellRect(kind: LeafKind) {
 }
 
 function paintAtlas() {
+  const baked = runtimeTexture('forest-atlas');
+  if (baked) return baked;
   const c = document.createElement('canvas');
   c.width = ATLAS;
   c.height = ATLAS;
@@ -245,12 +249,19 @@ function paintAtlas() {
       alphaCanvas.width = alphaCanvas.height = CELL;
       const dc = diffuseCanvas.getContext('2d')!;
       const ac = alphaCanvas.getContext('2d')!;
-      dc.drawImage(photo.diffuse, sx, sy, sw, sh, 0, 0, CELL, CELL);
-      ac.drawImage(photo.alpha, sx, sy, sw, sh, 0, 0, CELL, CELL);
+      dc.drawImage(photo.diffuse, sx, sy, sw, sh, 12, 12, CELL - 24, CELL - 24);
+      ac.drawImage(photo.alpha, sx, sy, sw, sh, 12, 12, CELL - 24, CELL - 24);
       const diffuse = dc.getImageData(0, 0, CELL, CELL);
       const alpha = ac.getImageData(0, 0, CELL, CELL);
       for (let p = 0; p < diffuse.data.length; p += 4) {
-        diffuse.data[p + 3] = alpha.data[p];
+        // UV islands around the photographs also contain opaque grey mesh
+        // fragments. Keep only the leaf/needle colours inside the clean crop.
+        const r=diffuse.data[p],g=diffuse.data[p+1],b=diffuse.data[p+2];
+        const leaf = kind === 'pine' ? g > r * .94 && g > b * 1.12
+          : g > r * 1.025 && g > b * 1.18;
+        diffuse.data[p + 3] = leaf && alpha.data[p] > 230 ? 255 : 0;
+        diffuse.data[p] = Math.min(255,r*1.06);
+        diffuse.data[p+1] = Math.min(255,g*1.16);
         if (autumn) {
           diffuse.data[p] = Math.min(255, diffuse.data[p] * 1.5 + 52);
           diffuse.data[p + 1] = Math.min(255, diffuse.data[p + 1] * .68 + 12);
@@ -264,9 +275,9 @@ function paintAtlas() {
     };
     // Stay inside the black alpha-backed cutout areas of the source atlases;
     // adjacent white islands are UV data for the original 3D tree meshes.
-    copyCutout('pine', foliagePhotos.pine, 700, 340, 280, 185);
-    copyCutout('broad', foliagePhotos.broad, 20, 35, 440, 545);
-    copyCutout('maple', foliagePhotos.broad, 20, 35, 440, 545, true);
+    copyCutout('pine', foliagePhotos.pine, 30, 42, 197, 360);
+    copyCutout('broad', foliagePhotos.broad, 560, 35, 290, 620);
+    copyCutout('maple', foliagePhotos.broad, 560, 35, 290, 620, true);
   }
 
   const tex = new THREE.CanvasTexture(c);
@@ -278,12 +289,13 @@ function paintAtlas() {
 
 function cellUVs(kind: LeafKind, w: number, h: number) {
   const { col, row } = cellRect(kind);
-  const u0 = col / 4;
-  const v0 = 1 - (row + 1) / 4;
+  const inset = 3 / ATLAS;
+  const u0 = col / 4 + inset;
+  const v0 = 1 - (row + 1) / 4 + inset;
   const g = new THREE.PlaneGeometry(w, h);
   const uv = g.getAttribute('uv');
   for (let i = 0; i < uv.count; i++) {
-    uv.setXY(i, u0 + uv.getX(i) * 0.25, v0 + uv.getY(i) * 0.25);
+    uv.setXY(i, u0 + uv.getX(i) * (.25-inset*2), v0 + uv.getY(i) * (.25-inset*2));
   }
   return g;
 }
@@ -410,12 +422,8 @@ function bambooGeometry(rng: Rng) {
     g.rotateY(a);
     g.translate(Math.cos(a) * 0.35, h / 2, Math.sin(a) * 0.35);
     parts.push(g);
-    for (let k = 1; k < 8; k++) {
-      const y = (k / 8) * h;
-      const node = new THREE.CylinderGeometry(0.055, 0.055, 0.035, 6);
-      node.translate(Math.cos(a) * 0.35 - Math.sin(a) * 0, y, Math.sin(a) * 0.35);
-      parts.push(node);
-    }
+    // Rings and fibres are in the shared culm map, rather than seven extra
+    // cylinders per stem. The four bent stem silhouettes remain geometric.
   }
   const trunk = mergeGeometries(parts, false)!;
   const cards: THREE.BufferGeometry[] = [];
@@ -441,7 +449,7 @@ export class Vegetation {
   constructor() {
     this.group.name = 'vegetation';
     this.atlas = paintAtlas();
-    this.bark = procMaterial({
+    this.bark = photographedBarkMaterial() ?? procMaterial({
       name: 'bark',
       params: { color: 0xffffff, roughness: 0.95 },
       color: /* glsl */ `
@@ -457,6 +465,7 @@ export class Vegetation {
         color: 0xffffff,
         map: this.atlas,
         alphaTest: 0.42,
+        alphaToCoverage:true,
         side: THREE.DoubleSide,
         roughness: 0.92,
         metalness: 0,
@@ -494,6 +503,7 @@ export class Vegetation {
   }
 
   private canPlace(x: number, z: number, pad: number) {
+    if (!insideTerrainFootprint(x,z,pad)) return false;
     if (insidePlatform(x, z, pad)) return false;
     // keep the showcase sightlines clear: no trunk or canopy inside the first 55% of a shot's view corridor
     for (const shot of SHOTS) {
@@ -548,19 +558,9 @@ export class Vegetation {
       const x = rng.range(-250, 250);
       const z = rng.range(-250, 220);
       if (!this.canPlace(x, z, 3.5)) continue;
-      if (this.cragDistance(x, z) < 22) continue;
       if (slopeAt(x, z) < 0.08 && rng.chance(0.7)) continue;
       pineSlots.push({ v: rng.int(0, pineVars.length - 1), m: mat4(x, heightAt(x, z) - 0.25, z, rng.range(0.75, 1.25), rng.range(0, 6.28)), c: new THREE.Color().setHSL(0.29 + rng.range(-0.02, 0.02), 0.10, 0.76 + rng.range(-0.08, 0.06)) });
     }
-    // three pines perched on the crag top
-    for (const [x, z, s] of [
-      [78, -20, 0.9],
-      [93, -34, 0.8],
-      [69, -34, 0.7],
-    ] as const) {
-      pineSlots.push({ v: 0, m: mat4(x, heightAt(x, z) + 17 * s, z, s, rng.range(0, 6.28)), c: new THREE.Color('#3d5135') });
-    }
-
     // broadleaf around the temple and lower slopes
     tries = 0;
     while (broadSlots.length < 120 && tries < 7000) {
@@ -568,7 +568,6 @@ export class Vegetation {
       const x = rng.range(-210, 210);
       const z = rng.range(-190, 200);
       if (!this.canPlace(x, z, 3)) continue;
-      if (this.cragDistance(x, z) < 20) continue;
       if (Math.abs(x + 2) > 90 && rng.chance(0.5)) continue;
       broadSlots.push({ v: rng.int(0, broadVars.length - 1), m: mat4(x, heightAt(x, z) - 0.2, z, rng.range(0.8, 1.3), rng.range(0, 6.28)), c: new THREE.Color().setHSL(0.27 + rng.range(-0.03, 0.03), 0.10, 0.74 + rng.range(-0.08, 0.06)) });
     }
@@ -595,7 +594,7 @@ export class Vegetation {
     this.buildSpecies(pineVars, pineSlots);
     this.buildSpecies(broadVars, broadSlots);
     this.buildSpecies(mapleVars, mapleSlots);
-    this.buildSpecies([bambooVar], bambooSlots.map((s) => ({ v: 0, ...s })));
+    this.buildSpecies([bambooVar], bambooSlots.map((s) => ({ v: 0, ...s })), bambooCulmMaterial());
 
     // grass and ferns
     const grassSlots: THREE.Matrix4[] = [];
@@ -619,7 +618,6 @@ export class Vegetation {
     }
     this.addInstanced(this.grassGeo, this.leafMat, grassSlots, false, 'grass');
     this.addInstanced(this.fernGeo, this.leafMat, fernSlots, false, 'fern');
-    this.farForest(rng);
     this.shrubsAndRocks(rng);
   }
 
@@ -659,64 +657,39 @@ export class Vegetation {
       g.computeVertexNormals();
       rockGeos.push(g);
     }
-    const rockGeo = mergeGeometries(rockGeos, false)!;
+    let rockGeo = mergeGeometries(rockGeos, false)!;
+    const rockMat=rockMaterial();
+    if(rockMat.name==='limestone-photogrammetry')
+      rockGeo=bakeSurfaceFinish(projectedTempleUV(rockGeo,1.6),'stone');
     const rockMats: THREE.Matrix4[] = [];
     tries = 0;
     while (rockMats.length < 85 && tries < 3000) {
       tries++;
       const x = rng.range(-150, 140);
       const z = rng.range(-110, 130);
-      if (insidePlatform(x, z, 2)) continue;
+      if (!insideTerrainFootprint(x,z,2.2)) continue;
       const s = rng.range(0.5, 2.2);
+      // The merged boulder is wider than its instance origin.  Reserve space
+      // from the temple by its actual scale so a large exterior rock cannot
+      // protrude across the wall and appear on the courtyard paving.
+      if (insidePlatform(x, z, 2.2 * s + 1)) continue;
       if (pathDistance(x, z) < 3 ||
         ridgeTrailDistance(x,z)<RIDGE_RAIL_OFFSET+1.8*s+.35) continue;
       rockMats.push(new THREE.Matrix4().compose(new THREE.Vector3(x, heightAt(x, z) - 0.35 * s, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rng.range(-0.2, 0.2), rng.range(0, 6.28), rng.range(-0.2, 0.2))), new THREE.Vector3(s, s * rng.range(0.6, 1.1), s)));
     }
-    this.addInstanced(rockGeo, rockMaterial(), rockMats, true, 'boulder');
+    this.addInstanced(rockGeo, rockMat, rockMats, true, 'boulder');
   }
 
-  /** cheap conifer silhouettes that give the far hills a forest mass without cards */
-  private farForest(rng: Rng) {
-    const geos: THREE.BufferGeometry[] = [];
-    geos.push(new THREE.CylinderGeometry(0.18, 0.3, 3.0, 5).translate(0, 1.5, 0));
-    for (const [y, r, h] of [[3.2, 2.4, 3.6], [5.2, 1.8, 3.0], [7.0, 1.2, 2.4]] as const) {
-      geos.push(new THREE.ConeGeometry(r, h, 7).translate(0, y, 0));
-    }
-    const geo = mergeGeometries(geos, false)!;
-    const mat = new THREE.MeshStandardMaterial({ color: 0x1c2c1b, roughness: 1, flatShading: true });
-    const slots: THREE.Matrix4[] = [];
-    let tries = 0;
-    while (slots.length < 520 && tries < 12000) {
-      tries++;
-      const x = rng.range(-300, 300);
-      const z = rng.range(-300, 260);
-      const d = Math.hypot(x - WORLD_CENTER_X, z - WORLD_CENTER_Z);
-      if (d < 185) continue;
-      if (insidePlatform(x, z, 6)) continue;
-      if (waterEdge(x, z) < 3) continue;
-      if (slopeAt(x, z) > 0.85) continue;
-      const s = rng.range(0.9, 1.9);
-      const m = new THREE.Matrix4().compose(
-        new THREE.Vector3(x, heightAt(x, z) - 0.3, z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rng.range(0, 6.28), 0)),
-        new THREE.Vector3(s, s, s),
-      );
-      slots.push(m);
-    }
-    this.addInstanced(geo, mat, slots, false, 'far-forest');
-  }
-
-  private cragDistance(x: number, z: number) {
-    return Math.hypot(x - 80, z + 20);
-  }
-
-  private buildSpecies(variants: TreeVariant[], slots: { v: number; m: THREE.Matrix4; c: THREE.Color }[]) {
+  private buildSpecies(variants: TreeVariant[], slots: { v: number; m: THREE.Matrix4; c: THREE.Color }[], trunkMaterial = this.bark) {
     for (let vi = 0; vi < variants.length; vi++) {
       const list = slots.filter((s) => s.v === vi);
       if (!list.length) continue;
       const mats = list.map((s) => s.m);
       const colors = list.map((s) => s.c);
-      this.addInstanced(variants[vi].trunk, this.bark, mats, true, 'trunk');
+      let trunk=variants[vi].trunk;
+      if(trunkMaterial.name==='bark-photogrammetry')
+        trunk=bakeSurfaceFinish(projectedTempleUV(trunk,2.4),'bark');
+      this.addInstanced(trunk, trunkMaterial, mats, true, 'trunk');
       this.addInstanced(variants[vi].cards, this.leafMat, mats, true, 'cards', colors);
     }
   }
@@ -727,7 +700,7 @@ export class Vegetation {
     // sphere: Three.js then draws every tree even when most are behind us.
     // Keep shared geometry/materials, but give each spatial tile its own bounds.
     const tileSize = name === 'far-forest' ? 200
-      : name === 'grass' || name === 'fern' ? 96 : 128;
+      : name === 'grass' || name === 'fern' ? 48 : 96;
     const maxDistance = name === 'grass' ? 75 : name === 'fern' ? 100
       : name === 'shrub' ? 125 : name === 'far-forest' ? 380 : 185;
     const bins = new Map<string, number[]>();

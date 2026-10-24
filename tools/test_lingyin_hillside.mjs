@@ -7,8 +7,8 @@ import { FRONT_GATE_FORECOURT, RIDGE_LOOKOUTS, RIDGE_SURFACE_LIFT, RIDGE_TRAILS,
 
 const map=lingyinLayout();
 assert.ok(map.bounds.hw>=80&&map.bounds.hl>=68,'mountain lies inside playable bounds');
-assert.ok(Math.abs(map.surfaceAt(-2,45.7,1.5)-.64)<.01,
-  'the gate staircase leads through the terrace opening');
+assert.ok(Math.abs(map.surfaceAt(-2,45.7,1.5)-1.05)<.01,
+  'the relocated gate floor crosses the former terrace opening');
 assert.equal(RIDGE_TRAILS.length,1,'only the west-gate mountain route remains');
 assert.equal(RIDGE_TRAILS[0],WEST_RIDGE_TRAIL);
 assert.equal(RIDGE_LOOKOUTS.length,1,'the west ascent ends at one pavilion terrace');
@@ -16,7 +16,7 @@ const pavilion=RIDGE_LOOKOUTS[0];
 assert.equal(pavilion.entrySide,'east','the final trail enters the pavilion from its east edge');
 assert.deepEqual(WEST_RIDGE_TRAIL.at(-1).slice(0,2),[pavilion.entryX,pavilion.entryZ],
   'the visible stone road terminates exactly at the pavilion opening');
-for(const [x,z] of [[-2,47.2],[-2,58],[10,67]])
+for(const [x,z] of [[-2,58],[10,67]])
   assert.ok(map.surfacesAt(x,z,.52).includes(FRONT_GATE_FORECOURT.y),
     'the former front climb is a level supported forecourt');
 assert.equal(map.surfaceAt(-20,58,.52),FRONT_GATE_FORECOURT.y,
@@ -30,7 +30,9 @@ for(const [x,z] of [[-23.2,58],[19.2,58],[-2,73.7]]) {
 for(let x=-23.2;x<18.8;x+=.25)
   assert.ok(canMoveThroughBrushes(map.colliders,x,58,x+.25,58,
     0,.45,.52,1.78,map.surfaceAt),`outer paving is laterally open at x=${x}`);
-for(let z=48;z<73.5;z+=.25)
+// The relocated gate occupies z≈40..54; the open forecourt begins beyond its
+// front stair and stays level to the outer boundary.
+for(let z=54.5;z<73.5;z+=.25)
   assert.ok(canMoveThroughBrushes(map.colliders,-2,z,-2,z+.25,
     map.surfaceAt(-2,z,.52),.45,.52,1.78,map.surfaceAt),
   `outer paving is continuously walkable without jumping at z=${z}`);
@@ -39,7 +41,7 @@ for(const [x,z] of [[-23.8,58],[19.8,58],[-2,74.3]])
     0,.45,.52,1.78,map.surfaceAt),false,
   'the dense tree line has a continuous movement boundary');
 assert.ok(Math.abs(map.surfaceAt(-35.5,7,1.5)-(.95+RIDGE_SURFACE_LIFT))<.02,
-  'the west hall bridge continues through its perimeter gate');
+  'the old west gate retains grounded scenery behind its closing fence');
 
 // The continuous mitered strip must have exactly one cross-section at each
 // authored bend; only the west-gate route contributes paving and rails.
@@ -88,14 +90,17 @@ assert.equal(blocked(pavilion.x+Math.cos(columnAngle)*2.9,
   pavilion.z-.45+Math.sin(columnAngle)*2.9),true,
   'a visible pavilion column has matching collision');
 
-// The west hall is a real passage rather than a decorative door: a full
-// capsule must cross its front bay, rear bay, stone link and western gate.
-for(let x=-18.2;x>-38;x-=.25) {
+// The hall and stone link remain grounded, but the old west perimeter gate is
+// intentionally closed by a matching stone fence.
+for(let x=-18.2;x>-34.45;x-=.25) {
   const y=map.surfaceAt(x,7,2),next=map.surfaceAt(x-.25,7,2);
   assert.ok(Number.isFinite(y)&&Number.isFinite(next),`west passage support at ${x}`);
   assert.ok(canMoveThroughBrushes(map.colliders,x,7,x-.25,7,y,.45,.52,1.78,map.surfaceAt),
-    `west temple doorway and mountain approach stay open at ${x}`);
+    `west hall remains usable up to the closing fence at ${x}`);
 }
+assert.equal(canMoveThroughBrushes(map.colliders,-35.2,7,-35.8,7,
+  .98,.45,.52,1.78,map.surfaceAt),false,
+  'the old west-gate fence separates the temple from the retired ascent');
 
 for(const route of RIDGE_TRAILS) {
   for(let i=0;i<route.length-1;i++) {
@@ -123,12 +128,12 @@ for(const spawn of [map.spawns.player[0],map.spawns.enemy[0]]) {
   nav.update({x:spawn[0],y:spawn[1],z:spawn[2]});
   for(const p of RIDGE_LOOKOUTS) {
     const node=nav.nearest(p.x,p.z,p.y);
-    assert.ok(node>=0&&nav.distance[node]>0,
-      `both teams can reach lookout ${p.x},${p.z}`);
+    assert.ok(node>=0&&nav.distance[node]<0,
+      `the retired lookout ${p.x},${p.z} stays outside the closed combat network`);
   }
   const westEntry=WEST_RIDGE_TRAIL[3];
   const westNode=nav.nearest(westEntry[0],westEntry[1],westEntry[2]);
-  assert.ok(westNode>=0&&nav.distance[westNode]>0,
-    'the west ascent joins the same reachable mountain network');
+  assert.ok(westNode>=0&&nav.distance[westNode]<0,
+    'the retired west ascent is no longer reachable through the sealed gate');
 }
 console.log(`Lingyin hillside: ${RIDGE_TRAILS.length} routes, ${RIDGE_LOOKOUTS.length} lookouts, ${nav.points.length} nav nodes`);

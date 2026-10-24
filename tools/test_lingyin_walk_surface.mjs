@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {join,resolve} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {dirname,join,resolve} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {intersectsBrush,canMoveThroughBrushes} from '../scripts/brush_collision.js';
 import {GroundNavigation} from '../scripts/navigation.js';
 import {lingyinLayout,railBeamBrush} from '../scripts/lingyin_layout.js';
@@ -12,16 +12,23 @@ import {RIDGE_TRAILS,RIDGE_LOOKOUTS,RIDGE_HALF_WIDTH,RIDGE_SURFACE_LIFT,ridgeRou
 import {triangulatedWalkSurface} from '../scripts/lingyin_walk_surface.js';
 
 // Use the real terrain height calculation that the visual road builds from.
-const root=resolve(import.meta.dirname,'../lingyin-map');
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'../lingyin-map');
 const scratch=mkdtempSync(join(tmpdir(),'lingyin-road-test-'));
 let heightAt,terrainRenderedHeightAt;
 try {
   const file=join(scratch,'heightfield.mjs');
-  execFileSync(join(root,'node_modules/.bin/rolldown'),[
+  execFileSync(process.execPath,[join(root,'node_modules/rolldown/bin/cli.mjs'),
     'src/world/heightfield.ts','-o',file,'-f','esm','-p','node',
   ],{cwd:root,stdio:'pipe'});
   ({heightAt,terrainRenderedHeightAt}=await import(pathToFileURL(file).href));
 } finally {rmSync(scratch,{recursive:true,force:true});}
+
+for(let x=-34;x<=26;x+=4)for(let z=-46;z<=44;z+=5)
+  assert.ok(terrainRenderedHeightAt(x,z)<=3.115,
+    `visible terrain stays buried beneath temple paving at ${x},${z}`);
+for(let x=-22;x<=18;x+=4)for(let z=48;z<=72;z+=4)
+  assert.ok(terrainRenderedHeightAt(x,z)<=3.115,
+    `visible terrain stays buried beneath forecourt paving at ${x},${z}`);
 
 const positions=[],indices=[];
 for(const route of RIDGE_TRAILS) {
@@ -96,8 +103,8 @@ for(const spawn of [map.spawns.player[0],map.spawns.enemy[0]]) {
   }
   for(const lookout of RIDGE_LOOKOUTS) {
     const node=nav.nearest(lookout.x,lookout.z,lookout.y);
-    assert.ok(node>=0&&nav.distance[node]>0,
-      `spawn ${spawn} cannot reach ${lookout.x},${lookout.z}: node ${node}, distance ${nav.distance[node]}`);
+    assert.ok(node>=0&&nav.distance[node]<0,
+      `the sealed west gate must isolate ${lookout.x},${lookout.z} from spawn ${spawn}`);
   }
 }
 

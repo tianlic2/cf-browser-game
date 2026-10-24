@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Rng } from '../core/math';
 import { box, merge, tint } from './geom';
-import { coverTileMaterial, roofFieldMaterial, timberMaterial } from './materials';
+import { coverTileMaterial, timberMaterial } from './materials';
+import { roofMaterial } from '../../world/materials';
 
 export const ROOF = {
   w: 13.8,
@@ -47,10 +48,14 @@ function roofNormal(kind: Kind, u: number, v: number) {
 export class Roof {
   readonly group = new THREE.Group();
   private tileMat = coverTileMaterial();
-  private fieldMat = roofFieldMaterial();
+  private fieldMat = roofMaterial();
 
   constructor() {
     this.group.name = 'roof';
+    // The shared photographed tile map carries courses, wear and relief.
+    // Individual round tiles are retained only along the exposed eave lip.
+    this.fieldMat.name = 'gate-photographic-roof';
+    this.fieldMat.color.set('#a3a99b');
     this.buildField();
     this.buildCoverTiles();
     this.buildRidges();
@@ -60,8 +65,8 @@ export class Roof {
 
   private buildField() {
     const geos: THREE.BufferGeometry[] = [];
-    const nu = 56;
-    const nv = 26;
+    const nu = 28;
+    const nv = 14;
     for (const kind of ['front', 'back', 'left', 'right'] as Kind[]) {
       const pos: number[] = [];
       const uvs: number[] = [];
@@ -178,7 +183,7 @@ export class Roof {
     const nFront = 52;
     for (let i = 0; i <= nFront; i++) {
       const u = i / nFront;
-      for (let c = 0; c < courses; c++) {
+      for (let c = 0; c < 1; c++) {
         const v0 = c / courses;
         const v1 = Math.min(1, (c + 1) / courses + 0.018);
         addTile('front', u, v0, v1);
@@ -188,7 +193,7 @@ export class Roof {
     const nSide = 20;
     for (let i = 0; i <= nSide; i++) {
       const u = i / nSide;
-      for (let c = 0; c < courses; c++) {
+      for (let c = 0; c < 1; c++) {
         const v0 = c / courses;
         const v1 = Math.min(1, (c + 1) / courses + 0.018);
         addTile('left', u, v0, v1);

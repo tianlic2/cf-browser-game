@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { canvasTexture, procMaterial } from '../core/materials';
 import { Rng } from '../core/math';
+import { runtimeTexture } from '../../world/runtime_textures';
+import { sharedStoneMaterial } from '../../world/materials';
 
 type Maps = { map: THREE.Texture; height: THREE.Texture };
 const flagstoneCache = new Map<string, Maps>();
@@ -184,7 +186,7 @@ export function flagstoneMaps(seed = 'flagstone', cells = 8): Maps {
 /** Weathered flagstone paving for the approach and the gate platform. */
 export function flagstoneMaterial(tile = 6.0, pathMask = true,
   originX = 0, originZ = 0) {
-  const { map } = flagstoneMaps('lingyin-flagstone', 8);
+  const map = runtimeTexture('gate-paving') ?? flagstoneMaps('lingyin-flagstone', 8).map;
   const tileStr = tile.toFixed(2);
   return procMaterial({
     name: pathMask ? 'flagstone-path' : 'flagstone-platform',
@@ -254,6 +256,8 @@ export function flagstoneMaterial(tile = 6.0, pathMask = true,
 
 /** Small granite block texture for column bases and kerbs. */
 export function graniteMaterial(warm = 0) {
+  const photographed=sharedStoneMaterial(warm);
+  if(photographed){photographed.name='granite-photogrammetry';return photographed;}
   const rng = new Rng('granite-tex');
   const size = 512;
   const map = canvasTexture(size, size, (ctx) => {

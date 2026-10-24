@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { procMaterial } from '../core/materials';
+import { sharedArchitecturalMaterial } from '../../world/materials';
 
 const WHITE = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
 WHITE.needsUpdate = true;
 
 /** Dark, weathered camphor-wood columns and beams with traces of old red lacquer. */
 export function timberMaterial(dark = 0) {
+  const photographed = sharedArchitecturalMaterial('wood', dark > .5);
+  if (photographed) return photographed;
   return procMaterial({
     name: dark ? 'timber-dark' : 'timber',
     params: { color: 0xffffff, roughness: 0.92, metalness: 0.0, envMapIntensity: 0.05 },
@@ -84,6 +87,8 @@ export function stoneMaterial(warm = 0) {
 
 /** Ochre plaster of the side walls, with rain streaks and exposed patches. */
 export function plasterMaterial() {
+  const photographed = sharedArchitecturalMaterial('plaster');
+  if (photographed) return photographed;
   return procMaterial({
     name: 'plaster',
     params: { color: 0xffffff, roughness: 0.9 },

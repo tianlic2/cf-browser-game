@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <base href="../" />
+  <link rel="icon" href="data:," />
+  <title>灵隐寺 · 地图编辑预览</title>
+  <link rel="stylesheet" href="./preview/lingyin-editor.css?v=2" />
+  <script type="importmap">
+  {"imports":{
+    "three":"./vendor/three/build/three.module.js",
+    "three/addons/":"./vendor/three/examples/jsm/"
+  }}
+  </script>
+</head>
+<body>
+  <canvas id="viewport" aria-label="灵隐寺地图实时编辑预览"></canvas>
+
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">CROSSFIRE · LINGYIN MAP LAB</div>
+      <h1>灵隐寺地图编辑预览</h1>
+    </div>
+    <div class="top-actions">
+      <button type="button" data-view="reference">参考全景</button>
+      <button type="button" data-view="courtyard">庭院</button>
+      <button type="button" data-view="top">俯视</button>
+      <button type="button" data-view="gate">山门</button>
+      <button type="button" data-view="wing">侧翼</button>
+      <button type="button" data-view="boundary">外圈</button>
+      <button type="button" data-view="trail">山路</button>
+      <button type="button" data-view="boardwalk">栈道方案</button>
+      <button type="button" data-view="pavilion">亭台近景</button>
+      <button type="button" data-view="river">水景方案</button>
+      <button type="button" data-view="westInterior">西殿内景</button>
+      <button type="button" data-view="eastInterior">东殿内景</button>
+      <button type="button" data-view="mainInterior">大殿内景</button>
+      <button type="button" data-view="mainHall">大殿外观</button>
+      <button type="button" id="toggle-panel">隐藏面板</button>
+    </div>
+  </header>
+
+  <aside class="panel" id="editor-panel">
+    <section class="intro">
+      <strong>可编辑场景分组</strong>
+      <p>西侧栈道已接入实战；此处的布局调整仅为预览草稿，不会自动改变正式碰撞。点击条目可单独调整或隐藏。</p>
+    </section>
+
+    <section class="object-list" id="object-list" aria-label="场景分组"></section>
+
+    <section class="tools">
+      <div class="segmented" aria-label="变换模式">
+        <button type="button" data-mode="translate" aria-pressed="true">移动 W</button>
+        <button type="button" data-mode="rotate">旋转 E</button>
+        <button type="button" data-mode="scale">缩放 R</button>
+      </div>
+      <div class="row switches">
+        <label><input id="local-space" type="checkbox" /> 本地坐标</label>
+        <label><input id="collision-toggle" type="checkbox" /> 碰撞线框</label>
+        <label><input id="grid-toggle" type="checkbox" checked /> 地面网格</label>
+      </div>
+    </section>
+
+    <section class="transform-panel" id="transform-panel">
+      <div class="selection-title">
+        <span>当前选择</span>
+        <strong id="selected-name">未选择</strong>
+      </div>
+      <div class="triplet">
+        <span>位置</span>
+        <label>X<input data-field="px" type="number" step="0.05" /></label>
+        <label>Y<input data-field="py" type="number" step="0.05" /></label>
+        <label>Z<input data-field="pz" type="number" step="0.05" /></label>
+      </div>
+      <div class="triplet">
+        <span>角度</span>
+        <label>X<input data-field="rx" type="number" step="1" /></label>
+        <label>Y<input data-field="ry" type="number" step="1" /></label>
+        <label>Z<input data-field="rz" type="number" step="1" /></label>
+      </div>
+      <div class="triplet">
+        <span>缩放</span>
+        <label>X<input data-field="sx" type="number" step="0.01" min="0.01" /></label>
+        <label>Y<input data-field="sy" type="number" step="0.01" min="0.01" /></label>
+        <label>Z<input data-field="sz" type="number" step="0.01" min="0.01" /></label>
+      </div>
+      <div class="row compact">
+        <button type="button" id="focus-selection">聚焦所选</button>
+        <button type="button" id="reset-selection">重置所选</button>
+        <button type="button" id="hide-selection">隐藏所选</button>
+      </div>
+    </section>
+
+    <section class="save-panel">
+      <div class="row">
+        <button type="button" id="undo">撤销</button>
+        <button type="button" id="redo">重做</button>
+        <button type="button" id="reset-all">全部重置</button>
+      </div>
+      <div class="row primary-row">
+        <button type="button" id="save-local" class="primary">保存调整</button>
+        <button type="button" id="copy-config">复制参数</button>
+      </div>
+      <p class="save-note">调整会自动保存在本机与当前网址中，不会直接覆盖正式地图。</p>
+    </section>
+  </aside>
+
+  <div class="selection-chip" id="selection-chip">未选择对象</div>
+  <div class="loading" id="loading">
+    <div class="loader-ring"></div>
+    <strong>正在加载灵隐寺真实场景</strong>
+    <span id="loading-progress">0%</span>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script type="module" src="./preview/lingyin-editor.js?v=44"></script>
+</body>
+</html>

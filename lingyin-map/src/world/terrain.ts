@@ -8,9 +8,9 @@ export class Terrain {
   readonly mesh: THREE.Mesh;
   readonly material: THREE.MeshStandardMaterial;
 
-  constructor(quality = 1) {
+  constructor(quality = 1, omitCovered = false) {
     const size = WORLD.size;
-    const seg = Math.round(260 * clamp(quality, 0.5, 1));
+    const seg = Math.round(WORLD.terrainSegments * clamp(quality, 0.5, 1));
     const half = size / 2;
     const cols = seg + 1;
     const positions = new Float32Array(cols * cols * 3);
@@ -49,6 +49,14 @@ export class Terrain {
     }
     for (let j = 0; j < seg; j++) {
       for (let i = 0; i < seg; i++) {
+        // Only cells entirely beneath the separate photographic paving sheets
+        // may disappear. Keep a generous edge margin and all real slopes.
+        const x=-half+i*step,z=-half+j*step;
+        const P=WORLD.platform;
+        const buried=omitCovered&&(
+          (x>P.x0+1.2&&x+step<P.x1-1.2&&z>P.z0+1.7&&z+step<P.z1-1.05)||
+          (x>-23.5&&x+step<19.5&&z>46&&z+step<74));
+        if(buried)continue;
         const a = j * cols + i;
         const b = a + 1;
         const c = a + cols;

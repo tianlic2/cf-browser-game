@@ -10,6 +10,10 @@ export class GroundNavigation {
     this.groundBrushes=colliders.filter(c=>c.walkable!==false&&c.h<=(options.maxHeight??.5));
     this.floorY=Math.min(0,...this.groundBrushes.map(c=>c.h));
     this.step=options.step??.55;this.climb=options.climb??.5;this.hw=bounds.hw;this.hl=bounds.hl;
+    // A coarse grid can skip several shallow treads. Candidate endpoints may
+    // differ more than one legal step, but clear() must still validate every
+    // .16m substep with the original actor climb limit.
+    this.linkClimb=options.linkClimb??this.climb;
     this.xs=Array.from({length:Math.ceil(bounds.hw*2/this.step)+1},(_,i)=>i*this.step-this.hw);
     // The authored spawn stairs have a central divider. Their 1.05m lanes
     // need a centre sample; a uniform .55m grid can miss the entire clearance.
@@ -55,7 +59,7 @@ export class GroundNavigation {
       for(let dz=-1;dz<=1;dz++)for(let dx=-1;dx<=1;dx++) {
         if(!dx&&!dz||x+dx<0||x+dx>=this.w||z+dz<0||z+dz>=this.h)continue;
         for(const j of this.cells[cell+dz*this.w+dx]) {
-          if(Math.abs(this.points[j].y-p.y)>this.climb)continue;
+          if(Math.abs(this.points[j].y-p.y)>this.linkClimb)continue;
           if(dx&&dz&&(!this.cells[cell+dx].some(k=>Math.abs(this.points[k].y-p.y)<=this.climb)||
              !this.cells[cell+dz*this.w].some(k=>Math.abs(this.points[k].y-p.y)<=this.climb)))continue;
           if(this.clear(p,this.points[j]))this.edges[i].push(j);

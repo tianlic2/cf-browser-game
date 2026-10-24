@@ -41,7 +41,7 @@ export function preloadTerrainTextures() {
   if (scannedGroundLoading) return scannedGroundLoading;
   const loader = new THREE.TextureLoader();
   const load = async (name: string, srgb: boolean) => {
-    const url = new URL(`./assets/lingyin/temple-textures/${name}.jpg`, document.baseURI).href + '?v=1';
+    const url = new URL(`./assets/lingyin/runtime-textures/${name}.webp`, document.baseURI).href + '?v=1';
     const texture = await loader.loadAsync(url);
     texture.name = `lingyin-${name}`;
     texture.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;

@@ -1,8 +1,7 @@
 import * as THREE from 'three';
-import { archWallGeometry, box, cyl, merge, projectedTempleUV, textTexture } from './geom';
-import { Rng } from '../core/math';
+import { archWallGeometry, box, cyl, merge, projectedTempleUV } from './geom';
 import { heightAt, WATER_POND, WORLD } from './heightfield';
-import { bronzeMaterial, courtyardPavingMaterial, goldMaterial, roofMaterial, stoneMaterial, woodMaterial } from './materials';
+import { bronzeMaterial, courtyardPavingExtensionMaterial, goldMaterial, roofMaterial, stoneMaterial, woodMaterial } from './materials';
 
 export class Details {
   readonly group = new THREE.Group();
@@ -18,53 +17,24 @@ export class Details {
     this.stele();
     this.pavilion();
     this.streamRailing();
-    this.prayerRibbons();
     this.paving();
-    this.puddles();
   }
 
   private paving() {
-    // The old court was hundreds of raised rectangular boxes with dark gaps.
-    // A continuous scan keeps the walking surface level while the albedo and
-    // normal maps carry the real joints, chips and age of the stone.
-    const court = new THREE.Mesh(new THREE.PlaneGeometry(48, 32), courtyardPavingMaterial());
+    // Cover every exposed part of the terrain inside the temple enclosure
+    // with the exact same photographed stone used by the gate forecourt.  The
+    // small inset keeps the sheet behind the visible wall footings, while the
+    // physical floor, navigation and terrain heights remain unchanged.
+    const P=WORLD.platform;
+    const x0=P.x0+.7,x1=P.x1-.7,z0=P.z0+1.2,z1=P.z1-.55;
+    const width=x1-x0,depth=z1-z0;
+    const court = new THREE.Mesh(new THREE.PlaneGeometry(width, depth),
+      courtyardPavingExtensionMaterial(width,depth));
     court.rotation.x = -Math.PI / 2;
-    court.position.set(-2, WORLD.platform.y + .025, 18);
+    court.position.set((x0+x1)/2, WORLD.platform.y + .025, (z0+z1)/2);
     court.receiveShadow = true;
-    court.name = 'courtyard-photographic-paving';
+    court.name = 'temple-enclosure-photographic-paving';
     this.group.add(court);
-  }
-
-  private puddles() {
-    const mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color('#333d33'),
-      roughness: 0.32,
-      metalness: 0.0,
-      transparent: true,
-      opacity: 0.17,
-      depthWrite: false,
-    });
-    const rng = new Rng('puddles');
-    for (let i = 0; i < 6; i++) {
-      const x = rng.range(-18, 16);
-      const z = rng.range(8, 30);
-      const r = rng.range(0.9, 2.25);
-      const shape = new THREE.Shape();
-      for(let j=0;j<=28;j++){
-        const a=j/28*Math.PI*2;
-        const irregular=.82+.13*Math.sin(a*3+i*2.4)+.08*Math.sin(a*7-i*.8);
-        const px=Math.cos(a)*r*irregular;
-        const py=Math.sin(a)*r*irregular;
-        if(j===0)shape.moveTo(px,py);else shape.lineTo(px,py);
-      }
-      const g = new THREE.ShapeGeometry(shape);
-      g.rotateX(-Math.PI / 2);
-      g.scale(1, 1, rng.range(0.45, 0.8));
-      g.translate(x, WORLD.platform.y + 0.035, z);
-      const m = new THREE.Mesh(g, mat);
-      m.receiveShadow = true;
-      this.group.add(m);
-    }
   }
 
   private bridge() {
@@ -214,17 +184,16 @@ export class Details {
 
   private stele() {
     const stone = stoneMaterial(0.7);
-    const tex = textTexture('冷泉', 256, 512, { bg: '#5b5b52', fg: '#2c2a24' });
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9 });
+    const slabStone = stoneMaterial(0.42);
     const g = new THREE.Group();
     const base = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.4, 1.1), stone);
     base.position.y = 0.2;
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.4, 0.22), mat);
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.4, 0.22), slabStone);
     slab.position.set(0, 1.55, 0);
     const cap = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.16, 0.4), stone);
     cap.position.y = 2.82;
     g.add(base, slab, cap);
-    g.position.set(7.5, heightAt(7.5, 33), 33);
+    g.position.set(7.5, heightAt(7.5, 36.5), 36.5);
     g.rotation.y = -0.35;
     g.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -293,40 +262,4 @@ export class Details {
     this.group.add(m);
   }
 
-  private prayerRibbons() {
-    const wood = woodMaterial(true);
-    const group = new THREE.Group();
-    const x0 = -12;
-    const z0 = 37;
-    const x1 = 8;
-    const z1 = 37;
-    for (const [x, z] of [
-      [x0, z0],
-      [x1, z1],
-    ] as const) {
-      const y = heightAt(x, z);
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 4.2, 6), wood);
-      post.position.set(x, y + 2.1, z);
-      group.add(post);
-    }
-    const lineY = heightAt(0, 37) + 3.9;
-    const ribbonMat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#8e2f24'), roughness: 0.8, side: THREE.DoubleSide });
-    for (let i = 0; i < 22; i++) {
-      const t = (i + 0.5) / 22;
-      const x = x0 + (x1 - x0) * t;
-      const w = 0.16 + Math.random() * 0.05;
-      const h = 0.55 + Math.random() * 0.35;
-      const r = new THREE.Mesh(new THREE.PlaneGeometry(w, h), ribbonMat);
-      r.position.set(x, lineY - 0.5 - h / 2, 37 + (Math.random() - 0.5) * 0.05);
-      r.rotation.y = (Math.random() - 0.5) * 0.3;
-      group.add(r);
-    }
-    const line = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, x1 - x0, 4).rotateZ(Math.PI / 2), wood);
-    line.position.set((x0 + x1) / 2, lineY, 37);
-    group.add(line);
-    group.traverse((o) => {
-      if (o instanceof THREE.Mesh && o.geometry.type === 'PlaneGeometry') o.castShadow = true;
-    });
-    this.group.add(group);
-  }
 }

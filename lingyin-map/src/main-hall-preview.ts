@@ -6,6 +6,7 @@ import { Temple } from './world/temple';
 import { buddhaMaterial, preloadMainHallTextures } from './world/materials';
 import { createMainHallInterior } from './world/main_hall_study';
 import { WORLD } from './world/heightfield';
+import { mainHallPoint } from '../../scripts/lingyin_main_hall.js';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#hall-canvas')!;
 const status = document.querySelector<HTMLElement>('#hall-status')!;
@@ -49,11 +50,11 @@ const sun = new THREE.DirectionalLight(0xffebc8, 2.15);
 sun.position.set(-12, 28, 19);
 scene.add(sun);
 const courtyard = new THREE.Mesh(
-  new THREE.PlaneGeometry(58, 90),
+  new THREE.PlaneGeometry(68, 110),
   new THREE.MeshStandardMaterial({ color: '#77756d', roughness: .96 }),
 );
 courtyard.rotation.x = -Math.PI / 2;
-courtyard.position.set(-2, WORLD.platform.y - .18, 12);
+courtyard.position.set(-2, WORLD.platform.y - .18, 0);
 courtyard.name = 'preview-only-ground';
 scene.add(courtyard);
 
@@ -67,10 +68,12 @@ const presets: Record<string, { position: [number, number, number]; target: [num
 function setView(name: string) {
   const view = presets[name];
   if (!view) return;
-  camera.position.set(...view.position);
+  const p=mainHallPoint(view.position[0]+2,view.position[2]+12);
+  camera.position.set(p.x,view.position[1],p.z);
   camera.fov = view.fov ?? 72;
   camera.updateProjectionMatrix();
-  controls.target.set(...view.target);
+  const t=mainHallPoint(view.target[0]+2,view.target[2]+12);
+  controls.target.set(t.x,view.target[1],t.z);
   controls.update();
   requestRender();
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]'))

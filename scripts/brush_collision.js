@@ -55,7 +55,11 @@ export function intersectsBrush(c, x, z, feet = 0, radius = .45, step = .5,
 // Conservative horizontal depth inside the brush's radius-expanded AABB.
 // This is used only for recovery after a vertical move has left a player
 // overlapping a wall; the exact convex-plane test remains authoritative.
-function horizontalDepth(c, x, z, radius) {
+function horizontalDepth(c, x, z, radius, feet, step, height) {
+  if(c.preciseEscape&&c.planes){
+    const push=brushHorizontalEscape(c,x,z,radius,feet,step,height);
+    return Math.hypot(push.x,push.z);
+  }
   return Math.max(0, Math.min(
     c.hx + radius - Math.abs(x - c.x),
     c.hz + radius - Math.abs(z - c.z),
@@ -82,12 +86,12 @@ export function canMoveThroughBrushes(colliders, fromX, fromZ, toX, toZ,
       surfaceAt,blockerAt)) (current ||= []).push(c);
   }
   if (!current?.length) return false;
-  const before = new Map(current.map(c => [c, horizontalDepth(c, fromX, fromZ, radius)]));
+  const before = new Map(current.map(c => [c, horizontalDepth(c, fromX, fromZ, radius,feet,step,height)]));
   let improved = next.length < current.length;
   for (const c of next) {
     const oldDepth = before.get(c);
     if (oldDepth === undefined) return false;
-    const newDepth = horizontalDepth(c, toX, toZ, radius);
+    const newDepth = horizontalDepth(c, toX, toZ, radius,feet,step,height);
     if (newDepth > oldDepth + 1e-5) return false;
     if (newDepth < oldDepth - 1e-5) improved = true;
   }
@@ -98,8 +102,24 @@ export function canMoveThroughBrushes(colliders, fromX, fromZ, toX, toZ,
 // AABB. Since the AABB contains the convex brush, the returned point is always
 // outside the exact brush too. This is a last-resort correction for vertical
 // descent beside a crate, not the normal movement path.
-export function brushHorizontalEscape(c, x, z, radius = .45) {
+export function brushHorizontalEscape(c, x, z, radius = .45, feet = 0,
+    step = 0, height = 1.78) {
   const eps = 2e-5;
+  // Long diagonal boardwalk solids have enormous empty AABB corners. Recover
+  // against their actual radius-expanded convex planes, not that whole box.
+  // Keep the legacy crate/BSP recovery unchanged unless explicitly admitted.
+  if(c.preciseEscape&&c.planes){
+    const cy=feet+(step+height)*.5,hy=(height-step)*.5;
+    let best=null,distance=Infinity;
+    for(const [nx,ny,nz,d] of c.planes){
+      const length=Math.hypot(nx,nz);if(length<1e-8)continue;
+      const depth=d+radius*length+Math.abs(ny)*hy-nx*x-ny*cy-nz*z;
+      if(depth<0)return {x:0,z:0};
+      const move=depth/length+eps;
+      if(move<distance){distance=move;best={x:nx/length*move,z:nz/length*move};}
+    }
+    if(best)return best;
+  }
   const candidates = [
     { x: c.x - c.hx - radius - eps - x, z: 0 },
     { x: c.x + c.hx + radius + eps - x, z: 0 },
@@ -129,6 +149,22 @@ export function brushTop(c, x, z) {
 export function brushSupport(c,x,z) {
   const center=brushTop(c,x,z);
   return c.stair ? Math.max(center,brushTop(c,x,z-.12),brushTop(c,x,z+.12)) : center;
+}
+
+// A descending cylinder can touch a real narrow tread with its toe/heel before
+// the centre crosses that tread. Without this support it repeatedly collides
+// sideways with the riser and gets pushed downhill without ever landing.
+// Opt in ONLY authored stair treads, never crates, walls or floating guards.
+export function stairLandingSupport(treads,x,z,maxFeet,radius=.45) {
+  let highest=null;
+  for(const c of treads){
+    if(!c.stepSurface||c.h>maxFeet+.001||
+      Math.abs(x-c.x)>c.hx+radius||Math.abs(z-c.z)>c.hz+radius)continue;
+    if(c.planes?.some(([nx,ny,nz,d])=>Math.abs(ny)<1e-8&&
+      nx*x+nz*z>d+radius*Math.hypot(nx,nz)-1e-5))continue;
+    highest=Math.max(highest??-Infinity,c.h);
+  }
+  return highest;
 }
 
 // A uniformly enlarged map needs the same authored jump *height*, not the same

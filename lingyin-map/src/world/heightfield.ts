@@ -1,13 +1,19 @@
 // The valley's analytic height field and water layout.
 // One function drives terrain meshing, placement, water depth and every prop's footing.
-import { clamp, distToPolyline, fbm2, gauss, lerp, ridged2, smoothstep } from '../core/math';
+import { clamp, distToPolyline, fbm2, lerp, smoothstep } from '../core/math';
+import { MAIN_HALL } from '../../../scripts/lingyin_main_hall.js';
 import { FRONT_GATE_FORECOURT, RIDGE_GRADED_WIDTH, RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_SHOULDER, ridgeTrailAt,
   ridgeTrailDistance } from '../../../scripts/lingyin_hillside_route.js';
 
 export const WORLD = {
-  size: 620,
+  // The playable temple, forecourt and west-ridge route all fit inside this
+  // compact footprint.  The former 620 m square existed only to carry a ring
+  // of inaccessible mountains, making the actual map look like a tiny island
+  // and spending most terrain/vegetation work outside gameplay.
+  size: 170,
+  terrainSegments: 180,
   center: [0, 0],
-  temple: { x: -2, z: -12 },
+  temple: { x: MAIN_HALL.x, z: MAIN_HALL.z },
   platform: { x0: -36, x1: 28, z0: -48, z1: 46, y: 3.25 },
   pond: { x: 18, z: 66, r: 15, y: 0.55 },
   bridge: { x: 36, z: 28 },
@@ -96,23 +102,13 @@ function rectMask(x: number, z: number, x0: number, z0: number, x1: number, z1: 
 }
 
 function baseHeight(x: number, z: number) {
-  let h = 1.6;
-  // gentle climb toward the north
-  h += smoothstep(44, -110, z) * 5.5;
-  // forested east ridge (the crag sits on its shoulder)
-  h += 36 * gauss(x - 118, z + 44, 92);
-  // west ridge, lower and softer
-  h += 30 * gauss(x + 118, z - 6, 104);
-  // northern massif
-  const north = smoothstep(-40, -230, z);
-  const n = 0.55 + 0.45 * ridged2(x * 0.012 + 3.1, z * 0.012 - 1.7, 4);
-  h += north * 62 * n;
-  // southern opening stays low so the valley reads as an entrance
-  h *= lerp(1, 0.55, smoothstep(55, 150, z));
-  // rolling detail
-  h += 1.35 * fbm2(x * 0.035, z * 0.035, 4);
-  h += 0.38 * fbm2(x * 0.16 + 4.2, z * 0.16 - 2.1, 3);
-  return h;
+  // Keep only a shallow natural verge around the authored combat area.  The
+  // old east/west ridges and northern massif were non-playable scenery and
+  // have deliberately been removed.  The retained west trail adds its own
+  // narrow graded shoulder later in heightAt().
+  return 1.55
+    + 0.22 * fbm2(x * 0.045, z * 0.045, 3)
+    + 0.07 * fbm2(x * 0.18 + 4.2, z * 0.18 - 2.1, 2);
 }
 
 export function heightAt(x: number, z: number) {
@@ -123,9 +119,6 @@ export function heightAt(x: number, z: number) {
   const flat = rectMask(x, z, P.x0, P.z0, P.x1, P.z1, 13);
   const terrace = P.y + 0.04 * fbm2(x * 0.12, z * 0.12, 2);
   h = lerp(terrace, h, flat);
-
-  // ---- crag footing: a stony shoulder under Feilai Feng
-  h += 6.5 * gauss(x - 78, z + 22, 26) * (0.6 + 0.4 * fbm2(x * 0.08, z * 0.08, 3));
 
   // ---- processional path: gentle smoothing, never a trench, never across water
   const pathD = distToPolyline(x, z, PATH).d;
@@ -186,6 +179,16 @@ export function heightAt(x: number, z: number) {
 // cannot cut across the graded walkway or the side of a switchback.
 export function terrainMeshHeightAt(x:number,z:number,gridStep:number) {
   const h=heightAt(x,z);
+  const P=WORLD.platform,F=FRONT_GATE_FORECOURT;
+  const underTemple=x>P.x0&&x<P.x1&&z>P.z0&&z<P.z1;
+  const underForecourt=x>F.x0&&x<F.x1&&z>F.z0&&z<F.z1;
+  // The terrain is only a hidden visual support beneath the photographed
+  // paving in these two areas.  heightAt() intentionally keeps subtle natural
+  // variation for prop footing, but that variation used to rise up to 4cm
+  // above the 2.5cm paving lift and caused large moving z-fighting patches.
+  // Bury only the rendered terrain; gameplay surfaces and prop heights still
+  // read the original flat platform through heightAt()/lingyin_layout.js.
+  if(underTemple||underForecourt)return Math.min(h,P.y-.14);
   const near=ridgeTrailAt(x,z);
   if(near.distance>RIDGE_HALF_WIDTH+gridStep)return h;
   let low=Infinity;
@@ -200,7 +203,7 @@ export function terrainMeshHeightAt(x:number,z:number,gridStep:number) {
 
 // Match the exact two triangles that Terrain uses, rather than a bilinear
 // approximation. Paving vertices are kept just above this visible surface.
-export function terrainRenderedHeightAt(x:number,z:number,segments=260) {
+export function terrainRenderedHeightAt(x:number,z:number,segments=WORLD.terrainSegments) {
   const step=WORLD.size/segments,half=WORLD.size/2;
   const gx=(x+half)/step,gz=(z+half)/step;
   const ix=Math.floor(gx),iz=Math.floor(gz),u=gx-ix,v=gz-iz;
@@ -229,6 +232,11 @@ export function slopeAt(x: number, z: number, e = 1.2) {
 export function insidePlatform(x: number, z: number, pad = 0) {
   const P = WORLD.platform;
   return x > P.x0 - pad && x < P.x1 + pad && z > P.z0 - pad && z < P.z1 + pad;
+}
+
+export function insideTerrainFootprint(x:number,z:number,pad=0) {
+  const half=WORLD.size/2-pad;
+  return half>0&&Math.abs(x)<=half&&Math.abs(z)<=half;
 }
 
 export function waterDepthAt(x: number, z: number) {

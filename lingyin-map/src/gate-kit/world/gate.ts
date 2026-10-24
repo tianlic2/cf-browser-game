@@ -4,6 +4,9 @@ import { canvasTexture } from '../core/materials';
 import { goldMaterial, plasterMaterial, timberMaterial } from './materials';
 import { flagstoneMaterial, graniteMaterial } from './textures';
 import { Roof } from './roof';
+import { batchStaticSiblings } from '../../world/static_batch';
+import { projectedTempleUV } from '../../world/geom';
+import { bakeSurfaceFinish } from '../../world/surface_finish';
 import { goldMaterial as templeGoldMaterial, stoneMaterial as templeStoneMaterial,
   templePlaqueTexture } from '../../world/materials';
 
@@ -34,8 +37,22 @@ export class Gate {
     this.buildWings();
     this.buildIvy();
     this.buildContactShadow();
+    // The source study keeps its Canvas granite fallback. The actual game
+    // uses preloaded stone scans at metre scale, including the long footing.
+    if(this.stone.name==='granite-photogrammetry')this.group.traverse(object=>{
+      if(!(object instanceof THREE.Mesh)||object.material!==this.stone)return;
+      object.geometry=bakeSurfaceFinish(projectedTempleUV(object.geometry,1.25),'stone');
+      (this.stone as THREE.MeshStandardMaterial).vertexColors=true;
+    });
     this.roof = new Roof();
     this.group.add(this.roof.group);
+    for (const object of this.group.children) {
+      if (!(object instanceof THREE.Mesh) || Array.isArray(object.material)) continue;
+      if (object.material.name.startsWith('gate-photographic-'))
+        object.geometry = projectedTempleUV(object.geometry,
+          object.material.name.includes('plaster') ? 2 : .8);
+    }
+    batchStaticSiblings(this.group);
   }
 
   private buildPlatformAndBases() {
@@ -523,33 +540,50 @@ export class Gate {
     // low ochre walls with a small tiled cap and a dark service door
     const tileMat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2c322d'), roughness: 0.95, metalness: 0 });
     const doorMat = new THREE.MeshStandardMaterial({ color: new THREE.Color('#241812'), roughness: 0.95 });
+    const wallTop=PLATFORM_Y+2.3;
     for (const s of [-1, 1]) {
       const cx = s * 8.95;
+      // The old roof sat roughly half a metre above the plaster wall. Anchor
+      // every roof component to the actual wall top so the eave reads as one
+      // supported assembly before this module is reused around the forecourt.
+      const headPlate = new THREE.Mesh(new THREE.BoxGeometry(6.58, 0.18, 0.5), this.timberDark);
+      headPlate.position.set(cx, wallTop + 0.015, -1.1);
+      headPlate.castShadow = true;
+      headPlate.receiveShadow = true;
+      headPlate.name = 'gate-wing-roof-bearing';
+      this.group.add(headPlate);
       for (const zs of [-1, 1]) {
         const slab = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.1, 0.95), tileMat);
         slab.rotation.x = zs * 0.34;
-        slab.position.set(cx, PLATFORM_Y + 3.0, -1.1 + zs * 0.38);
+        slab.position.set(cx, wallTop + 0.2, -1.1 + zs * 0.38);
         slab.castShadow = true;
         slab.receiveShadow = true;
         this.group.add(slab);
       }
       const ridge = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.14, 0.18), tileMat);
-      ridge.position.set(cx, PLATFORM_Y + 3.16, -1.1);
+      ridge.position.set(cx, wallTop + 0.36, -1.1);
       this.group.add(ridge);
       const fascia = new THREE.Mesh(new THREE.BoxGeometry(6.8, 0.16, 0.1), this.timberDark);
-      fascia.position.set(cx, PLATFORM_Y + 2.86, -0.22);
+      fascia.position.set(cx, wallTop + 0.06, -0.22);
       this.group.add(fascia);
       for (let i = 0; i < 15; i++) {
         const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.06, 8), tileMat);
         cap.rotation.x = Math.PI / 2;
-        cap.position.set(cx - 3.2 + i * 0.44, PLATFORM_Y + 2.82, -0.17);
+        cap.position.set(cx - 3.2 + i * 0.44, wallTop + 0.02, -0.17);
         this.group.add(cap);
       }
-      // continuous stone footing: the wing walls sit on the ground, not in mid-air
-      const footing = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.62, 0.86), this.stone);
-      footing.position.set(cx, 0.04, -1.1);
+      // In the standalone gate study local y=-.68 is ground. The playable map
+      // raises this whole gate by .68m, so a footing that stopped at -.27 still
+      // left a visible .41m void underneath. Span the complete interval from
+      // real ground to the plaster-wall base and overlap both ends slightly.
+      const footingBottom=-.7;
+      const footingTop=PLATFORM_Y+.08;
+      const footingHeight=footingTop-footingBottom;
+      const footing = new THREE.Mesh(new THREE.BoxGeometry(7.0, footingHeight, 0.86), this.stone);
+      footing.position.set(cx, (footingBottom+footingTop)/2, -1.1);
       footing.castShadow = true;
       footing.receiveShadow = true;
+      footing.name = 'gate-wing-ground-footing';
       this.group.add(footing);
       const footingCap = new THREE.Mesh(new THREE.BoxGeometry(7.12, 0.12, 0.96), this.stone);
       footingCap.position.set(cx, PLATFORM_Y + 0.06, -1.1);
@@ -562,5 +596,50 @@ export class Gate {
       frame.position.set(cx + s * 0.4, PLATFORM_Y + 1.3, -0.94);
       this.group.add(frame);
     }
+
+    // After the gate is moved to the terrace edge, continue the same grounded
+    // side-wing assembly across the two spans formerly occupied by low stone
+    // balustrades. Coordinates stay local to the gate at world x=-2.
+    const extensions=[
+      {cx:-22.575,len:20.85}, // world -35.0 .. -14.15
+      {cx:20.575,len:16.85},  // world  10.15 ..  27.0
+    ];
+    const plaster:THREE.BufferGeometry[]=[];
+    const stone:THREE.BufferGeometry[]=[];
+    const timber:THREE.BufferGeometry[]=[];
+    const tiles:THREE.BufferGeometry[]=[];
+    for(const {cx,len} of extensions) {
+      plaster.push(box(len,2.3,.34,cx,PLATFORM_Y+1.15,-1.1));
+      const footingBottom=-.7,footingTop=PLATFORM_Y+.08;
+      stone.push(box(len+.2,footingTop-footingBottom,.86,cx,
+        (footingBottom+footingTop)/2,-1.1));
+      stone.push(box(len+.32,.12,.96,cx,PLATFORM_Y+.06,-1.1));
+      timber.push(box(len+.18,.18,.5,cx,wallTop+.015,-1.1));
+      timber.push(box(len+.4,.16,.1,cx,wallTop+.06,-.22));
+      const bays=Math.max(2,Math.ceil(len/6.4));
+      for(let i=0;i<=bays;i++) {
+        const x=cx-len/2+len*i/bays;
+        timber.push(box(.34,2.38,.4,x,PLATFORM_Y+1.19,-1.1));
+      }
+      for(const zs of [-1,1])
+        tiles.push(box(len+.4,.1,.95,cx,wallTop+.2,-1.1+zs*.38,0,zs*.34));
+      tiles.push(box(len+.4,.14,.18,cx,wallTop+.36,-1.1));
+      const caps=Math.max(2,Math.floor(len/.44));
+      for(let i=0;i<=caps;i++) {
+        const cap=new THREE.CylinderGeometry(.055,.055,.06,8);
+        cap.rotateX(Math.PI/2);
+        cap.translate(cx-len/2+len*i/caps,wallTop+.02,-.17);
+        tiles.push(cap);
+      }
+    }
+    const add=(geos:THREE.BufferGeometry[],material:THREE.Material,name:string)=>{
+      const mesh=new THREE.Mesh(merge(geos),material);
+      mesh.castShadow=true;mesh.receiveShadow=true;mesh.name=name;
+      this.group.add(mesh);
+    };
+    add(plaster,this.plaster,'gate-wing-terrace-extension-plaster');
+    add(stone,this.stone,'gate-wing-terrace-extension-footing');
+    add(timber,this.timberDark,'gate-wing-terrace-extension-timber');
+    add(tiles,tileMat,'gate-wing-terrace-extension-roof');
   }
 }

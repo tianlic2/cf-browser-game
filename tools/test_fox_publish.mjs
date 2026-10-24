@@ -18,7 +18,8 @@ for (const file of files) {
     `${file} uses the shared cache-versioned URL`);
 }
 assert.match(loader, /FOX_ASSET_VERSION = 'fox-published-1'/);
-assert.match(entry, /scripts\/main\.js\?v=fox-published-1/);
+assert.match(entry, /scripts\/main\.js\?v=[a-z0-9-]+/,
+  'the game entry stays cache-versioned independently of published Fox assets');
 assert.equal((runtime.match(/fox_soldier\.js\?v=fox-published-1/g) || []).length, 3);
 assert.doesNotMatch(runtime, /fox_soldier\.js\?v=fox-native-4/);
 assert.doesNotMatch(loader, /loadAsync\(BASE \+ '(?:fox\.fbx|body\.png|face\.png|ddfcd20\.png)'\)/);

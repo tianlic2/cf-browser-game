@@ -5,6 +5,7 @@ let floorMaterial: THREE.MeshStandardMaterial | null = null;
 let plasterTexture: THREE.CanvasTexture | null = null;
 let paperTexture: THREE.CanvasTexture | null = null;
 let roofTexture: THREE.CanvasTexture | null = null;
+let mainHallPaintedBeamTexture: THREE.CanvasTexture | null = null;
 
 type TempleTextureName =
   | 'courtyard-albedo' | 'courtyard-normal' | 'courtyard-roughness'
@@ -42,7 +43,7 @@ function loadTempleTexture(name: TempleTextureName) {
       ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
     texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = 8;
+    texture.anisotropy = 16;
     templeTextures[name] = texture;
   });
   textureLoads.set(name, task);
@@ -84,8 +85,9 @@ export function courtyardPavingMaterial() {
   courtyardMaterial = new THREE.MeshStandardMaterial({
     name: 'courtyard-photogrammetry',
     map: albedo, normalMap: normal, roughnessMap,
-    normalScale: new THREE.Vector2(.34, .34),
-    roughness: 1, metalness: 0,
+    color: 0xeee4d2,
+    normalScale: new THREE.Vector2(.43, .43),
+    roughness: .94, metalness: 0,
   });
   return courtyardMaterial;
 }
@@ -111,7 +113,7 @@ export function gateApproachPavingMaterial() {
   if (gateApproachMaterial) return gateApproachMaterial;
   gateApproachMaterial = courtyardPavingMaterial().clone();
   gateApproachMaterial.name = 'gate-approach-aged-stone';
-  gateApproachMaterial.color.set(0xf5ecdf);
+  gateApproachMaterial.color.set(0xeee4d2);
   gateApproachMaterial.vertexColors = true;
   gateApproachMaterial.normalScale.set(.38, .38);
   gateApproachMaterial.roughness = .88;
@@ -129,6 +131,17 @@ function texturedTempleMaterial(
     normalScale: new THREE.Vector2(normalStrength, normalStrength),
     roughnessMap: templeTextures[roughnessMap], roughness, metalness: 0,
   });
+}
+
+// The gate and enclosure share these already-loaded photographs rather than
+// evaluating wood grain and wall weathering with fragment-noise layers.
+export function sharedArchitecturalMaterial(kind: 'wood' | 'plaster', dark = false) {
+  const material = texturedTempleMaterial(`gate-photographic-${kind}${dark ? '-dark' : ''}`,
+    kind === 'wood' ? 'wood-albedo' : 'plaster-albedo',
+    kind === 'wood' ? 'wood-normal' : 'plaster-normal',
+    kind === 'wood' ? 'wood-roughness' : 'plaster-roughness', .94, kind === 'wood' ? .22 : .2);
+  if (material) material.color.set(kind === 'plaster' ? '#b9a276' : dark ? '#978575' : '#b39a80');
+  return material;
 }
 
 export function ricePaperTexture() {
@@ -151,6 +164,7 @@ export function ricePaperTexture() {
   ctx.putImageData(image,0,0);
   paperTexture=new THREE.CanvasTexture(canvas);
   paperTexture.colorSpace=THREE.SRGBColorSpace;
+  paperTexture.wrapS=paperTexture.wrapT=THREE.RepeatWrapping;
   paperTexture.minFilter=THREE.LinearMipmapLinearFilter;
   paperTexture.magFilter=THREE.LinearFilter;
   paperTexture.anisotropy=8;
@@ -260,10 +274,8 @@ export function tintFloorSlab(geometry: THREE.BufferGeometry, amount: number) {
 }
 
 export function stoneMaterial(warm = 0) {
-  const textured = texturedTempleMaterial('stone-photogrammetry',
-    'stone-albedo', 'stone-normal', 'stone-roughness', .98, .23);
+  const textured = sharedStoneMaterial(warm);
   if (textured) {
-    textured.color.set(warm > .5 ? 0xd6cab8 : 0xffffff);
     return textured;
   }
   return procMaterial({
@@ -296,6 +308,20 @@ export function stoneMaterial(warm = 0) {
       roughnessFactor = .82+.15*cgNoise3(cgP*2.3);
     `,
   });
+}
+
+export function sharedStoneMaterial(warm=0) {
+  const material=texturedTempleMaterial('stone-photogrammetry',
+    'stone-albedo','stone-normal','stone-roughness',.96,.32);
+  if(material)material.color.set(warm>.5?0xd6cab8:0xffffff);
+  return material;
+}
+
+export function photographedBarkMaterial() {
+  const material=texturedTempleMaterial('bark-photogrammetry',
+    'wood-albedo','wood-normal','wood-roughness',.97,.42);
+  if(material){material.color.set(0xb2ac94);material.vertexColors=true;}
+  return material;
 }
 
 export function roofMaterial() {
@@ -353,6 +379,111 @@ export function roofMaterial() {
   return new THREE.MeshStandardMaterial({
     name: 'roof-tile-baked', map: roofTexture, bumpMap: roofTexture,
     bumpScale: .045, roughness: .82, metalness: .02, side: THREE.DoubleSide,
+  });
+}
+
+/** Reference-inspired exterior finish used only by the Mahavira Hall. */
+export function mainHallRoofMaterial() {
+  const material = roofMaterial();
+  material.name = 'main-hall-weathered-red-roof';
+  material.color.set(0x9b5143);
+  material.roughness = .91;
+  material.metalness = 0;
+  if (material.normalScale) material.normalScale.set(.36, .36);
+  return material;
+}
+
+export function mainHallWallMaterial() {
+  const material = wallMaterial();
+  material.name = 'main-hall-cool-grey-plaster';
+  material.color.set(0xb9b5ad);
+  material.roughness = 1;
+  if (material.normalScale) material.normalScale.set(.24, .24);
+  return material;
+}
+
+export function mainHallStoneMaterial() {
+  const material = stoneMaterial(0);
+  material.name = 'main-hall-grey-stone-plinth';
+  material.color.set(0xa9aaa6);
+  material.roughness = .98;
+  return material;
+}
+
+export function mainHallRedWoodMaterial(dark = false) {
+  const material = woodMaterial(dark);
+  material.name = dark ? 'main-hall-dark-red-joinery' : 'main-hall-weathered-red-timber';
+  // The albedo is already red lacquer; a second dark red multiplier hid its
+  // grain and turned the shaded facade almost black. Keep a neutral warm tint.
+  material.color.set(dark ? 0xa38577 : 0xd7b3a5);
+  material.roughness = dark ? .9 : .86;
+  if (material.normalScale) material.normalScale.set(.22, .22);
+  return material;
+}
+
+function paintedBeamTexture() {
+  if (mainHallPaintedBeamTexture) return mainHallPaintedBeamTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#173f3d';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#102d2d';
+  ctx.fillRect(0, 0, canvas.width, 26);
+  ctx.fillRect(0, 230, canvas.width, 26);
+  ctx.fillStyle = '#a87832';
+  ctx.fillRect(0, 27, canvas.width, 8);
+  ctx.fillRect(0, 221, canvas.width, 8);
+  for (let x = 0; x < canvas.width; x += 128) {
+    ctx.save();
+    ctx.translate(x + 64, 128);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = '#b68a42';
+    ctx.fillRect(-35, -35, 70, 70);
+    ctx.fillStyle = '#762f27';
+    ctx.fillRect(-25, -25, 50, 50);
+    ctx.fillStyle = '#1d5651';
+    ctx.fillRect(-15, -15, 30, 30);
+    ctx.restore();
+    ctx.strokeStyle = '#c49b56';
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.arc(x + 64, 128, 20, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  let seed = 0x4d41494e;
+  const random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 | 0) >>> 0) / 4294967296;
+  for (let i = 0; i < 4200; i++) {
+    const alpha = random() * .1;
+    ctx.fillStyle = `rgba(${random() > .5 ? 235 : 18},${random() > .5 ? 215 : 25},${random() > .5 ? 170 : 25},${alpha})`;
+    ctx.fillRect(random() * canvas.width, random() * canvas.height, 1 + random() * 3, 1 + random() * 2);
+  }
+  mainHallPaintedBeamTexture = new THREE.CanvasTexture(canvas);
+  mainHallPaintedBeamTexture.name = 'main-hall-painted-beam-pattern';
+  mainHallPaintedBeamTexture.colorSpace = THREE.SRGBColorSpace;
+  mainHallPaintedBeamTexture.wrapS = mainHallPaintedBeamTexture.wrapT = THREE.RepeatWrapping;
+  mainHallPaintedBeamTexture.repeat.set(2.5, 1);
+  mainHallPaintedBeamTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  mainHallPaintedBeamTexture.magFilter = THREE.LinearFilter;
+  mainHallPaintedBeamTexture.anisotropy = 8;
+  return mainHallPaintedBeamTexture;
+}
+
+export function mainHallPaintedBeamMaterial() {
+  const texture = paintedBeamTexture();
+  return new THREE.MeshStandardMaterial({
+    name: 'main-hall-blue-green-painted-beams',
+    map: texture, bumpMap: texture, bumpScale: .018,
+    roughness: .88, metalness: .01,
+  });
+}
+
+export function mainHallWindowMaterial() {
+  return new THREE.MeshStandardMaterial({
+    name: 'main-hall-dark-teal-window',
+    color: 0x122d2d, emissive: new THREE.Color(0x071111),
+    emissiveIntensity: .03, roughness: .92,
   });
 }
 
@@ -510,6 +641,12 @@ export function emissiveWindowMaterial() {
 }
 
 export function rockMaterial() {
+  const photographed=sharedStoneMaterial(.2);
+  if(photographed) {
+    photographed.name='limestone-photogrammetry';
+    photographed.color.set(0xb4b7a5);photographed.vertexColors=true;
+    return photographed;
+  }
   return procMaterial({
     name: 'limestone-crag',
     params: { color: 0xffffff, roughness: 0.95, metalness: 0.0 },

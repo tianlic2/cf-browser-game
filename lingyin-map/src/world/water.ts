@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ATMO } from '../core/atmosphere';
 import { clamp } from '../core/math';
 import { procMaterial } from '../core/materials';
-import { STREAM, heightAt, streamLevel, streamWidth, WATER_POND, WORLD } from './heightfield';
+import { STREAM, heightAt, insideTerrainFootprint, streamLevel, streamT, streamWidth, WATER_POND, WORLD } from './heightfield';
 
 const WATER_VERT = /* glsl */ `
 attribute float aDepth;
@@ -32,7 +32,7 @@ export class Water {
     const geos: THREE.BufferGeometry[] = [];
 
     // ---- stream ribbon
-    const pts = STREAM;
+    const pts = STREAM.filter(([x,z])=>insideTerrainFootprint(x,z,1));
     const pos: number[] = [];
     const uvs: number[] = [];
     const depth: number[] = [];
@@ -52,7 +52,7 @@ export class Water {
       const nx = -tz;
       const nz = tx;
       if (i > 0) dist += Math.hypot(x - pts[i - 1][0], z - pts[i - 1][1]);
-      const t = i / (n - 1);
+      const t = streamT(x,z).t;
       const w = streamWidth(t) * 0.54;
       const level = streamLevel(t);
       for (const side of [-1, 1]) {
@@ -169,8 +169,8 @@ export class Water {
       `,
       color: /* glsl */ `
         float d = clamp(vDepthW / 2.0, 0.0, 1.0);
-        vec3 deep = vec3(0.012, 0.034, 0.034);
-        vec3 shallow = vec3(0.10, 0.145, 0.115);
+        vec3 deep = vec3(0.018, 0.073, 0.078);
+        vec3 shallow = vec3(0.13, 0.23, 0.19);
         vec3 c = mix(shallow, deep, d);
         float flow = uTime * (0.35 + vFlowW * 0.5);
         float fn = cgNoise2(vec2(cgP.x * 1.7, cgP.z * 0.8 - flow));

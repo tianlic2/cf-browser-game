@@ -59,21 +59,17 @@ for (const hold of BIO_BLACKTOWN_LAYOUT.holdPoints) {
 }
 
 const main = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
-const bioMap = readFileSync(new URL('../scripts/bio_map.js', import.meta.url), 'utf8');
+const bioMap = readFileSync(new URL('../scripts/zone13_map.js', import.meta.url), 'utf8');
 const lobby = readFileSync(new URL('../scripts/lobby.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-assert.match(bioMap, /buildBlacktownMap\(scene/, 'bio mode builds an independent Black Town instance');
-assert.match(bioMap, /bio-blacktown-rain/, 'bio Black Town includes dynamic rain');
-assert.match(bioMap, /wrecked_suv\.glb/, 'bio Black Town includes wrecked cars');
-assert.match(bioMap, /power_box\.glb/, 'the former power box remains as a decorative prop');
-assert.doesNotMatch(bioMap, /setPower|defenseLights|powerLight|statusMaterial/,
-  'the decorative power box has no lighting or gameplay controller');
-assert.doesNotMatch(bioMap, /bio-pyramid|factoryBlock|overhead-crane/,
-  'the retired procedural bio arena is no longer built');
+assert.match(bioMap, /buildZone13Map\(scene/, 'bio mode builds a formal Zone 13 instance');
+assert.match(bioMap, /zone13-graybox\.bin/, 'formal Zone 13 loads the converted BSP geometry');
+assert.match(bioMap, /static-models\/manifest\.json/, 'formal Zone 13 loads source vehicles and lamps');
+assert.match(bioMap, /zone13-walkmesh\.json/, 'formal Zone 13 uses the converted Source navigation');
 assert.match(main, /blacktown: \(\) => import\('\.\/blacktown_map\.js/,
   'TDM Black Town remains available for deferred loading');
-assert.match(main, /bio: \(\) => import\('\.\/bio_map\.js/,
-  'bio Black Town remains available as the mode-specific map');
+assert.match(main, /bio: \(\) => import\('\.\/zone13_map\.js/,
+  'Zone 13 is the deferred mode-specific bio map');
 assert.doesNotMatch(main, /repairPower|bioObjective|onPowerRestored/,
   'the main loop exposes no power interaction, objective HUD, or restore callback');
 assert.doesNotMatch(lobby, /配电箱旁恢复照明|keys:\s*\["E"\]/,
@@ -87,5 +83,4 @@ assert.doesNotMatch(bioMode, /POWER_REPAIR_TIME|POWER_DURATION|repairPower|power
 assert.doesNotMatch(bioMode, /const lit =|\.78 : 1/,
   'zombie speed is no longer modified by defense lighting');
 
-console.log(`PASS: Bio Black Town uses the original city collision with rain, ` +
-  `${BIO_BLACKTOWN_LAYOUT.wrecks.length} wrecks, ${BIO_BLACKTOWN_LAYOUT.holdPoints.length} reachable hold points.`);
+console.log('PASS: Black Town TDM remains intact and formal bio mode routes to Zone 13.');

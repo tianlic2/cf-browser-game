@@ -3,29 +3,31 @@ import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
 import { FoxSoldierRig } from './fox_soldier.js?v=fox-published-1';
 import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
-import { enemyModel } from './guncatalog.js?v=enemy-loadouts-1';
+import { enemyModel } from './guncatalog.js?v=weapon-world-3';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';
 import { overlapsActors, sweepActorAxis, findActorSpawn } from './actor_collision.js';
-import { BIO_DAMAGE_MILESTONE, BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT,
-  ZOMBIE_RESPAWN_SECONDS, crossedDamageMilestones, refillTwoMagazines } from './bio_rules.js?v=bio-population-damage-1';
-import { chooseIntent, createDirector, directorProfile, humanRole, seededTraits,
-  updateDirector, zombieRole, zombieTargetScore } from './bio_ai.js';
+import { BIO_DAMAGE_MILESTONE, BIO_NPC_COUNT, BIO_INITIAL_ZOMBIES, BIO_ZOMBIE_HEALTH, bioHumanDamageMultiplier,
+  ZOMBIE_RESPAWN_SECONDS, crossedDamageMilestones, refillTwoMagazines } from './bio_rules.js?v=initial-eight-1';
+import { chooseAttackSlot, chooseIntent, combatPositionScore, createDirector,
+  directorProfile, humanRole, localAvoidanceVector, recoveryStage, seededTraits,
+  updateDirector, zombieRole, zombieTargetScore } from './bio_ai.js?v=bio-tactical-2';
 import { BIO_HUMAN_SENSE_INTERVAL, BIO_ZOMBIE_ROUTE_INTERVAL,
   BIO_ZOMBIE_SENSE_INTERVAL, bioAnimationInterval, bioBudgetDue,
   bioSenseOffset } from './bio_performance.js?v=bio-lod-1';
 import { createNpcNamePool } from './npc_names.js';
+import { bioSourceRules } from './bio_source_rules.js';
 
 const ASSET = new URL('../assets/bio/zombie/', import.meta.url).href;
 const CLIPS = ['idle', 'run', 'attack', 'hit', 'death', 'scream'];
-const PREP = 15;
+// Zombie meshes are fitted to 1.84 m. Hits above this height relative to
+// their feet count as headshots, including body-tagged meshes and the proxy.
+const BIO_ZOMBIE_HEAD_HEIGHT = 1.48;
 const ROUND = 180;
 const HIT_RANGE = 1.58;
 const LEAP_UP = 8;
 const LEAP_GRAVITY = 18;
-const LEAP_HEIGHT = LEAP_UP * LEAP_UP / (2 * LEAP_GRAVITY);
-const ZOMBIE_RUN_SPEED = HUMAN_RUN_SPEED * 1.05;
+const ZOMBIE_RUN_SPEED = HUMAN_RUN_SPEED;
 const HIT_MOVE_SCALE = .52;
-const ZOMBIE_HEALTH = 5000;
 const HUMAN_MAG_SIZE = 30;
 const HUMAN_INITIAL_RESERVE = 180;
 const ZOMBIE_ACCEL = 8;
@@ -42,10 +44,13 @@ const HUMAN_SIGHT_RANGE = 31;
 const ZOMBIE_SIGHT_RANGE = 34;
 const HUMAN_HEARING_RANGE = 18;
 const ZOMBIE_HEARING_RANGE = 24;
+const ZOMBIE_ATTACK_SLOTS = 8;
+const ZOMBIE_ATTACK_RADIUS = 1.27;
+const LOCAL_AVOIDANCE_NEIGHBORS = 6;
 
 export class BioMode {
   constructor({ scene, camera = null, sound, onPlayerInfected, onPlayerRespawn, onRoundEnd, onZombieKilled,
-    onDamageMilestone, onChange }) {
+    onDamageMilestone, onDamageProgress, onSupplyReward, onChange }) {
     this.scene = scene;
     this.camera = camera;
     this.sound = sound;
@@ -54,6 +59,8 @@ export class BioMode {
     this.onRoundEnd = onRoundEnd;
     this.onZombieKilled = onZombieKilled;
     this.onDamageMilestone = onDamageMilestone;
+    this.onDamageProgress = onDamageProgress;
+    this.onSupplyReward = onSupplyReward;
     this.onChange = onChange;
     this.phase = 'off';
     this.playerZombie = false;
@@ -62,8 +69,13 @@ export class BioMode {
     this.zombies = [];
     this.timer = 0;
     this.kills = 0;
+    this.playerKills = 0;
     this.infections = 0;
     this.playerDamage = 0;
+    this.rules = bioSourceRules();
+    this.humanDamageMultiplier = 1;
+    this.liveElapsed = 0;
+    this.nextBgmAt = 0;
     this._playerAttack = 0;
     this.playerMaxHealth = 100;
     this.playerRespawnT = 0;
@@ -81,7 +93,9 @@ export class BioMode {
 
   _newPerformanceStats() {
     return { senseRefreshes: 0, lineOfSightRays: 0, navigationRefreshes: 0,
-      animationUpdates: 0, animationSkips: 0, colliderCandidates: 0 };
+      animationUpdates: 0, animationSkips: 0, colliderCandidates: 0,
+      localAvoidanceQueries: 0, tacticalPositionQueries: 0,
+      recoveryTransitions: 0, attackSlotAssignments: 0 };
   }
 
   async load() {
@@ -172,6 +186,7 @@ export class BioMode {
   }
 
   clear() {
+    this.map?.zone13Events?.reset?.(null);
     for (const a of [...this.humans, ...this.zombies]) {
       this.scene.remove(a.group);
       a.mixer?.stopAllAction();
@@ -193,6 +208,10 @@ export class BioMode {
     this.combatHeat = 0;
     this.playerNoise = null;
     this.playerDamage = 0;
+    this.playerKills = 0;
+    this.humanDamageMultiplier = 1;
+    this.liveElapsed = 0;
+    this.nextBgmAt = 0;
     this._viewValid = false;
     this._localColliderCache.clear();
     this.performance = this._newPerformanceStats();
@@ -202,9 +221,12 @@ export class BioMode {
   start(map, player = null) {
     this.clear();
     this.map = map;
+    this.map?.zone13Events?.reset?.(this.sound);
+    this.rules = bioSourceRules(map.bio?.ruleVariant);
+    if (player) player.hp = this.rules.humanHealth;
     this.playerRef = player;
     this.phase = 'prepare';
-    this.timer = PREP;
+    this.timer = this.rules.preparationSeconds;
     this.kills = this.infections = 0;
     const spawns = map.bio?.humans || map.spawns.player;
     const mercenaryNames = createNpcNamePool(Math.min(BIO_NPC_COUNT, spawns.length));
@@ -220,7 +242,7 @@ export class BioMode {
       this.scene.add(group);
       this.humans.push({ group, rig, alive: true, infected: false,
         name: mercenaryNames[i], shotCd: .3 + i * .23,
-        hold: i % (map.bio?.holdPoints?.length || 1), panic: 0, hp: 100,
+        hold: i % (map.bio?.holdPoints?.length || 1), panic: 0, hp: this.rules.humanHealth,
         ammo: HUMAN_MAG_SIZE, reserve: HUMAN_INITIAL_RESERVE, reloadT: 0,
         routeT: 0, routeX: 0, routeZ: 0, moveX: 0, moveZ: 0,
         strafeSide: i % 2 ? 1 : -1, holdDecisionT: 2 + i * .35,
@@ -229,9 +251,20 @@ export class BioMode {
         decisionT: .12 + i * .035, acquireT: 0, burstLeft: 2 + i % 3,
         shotNoiseT: 0, sharedThreat: null, sharedThreatT: 0,
         searchSide: i % 2 ? 1 : -1, threatVisible: false,
+        airborne: false, jumpVelocity: 0, jumpTime: 0, jumpCooldown: 0,
+        leapX: 0, leapZ: 0,
+        stuckFor: 0, recoveryStage: 0, recoverySide: i % 2 ? 1 : -1,
+        recoveryGoal: null, combatGoal: null, combatGoalT: 0,
+        aimFocus: 0, lastAimX: NaN, lastAimZ: NaN,
         senseT: bioSenseOffset(i, Math.min(BIO_NPC_COUNT, spawns.length), BIO_HUMAN_SENSE_INTERVAL),
         senseCache: [], animLodT: 0,
         animMotion: { moved: 0, x: 0, z: 0, aimed: false } });
+    }
+    for (const crate of map.bio?.weaponCrates || []) {
+      crate.active = true; crate.claimed = false; if (crate.mesh) crate.mesh.visible = true;
+    }
+    for (const wave of map.bio?.supplyWaves || []) {
+      wave.deployed = wave.claimed = false; if (wave.mesh) wave.mesh.visible = false;
     }
     this.onChange?.();
   }
@@ -253,14 +286,17 @@ export class BioMode {
     const fitted = new THREE.Box3().setFromObject(model);
     model.position.set(-(fitted.min.x + fitted.max.x) / 2, -fitted.min.y,
       -(fitted.min.z + fitted.max.z) / 2);
-    const actor = { group, model, mother, hazmat, name, health: ZOMBIE_HEALTH,
-      maxHealth: ZOMBIE_HEALTH, dead: false, meshes: [], combatAt: -Infinity,
+    const zombieHealth = BIO_ZOMBIE_HEALTH;
+    const actor = { group, model, mother, hazmat, name, headshotHeight: BIO_ZOMBIE_HEAD_HEIGHT, health: zombieHealth,
+      maxHealth: zombieHealth, dead: false, meshes: [], combatAt: -Infinity,
       attackT: 0, attackCd: 1.1, attackTarget: null, attackLanded: false,
       stagger: 0, pushX: 0, pushZ: 0, hitBrakeT: 0,
       moveX: 0, moveZ: 0, runRate: 1, hitT: 0, hitSide: 1,
       airborne: false, jumpVelocity: 0, jumpTime: 0, jumpCooldown: 0,
       leapX: 0, leapZ: 0, stuckFor: 0,
-      flashT: 0, deathT: 0, restY: model.position.y,
+      recoveryStage: 0, recoverySide: this.zombies.length % 2 ? 1 : -1,
+      recoveryGoal: null, attackSlotIndex: null, attackSlotTarget: null,
+      flashT: 0, deathT: 0, restY: model.position.y, regenT: 0, lowHealth: false,
       respawnT: 0, rewarded: false,
       pursuitKey: null, pursuitMemory: 0, lastKnown: null,
       role: zombieRole(this.zombies.length, this.director.serial),
@@ -292,7 +328,10 @@ export class BioMode {
     actor.meshes.push(head);
     actor.takeDamage = (amount, headshot = false, impactDir = null) => {
       if (actor.dead) return false;
+      amount *= this.humanDamageMultiplier;
       actor.health = Math.max(0, actor.health - amount);
+      actor.regenT = 0;
+      actor.lowHealth = actor.health > 0 && actor.health <= this.rules.lowHealthBlink;
       actor.stagger = Math.min(.48, Math.max(.2, actor.stagger + amount / 1100));
       if (impactDir) {
         const len = Math.hypot(impactDir.x, impactDir.z);
@@ -429,13 +468,33 @@ export class BioMode {
     return findActorSpawn(x, y, z, this._bodies(), valid);
   }
 
+  _floorAt(x, z, feetY) {
+    const step = this.map.stepHeight ?? .5;
+    const ceiling = feetY + step + .035;
+    const navFloor = this.map.navigation?.heightAt(x, z, ceiling) ?? -Infinity;
+    if (Number.isFinite(navFloor) && navFloor >= feetY - .05) return navFloor;
+    return Math.max(navFloor,
+      this.map.supportSurfaceAt?.(x, z, ceiling, .95) ?? -Infinity);
+  }
+
   _canMove(x, z, y, radius = .45, self = null, checkActors = true) {
     const b = this.map.bounds;
     if (Math.abs(x) > b.hw - radius || Math.abs(z) > b.hl - radius) return false;
+    // Source NAV can contain several floors under the same X/Z. A query made a
+    // few millimetres below the current polygon used to select the next floor
+    // down and teleport an NPC through the building. NPC walking is limited to
+    // an ordinary step in both directions; deliberate leaps use _updateLeap.
+    if (!self?.airborne) {
+      const floor = this._floorAt(x, z, y);
+      if (!Number.isFinite(floor) || Math.abs(floor - y) > (this.map.stepHeight ?? .5) + .055)
+        return false;
+    }
     const colliders = this._nearbyColliders(x, z);
     this.performance.colliderCandidates += colliders.length;
-    return !colliders.some(c => intersectsBrush(c, x, z, y, radius,
-      this.map.stepHeight ?? .5, 1.78, colliders,
+    return (self?.airborne || !this.map.canTraverse || this.map.canTraverse(x, z, y, this.map.stepHeight ?? .5)) &&
+      (!self || !this.map.npcCanMove || this.map.npcCanMove(self.group.position.x, self.group.position.z, x, z, y, radius, !!self.airborne)) &&
+      !colliders.some(c => intersectsBrush(c, x, z, y, radius,
+      self?.airborne ? 0 : (this.map.stepHeight ?? .5), 1.78, colliders,
       this.map.navigation?.surfaceAt, this.map.navigation?.blockerAt)) &&
       (!checkActors || !overlapsActors(x, y, z, this._bodies(), self, radius));
   }
@@ -456,39 +515,73 @@ export class BioMode {
 
   _move(a, vx, vz, dt) {
     const p = a.group.position;
+    if (!a.lastSafePosition) a.lastSafePosition = [p.x, p.y, p.z];
     const bodies = this._bodies();
+    // Step off a low ledge under gravity instead of snapping back forever to
+    // the last position on a crate whose top is absent from Source NAV.
+    if (!a.airborne && Math.hypot(vx, vz) > .01) {
+      const nx = p.x + vx * dt, nz = p.z + vz * dt;
+      const floor = this._floorAt(nx, nz, p.y);
+      const drop = p.y - floor;
+      if (Number.isFinite(floor) && drop > (this.map.stepHeight ?? .5) + .055 && drop <= 1.5 &&
+          (!this.map.canMoveSegment || this.map.canMoveSegment(p.x, p.z, nx, nz, p.y, 0, 1.78, .45))) {
+        const speed = Math.hypot(vx, vz);
+        a.airborne = true; a.jumpVelocity = 0; a.jumpTime = 0;
+        a.leapX = vx / speed; a.leapZ = vz / speed;
+      }
+    }
     const dx = sweepActorAxis(p.x, vx * dt, p.z, p.y, bodies, a, 'x');
     const nx = p.x + dx;
-    const floorX = !a.airborne ? Math.max(this.map.navigation?.heightAt(nx, p.z, p.y) ?? 0,
+    const floorX = !a.airborne ? Math.max(this._floorAt(nx, p.z, p.y),
       this._actorSupport({ x: nx, y: p.y, z: p.z }, a, bodies)) : p.y;
     if (this._canMove(nx, p.z, p.y, .45, a, false) &&
+        (!this.map.canMoveSegment || this.map.canMoveSegment(p.x, p.z, nx, p.z, p.y,
+          a.airborne ? 0 : (this.map.stepHeight ?? .5), 1.78, .45, !a.airborne)) &&
         !overlapsActors(nx, floorX, p.z, bodies, a)) p.x = nx;
     const dz = sweepActorAxis(p.z, vz * dt, p.x, p.y, bodies, a, 'z');
     const nz = p.z + dz;
-    const floorZ = !a.airborne ? Math.max(this.map.navigation?.heightAt(p.x, nz, p.y) ?? 0,
+    const floorZ = !a.airborne ? Math.max(this._floorAt(p.x, nz, p.y),
       this._actorSupport({ x: p.x, y: p.y, z: nz }, a, bodies)) : p.y;
     if (this._canMove(p.x, nz, p.y, .45, a, false) &&
+        (!this.map.canMoveSegment || this.map.canMoveSegment(p.x, p.z, p.x, nz, p.y,
+          a.airborne ? 0 : (this.map.stepHeight ?? .5), 1.78, .45, !a.airborne)) &&
         !overlapsActors(p.x, floorZ, nz, bodies, a)) p.z = nz;
-    if (!a.airborne) p.y = Math.max(this.map.navigation?.heightAt(p.x, p.z, p.y) ?? 0,
-      this._actorSupport(p, a, bodies));
+    if (!a.airborne) {
+      const floor = Math.max(this._floorAt(p.x, p.z, p.y), this._actorSupport(p, a, bodies));
+      if (Number.isFinite(floor) && Math.abs(floor - p.y) <= (this.map.stepHeight ?? .5) + .055) {
+        p.y = floor;
+        a.lastSafePosition = [p.x, p.y, p.z];
+      } else {
+        p.fromArray(a.lastSafePosition);
+        a.moveX = a.moveZ = 0;
+        a.routeT = 0;
+      }
+    }
   }
 
   // Leap only over a low obstacle ahead. Tall perimeter walls remain solid.
   _tryLeap(a, vx, vz) {
     if (a.airborne || a.jumpCooldown > 0) return false;
     const p = a.group.position;
-    const x = p.x + vx * .7, z = p.z + vz * .7;
-    const colliders = this._nearbyColliders(x, z);
-    this.performance.colliderCandidates += colliders.length;
-    const obstacle = colliders.find(c =>
-      c.h > p.y + (this.map.stepHeight ?? .5) && c.h <= p.y + LEAP_HEIGHT - .08 &&
-      intersectsBrush(c, x, z, p.y, .45, this.map.stepHeight ?? .5, 1.78,
-        colliders, this.map.navigation?.surfaceAt, this.map.navigation?.blockerAt));
-    if (!obstacle) return false;
-    // A jump needs room to clear the far side; don't hop in place against a wall.
-    const beyond = Math.max(1.7, Math.min(3.7, Math.abs(vx) * obstacle.hx * 2 + Math.abs(vz) * obstacle.hz * 2 + 1));
-    if (!this._canMove(p.x + vx * beyond, p.z + vz * beyond,
-      Math.max(p.y, obstacle.h) + .06, .45, a)) return false;
+    const length = Math.hypot(vx, vz);
+    if (length < .01) return false;
+    vx /= length; vz /= length;
+    const leapGravity = LEAP_GRAVITY * this.rules.zombieGravity;
+    const leapHeight = LEAP_UP * LEAP_UP / (2 * leapGravity);
+    const step = this.map.stepHeight ?? .5;
+    let landing = null;
+    for (const distance of [.7, 1, 1.3]) {
+      const x = p.x + vx * distance, z = p.z + vz * distance;
+      if (this._canMove(x, z, p.y, .45, a, false) &&
+          (!this.map.canMoveSegment || this.map.canMoveSegment(p.x, p.z, x, z, p.y, step, 1.78, .45))) continue;
+      const top = this.map.supportSurfaceAt?.(x, z, p.y + leapHeight - .08, .25) ?? -Infinity;
+      if (top <= p.y + step + .035 || top > p.y + leapHeight - .08) continue;
+      if (this.map.hasVerticalClearance && !this.map.hasVerticalClearance(x, z, top + .04, 1.78, .4)) continue;
+      if (!this._canMove(x, z, top + .04, .45, a, false)) continue;
+      landing = top;
+      break;
+    }
+    if (landing === null) return false;
     a.airborne = true;
     a.jumpVelocity = LEAP_UP;
     a.jumpTime = 0;
@@ -503,19 +596,23 @@ export class BioMode {
     a.jumpCooldown = Math.max(0, a.jumpCooldown - dt);
     if (!a.airborne) return;
     const p = a.group.position;
-    const next = p.y + a.jumpVelocity * dt - LEAP_GRAVITY * dt * dt * .5;
-    a.jumpVelocity -= LEAP_GRAVITY * dt;
+    const leapGravity = LEAP_GRAVITY * this.rules.zombieGravity;
+    const next = p.y + a.jumpVelocity * dt - leapGravity * dt * dt * .5;
+    a.jumpVelocity -= leapGravity * dt;
     a.jumpTime += dt;
-    const ground = Math.max(this.map.navigation?.heightAt(p.x, p.z, Math.max(p.y, next)) ?? 0,
+    const ground = Math.max(this.map.navigation?.heightAt(p.x, p.z, Math.max(p.y, next)) ?? -Infinity,
+      this.map.landingSurfaceAt?.(p.x, p.z, p.y, .55) ?? -Infinity,
       this._actorSupport(p, a));
+    if (next > p.y && this.map.hasVerticalClearance &&
+        !this.map.hasVerticalClearance(p.x, p.z, next, 1.78, .4)) a.jumpVelocity = 0;
     if (a.jumpVelocity <= 0 && next <= ground) {
       p.y = ground;
       a.airborne = false;
       a.jumpVelocity = 0;
-      a.model.rotation.x = 0;
+      if (a.model) a.model.rotation.x = 0;
     } else {
-      p.y = next;
-      a.model.rotation.x = -.18 * Math.sin(Math.min(1, a.jumpTime / .9) * Math.PI);
+      if (a.jumpVelocity !== 0 || next <= p.y) p.y = next;
+      if (a.model) a.model.rotation.x = -.18 * Math.sin(Math.min(1, a.jumpTime / .9) * Math.PI);
     }
   }
 
@@ -552,6 +649,7 @@ export class BioMode {
     const spot = this._mutantSpawn();
     if (!spot) return false;
     z.group.position.fromArray(spot);
+    z.lastSafePosition = [...spot];
     if (!z.group.parent) this.scene.add(z.group);
     z.model.position.y = z.restY;
     z.model.rotation.set(0, 0, 0);
@@ -565,7 +663,9 @@ export class BioMode {
     z.pushX = z.pushZ = z.moveX = z.moveZ = z.hitBrakeT = 0;
     z.airborne = false; z.jumpVelocity = z.jumpTime = z.jumpCooldown = 0;
     z.leapX = z.leapZ = 0;
-    z.stuckFor = z.flashT = 0; z.runRate = 1;
+    z.stuckFor = z.flashT = z.regenT = 0; z.lowHealth = false; z.runRate = 1;
+    z.recoveryStage = 0; z.recoveryGoal = null;
+    z.attackSlotIndex = null; z.attackSlotTarget = null;
     z.pursuitKey = null; z.pursuitMemory = 0; z.lastKnown = null;
     z.decisionT = z.commitT = 0;
     z.heardTarget = z.visibleTarget = false;
@@ -585,7 +685,7 @@ export class BioMode {
     player.vel?.set(0, 0, 0);
     player.yaw = Math.atan2(spot[0], spot[2]);
     player.pitch = 0;
-    player.hp = this.playerMaxHealth = ZOMBIE_HEALTH;
+    player.hp = this.playerMaxHealth = BIO_ZOMBIE_HEALTH;
     this.playerOut = false;
     this.playerRespawnT = 0;
     this.onPlayerRespawn?.();
@@ -598,6 +698,7 @@ export class BioMode {
     player.hp = 0;
     this.playerOut = true;
     this.playerRespawnT = ZOMBIE_RESPAWN_SECONDS;
+    this._advanceZombieKill();
     this.sound?.bio('death', player.pos.x, player.pos.y, player.pos.z);
     this.onChange?.();
     return true;
@@ -612,46 +713,71 @@ export class BioMode {
   }
 
   _chooseMother(player) {
-    // 玩家与全部佣兵一起进入无放回抽选，一局固定产生 3 名初始幽灵。
-    // 玩家被抽中时只占一个名额，其余名额由 NPC 补齐。
-    const candidates = [
-      ...this.humans.filter(h => h.alive).map(h => ({ human: h })),
-      { player: true },
-    ];
+    // Select only existing NPCs, without replacement; the player starts human.
+    const candidates = this.humans.filter(h => h.alive);
     for (let i = candidates.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
     }
-    for (const chosen of candidates.slice(0, Math.min(BIO_INITIAL_ZOMBIES, candidates.length))) {
-      if (chosen.player) {
-        this.playerZombie = true;
-        this.playerMaxHealth = player.hp = ZOMBIE_HEALTH;
-        this.onPlayerInfected?.(true);
-        continue;
-      }
-      const h = chosen.human;
+    let spawned = 0;
+    for (const h of candidates) {
+      if (spawned >= BIO_INITIAL_ZOMBIES) break;
       h.alive = false;
       this.scene.remove(h.group);
       const p = h.group.position;
-      this.spawnZombie(p.x, p.y, p.z, true, h.name);
+      if (this.spawnZombie(p.x, p.y, p.z, spawned === 0, h.name)) spawned++;
+      else { h.alive = true; this.scene.add(h.group); }
     }
-    // 初始三变只播一次全局警报，避免同一帧叠三份母体音效造成爆音。
+    // Play one global warning even when the second mother is selected.
     this.sound?.bio('mother');
     this.phase = 'live';
-    this.timer = ROUND;
+    this.timer = this.rules.roundSeconds || ROUND;
+    this.liveElapsed = 0;
     this.onChange?.();
+  }
+
+  tryInteract(player) {
+    if (this.phase !== 'live' || this.playerZombie || this.playerOut) return null;
+    const entries = [...(this.map.bio?.weaponCrates || []), ...(this.map.bio?.supplyWaves || [])]
+      .filter((entry) => entry.active !== false && !entry.claimed && (entry.kind === 'weapon' || entry.deployed));
+    let best = null, distance = 2.25;
+    for (const entry of entries) {
+      const position = entry.position || (entry.mesh ? entry.mesh.position.toArray() : null);
+      if (!position) continue;
+      const d = Math.hypot(player.pos.x - position[0], player.pos.z - position[2]);
+      if (d < distance && Math.abs(player.pos.y - position[1]) < 1.8) { best = entry; distance = d; }
+    }
+    if (!best) return null;
+    best.claimed = true; best.active = false;
+    if (best.collider) best.collider.active = false;
+    if (best.mesh) best.mesh.visible = false;
+    const reward = best.kind === 'weapon'
+      ? { type: 'weapon', id: this.rules.weaponRewards[Math.floor(Math.random() * this.rules.weaponRewards.length)] }
+      : { type: 'supply', ammo: 'full', grenades: ['frag', 'flash', 'smoke'] };
+    this.onSupplyReward?.(reward);
+    this.sound?.bio('supply');
+    this.onChange?.();
+    return reward;
   }
 
   recordPlayerDamage(amount) {
     if (this.phase !== 'live' || this.playerZombie || this.playerOut || !(amount > 0)) return [];
     const previous = this.playerDamage;
     this.playerDamage += amount;
+    const hundredCrossed = crossedDamageMilestones(previous, this.playerDamage, 100);
+    if (hundredCrossed.length) this.onDamageProgress?.({ thresholds: hundredCrossed, total: this.playerDamage });
     const crossed = crossedDamageMilestones(previous, this.playerDamage, BIO_DAMAGE_MILESTONE);
     for (const threshold of crossed) this.onDamageMilestone?.({
       threshold, total: this.playerDamage, tier: threshold / BIO_DAMAGE_MILESTONE,
     });
     this.onChange?.();
     return crossed;
+  }
+
+  recordPlayerKill() {
+    if (this.phase !== 'live' || this.playerZombie || this.playerOut) return;
+    this.playerKills++;
+    this.onChange?.();
   }
 
   attackAsZombie(player) {
@@ -675,6 +801,10 @@ export class BioMode {
   }
 
   _lineClear(a, b) {
+    if (this.map.lineClear) {
+      this.performance.lineOfSightRays++;
+      return this.map.lineClear(a, b);
+    }
     const dir = new THREE.Vector3(b.x - a.x, (b.y || 0) - (a.y || 0), b.z - a.z);
     const dist = dir.length();
     if (dist < .01) return true;
@@ -746,7 +876,17 @@ export class BioMode {
 
   _moveHuman(h, vx, vz, dt, speed) {
     const p = h.group.position;
-    const length = Math.hypot(vx, vz);
+    this._updateLeap(h, dt);
+    const intendedX = vx, intendedZ = vz;
+    if (!h.airborne && h.stuckFor > .62) this._tryLeap(h, intendedX, intendedZ);
+    let length = Math.hypot(vx, vz);
+    if (h.airborne) {
+      vx = h.leapX; vz = h.leapZ; length = Math.hypot(vx, vz);
+    } else if (length > .001) {
+      [vx, vz] = this._localSteer(h, vx, vz, speed);
+      [vx, vz] = this._recoverySteer(h, vx, vz, 'human');
+      length = Math.hypot(vx, vz);
+    }
     const targetX = length > .001 ? vx / length * speed : 0;
     const targetZ = length > .001 ? vz / length * speed : 0;
     const blend = 1 - Math.exp(-dt * 8);
@@ -761,6 +901,7 @@ export class BioMode {
       h.moveX *= .4;
       h.moveZ *= .4;
     }
+    this._trackProgress(h, moved, length > .001 ? speed * dt : 0, dt);
     return { moved, speed: moved / Math.max(dt, .001), x: actualX, z: actualZ };
   }
 
@@ -809,6 +950,199 @@ export class BioMode {
   _targetMotion(target, player) {
     if (target.human) return { x: target.human.moveX || 0, z: target.human.moveZ || 0 };
     return { x: player.vel?.x || 0, z: player.vel?.z || 0 };
+  }
+
+  _neighborSamples(actor) {
+    const p = actor.group?.position || actor.pos;
+    if (!p) return [];
+    return this._bodies().filter(other => other !== actor).map(other => {
+      const q = other.group?.position || other.pos;
+      return q ? { x: q.x, z: q.z, vx: other.moveX || other.vel?.x || 0,
+        vz: other.moveZ || other.vel?.z || 0, radius: .45,
+        distance: Math.hypot(q.x - p.x, q.z - p.z) } : null;
+    }).filter(Boolean).sort((a, b) => a.distance - b.distance)
+      .slice(0, LOCAL_AVOIDANCE_NEIGHBORS);
+  }
+
+  _localSteer(actor, vx, vz, speed) {
+    const p = actor.group?.position || actor.pos;
+    const steered = localAvoidanceVector({ position: p, desired: { x: vx, z: vz }, speed,
+      neighbors: this._neighborSamples(actor), sideBias: actor.recoverySide || actor.flankSide || 1 });
+    this.performance.localAvoidanceQueries++;
+    if (actor.airborne || Math.hypot(steered.x, steered.z) < .01) return [steered.x, steered.z];
+    const probe = .78;
+    if (this._canMove(p.x + steered.x * probe, p.z + steered.z * probe,
+      p.y, .45, actor, false)) return [steered.x, steered.z];
+    const angle = .72;
+    const candidates = [actor.recoverySide || 1, -(actor.recoverySide || 1)].map(side => {
+      const c = Math.cos(angle * side), s = Math.sin(angle * side);
+      return { x: steered.x * c - steered.z * s, z: steered.x * s + steered.z * c, side };
+    });
+    const clear = candidates.find(dir => this._canMove(p.x + dir.x * probe,
+      p.z + dir.z * probe, p.y, .45, actor, false));
+    if (clear) { actor.recoverySide = clear.side; return [clear.x, clear.z]; }
+    return [steered.x, steered.z];
+  }
+
+  _pickRecoveryGoal(actor, vx, vz) {
+    const p = actor.group.position;
+    const base = Math.atan2(vx, vz);
+    const side = actor.recoverySide || 1;
+    const turns = [side * Math.PI / 2, -side * Math.PI / 2,
+      side * Math.PI * .72, -side * Math.PI * .72, Math.PI];
+    for (const radius of [1.05, 1.65, 2.25]) for (const turn of turns) {
+      const angle = base + turn;
+      const x = p.x + Math.sin(angle) * radius, z = p.z + Math.cos(angle) * radius;
+      const y = this._floorAt(x, z, p.y);
+      if (Number.isFinite(y) && Math.abs(y - p.y) <= (this.map.stepHeight ?? .5) + .055 &&
+          this._canMove(x, z, p.y, .45, actor, false))
+        return { x, y, z };
+    }
+    return null;
+  }
+
+  _recoverySteer(actor, vx, vz, kind) {
+    const stage = recoveryStage(actor.stuckFor);
+    if (stage !== actor.recoveryStage) {
+      actor.recoveryStage = stage;
+      this.performance.recoveryTransitions++;
+      if (stage >= 2) actor.recoverySide *= -1;
+      if (stage >= 3) {
+        actor.routeT = 0;
+        actor.recoveryGoal = this._pickRecoveryGoal(actor, vx, vz);
+      }
+    }
+    if (stage === 0) return [vx, vz];
+    const length = Math.hypot(vx, vz) || 1;
+    const dx = vx / length, dz = vz / length, side = actor.recoverySide || 1;
+    if (stage === 1) return [dx * .38 - dz * side * .92, dz * .38 + dx * side * .92];
+    if (stage === 2) return [-dx * .46 - dz * side * .88, -dz * .46 + dx * side * .88];
+    const goal = actor.recoveryGoal;
+    if (goal) {
+      const p = actor.group.position, gx = goal.x - p.x, gz = goal.z - p.z;
+      const d = Math.hypot(gx, gz);
+      if (d > .28) return [gx / d, gz / d];
+      actor.recoveryGoal = null;
+    }
+    if (kind === 'zombie') this._tryLeap(actor, dx, dz);
+    return [-dz * side, dx * side];
+  }
+
+  _trackProgress(actor, moved, intended, dt) {
+    if (intended < .001 || actor.airborne || actor.hitBrakeT > 0) {
+      actor.stuckFor = Math.max(0, actor.stuckFor - dt * 2.5);
+      return;
+    }
+    if (moved < intended * .24) actor.stuckFor += dt;
+    else actor.stuckFor = Math.max(0, actor.stuckFor - dt * 3.2);
+    if (actor.stuckFor < .08) {
+      actor.recoveryStage = 0;
+      actor.recoveryGoal = null;
+    }
+  }
+
+  _attackSlot(z, chosen, targetMotion, reservations) {
+    if (chosen.patrol || !chosen.key) {
+      z.attackSlotIndex = null; z.attackSlotTarget = null;
+      return chosen.navPos;
+    }
+    const key = chosen.key;
+    let reserved = reservations.get(key);
+    if (!reserved) { reserved = new Set(); reservations.set(key, reserved); }
+    const target = { x: chosen.pos.x + targetMotion.x * .12, y: chosen.pos.y,
+      z: chosen.pos.z + targetMotion.z * .12 };
+    const slot = chooseAttackSlot({ agent: z.group.position, target, reserved,
+      count: ZOMBIE_ATTACK_SLOTS, radius: ZOMBIE_ATTACK_RADIUS,
+      phase: (this.director.serial % 2) * Math.PI / ZOMBIE_ATTACK_SLOTS,
+      preferredIndex: z.attackSlotTarget === key ? z.attackSlotIndex : null,
+      canOccupy: candidate => {
+        const floor = this._floorAt(candidate.x, candidate.z, target.y);
+        return Number.isFinite(floor) && Math.abs(floor - target.y) < .72 &&
+          this._canMove(candidate.x, candidate.z, floor, .42, z, false);
+      } });
+    if (slot) {
+      reserved.add(slot.index);
+      if (z.attackSlotIndex !== slot.index || z.attackSlotTarget !== key)
+        this.performance.attackSlotAssignments++;
+      z.attackSlotIndex = slot.index; z.attackSlotTarget = key;
+      return { x: slot.x, y: this._floorAt(slot.x, slot.z, target.y), z: slot.z };
+    }
+    z.attackSlotIndex = null; z.attackSlotTarget = key;
+    const index = Math.max(0, this.zombies.indexOf(z));
+    const angle = index / Math.max(1, this.zombies.length) * Math.PI * 2;
+    return { x: target.x + Math.sin(angle) * 2.35, y: target.y,
+      z: target.z + Math.cos(angle) * 2.35 };
+  }
+
+  _positionKey(x, z) {
+    return `${Math.round(x / 1.2)},${Math.round(z / 1.2)}`;
+  }
+
+  _humanCombatGoal(h, target, threats, reservations) {
+    h.combatGoalT = Math.max(0, (h.combatGoalT || 0));
+    if (h.combatGoal && h.combatGoalT > 0) {
+      reservations.add(this._positionKey(h.combatGoal[0], h.combatGoal[2]));
+      return h.combatGoal;
+    }
+    const p = h.group.position;
+    const preferred = h.role === 'scout' ? 12.5 : h.role === 'support' ? 15 : 18;
+    const candidates = [{ x: p.x, z: p.z, repeated: 0 }];
+    const phase = (this.humans.indexOf(h) % 6) * Math.PI / 6;
+    for (const radius of [preferred - 2, preferred + 2])
+      for (let i = 0; i < 6; i++) {
+        const angle = phase + i / 6 * Math.PI * 2;
+        candidates.push({ x: target.x + Math.sin(angle) * radius,
+          z: target.z + Math.cos(angle) * radius, repeated: i === 0 ? 1 : 0 });
+      }
+    let best = null, bestScore = -Infinity;
+    for (const candidate of candidates) {
+      const floor = this._floorAt(candidate.x, candidate.z, p.y);
+      if (!Number.isFinite(floor) || Math.abs(floor - p.y) > 1.2 ||
+          !this._canMove(candidate.x, candidate.z, floor, .45, h, false)) continue;
+      const key = this._positionKey(candidate.x, candidate.z);
+      const crowd = reservations.has(key) ? 1 : this.humans.filter(other => other !== h && other.alive &&
+        Math.hypot((other.combatGoal?.[0] ?? other.group.position.x) - candidate.x,
+          (other.combatGoal?.[2] ?? other.group.position.z) - candidate.z) < 2.2).length;
+      const eye = { x: candidate.x, y: floor + 1.25, z: candidate.z };
+      const aim = { x: target.x, y: target.y + 1.05, z: target.z };
+      const visible = this._lineClear(eye, aim);
+      const tx = candidate.x - target.x, tz = candidate.z - target.z;
+      const targetDistance = Math.hypot(tx, tz), inv = 1 / Math.max(.001, targetDistance);
+      const tucked = { x: candidate.x + tx * inv * .85, y: floor + .85,
+        z: candidate.z + tz * inv * .85 };
+      const cover = visible && !this._lineClear(tucked, aim) ? 1 : 0;
+      const danger = threats.length ? Math.min(...threats.map(q =>
+        Math.hypot(candidate.x - q.x, candidate.z - q.z))) : targetDistance;
+      const pathCost = Math.hypot(candidate.x - p.x, candidate.z - p.z) *
+        (this.map.navigation?.clear(p, { x:candidate.x,y:floor,z:candidate.z }) === false ? 1.28 : 1);
+      const flank = Math.abs((candidate.x-target.x)*(p.z-target.z) -
+        (candidate.z-target.z)*(p.x-target.x)) / Math.max(1,targetDistance*preferred);
+      const score = combatPositionScore({ pathCost, targetDistance,
+        preferredDistance: preferred, visible, cover, crowd, danger,
+        repeated: candidate.repeated, flank });
+      this.performance.tacticalPositionQueries++;
+      if (score > bestScore) { bestScore = score; best = [candidate.x, floor, candidate.z]; }
+    }
+    h.combatGoal = best || this._holdPoint(h);
+    h.combatGoalT = 1.02 + this.humans.indexOf(h) % 4 * .12;
+    reservations.add(this._positionKey(h.combatGoal[0], h.combatGoal[2]));
+    return h.combatGoal;
+  }
+
+  _friendInLineOfFire(h, target, humans) {
+    const p = h.group.position;
+    const dx = target.x - p.x, dz = target.z - p.z;
+    const length2 = dx * dx + dz * dz;
+    if (length2 < .01) return false;
+    for (const mate of humans) {
+      if (mate === h || !mate.alive) continue;
+      const q = mate.group.position;
+      const t = ((q.x - p.x) * dx + (q.z - p.z) * dz) / length2;
+      if (t <= .06 || t >= .94 || Math.abs(q.y - p.y) > 1.3) continue;
+      const rx = p.x + dx * t - q.x, rz = p.z + dz * t - q.z;
+      if (rx * rx + rz * rz < .62 * .62) return true;
+    }
+    return false;
   }
 
   _patrolPoint(z) {
@@ -885,6 +1219,25 @@ export class BioMode {
       else this.onChange?.();
       return;
     }
+    this.liveElapsed += dt;
+    this.map?.zone13Events?.update?.(this.liveElapsed, this.sound);
+    if (this.liveElapsed >= this.nextBgmAt) {
+      this.sound?.bio('bgm');
+      this.nextBgmAt += this.rules.bgmRepeat;
+    }
+    for (const wave of this.map.bio?.supplyWaves || []) if (!wave.deployed && this.liveElapsed >= wave.at) {
+      const candidates = wave.candidates || [];
+      if (candidates.length) {
+        wave.position = [...candidates[Math.floor(Math.random() * candidates.length)]];
+        wave.deployed = true; wave.active = true;
+        if (wave.collider) {
+          const [x, y, z] = wave.position;
+          Object.assign(wave.collider, { x, z, y0: y, h: y + .72, active: true });
+        }
+        if (wave.mesh) { wave.mesh.position.fromArray(wave.position); wave.mesh.position.y += .38; wave.mesh.visible = true; }
+        this.sound?.bio('supply');
+      }
+    }
     if (this.playerZombie && this.playerOut) {
       this.playerRespawnT = Math.max(0, this.playerRespawnT - countdownDt);
       if (this.playerRespawnT === 0) this._respawnPlayerZombie(player);
@@ -951,6 +1304,7 @@ export class BioMode {
       zombieSenses.set(z, sensed);
     }
     const targetLoads = new Map();
+    const attackReservations = new Map();
     for (const z of this.zombies) {
       if (z.hitT > 0) {
         z.hitT = Math.max(0, z.hitT - dt);
@@ -1025,8 +1379,8 @@ export class BioMode {
         z.lastKnown = null;
         z.visibleTarget = z.heardTarget = false;
       }
-      let q = chosen.navPos;
       const targetMotion = chosen.patrol ? { x: 0, z: 0 } : this._targetMotion(chosen, player);
+      let q = this._attackSlot(z, chosen, targetMotion, attackReservations);
       if (!chosen.patrol && z.role === 'cutoff') {
         const leadTime = Math.min(.72,.28+Math.hypot(targetMotion.x,targetMotion.z)*.045);
         q = { x:q.x + targetMotion.x*leadTime, y:q.y, z:q.z + targetMotion.z*leadTime };
@@ -1053,7 +1407,7 @@ export class BioMode {
           if (target.human) this._infect(target.human);
           else {
             this.playerZombie = true;
-            this.playerMaxHealth = player.hp = ZOMBIE_HEALTH;
+            this.playerMaxHealth = player.hp = BIO_ZOMBIE_HEALTH;
             this.infections++;
             this.director.shock = 1;
             this.combatHeat = 1;
@@ -1099,12 +1453,17 @@ export class BioMode {
         const directX = vx, directZ = vz;
         // Elevated defense decks can be reached directly with a leap. When a
         // pathfinder route stalls at a crate, the same leap is a recovery move.
-        const raised = q.y > p.y + .55 && q.y - p.y < LEAP_HEIGHT;
+        const raised = q.y > p.y + .55 && q.y - p.y <
+          LEAP_UP * LEAP_UP / (2 * LEAP_GRAVITY * this.rules.zombieGravity);
         const canLeap = raised && this._tryLeap(z, directX, directZ);
         if (!z.airborne && !canLeap && this.map.navigation)
           [vx, vz] = this._zombieRoute(z, q, dt, vx, vz);
         const phasePace = chosen.patrol ? .76 : .86 + profile.aggression * .14;
-        const speed = ZOMBIE_RUN_SPEED * phasePace * (z.stagger > 0 ? HIT_MOVE_SCALE : 1);
+        const speed = ZOMBIE_RUN_SPEED * this.rules.zombieSpeed * phasePace * (z.stagger > 0 ? HIT_MOVE_SCALE : 1);
+        if (!z.airborne) {
+          [vx, vz] = this._localSteer(z, vx, vz, speed);
+          [vx, vz] = this._recoverySteer(z, vx, vz, 'zombie');
+        }
         // Turn first, then accelerate. The old controller translated directly
         // toward the target while the mesh was still facing elsewhere.
         const headingError = Math.atan2(Math.sin(desiredYaw - z.group.rotation.y),
@@ -1118,9 +1477,16 @@ export class BioMode {
         const beforeX = p.x, beforeZ = p.z;
         this._move(z, z.moveX, z.moveZ, dt);
         const advanced = Math.hypot(p.x - beforeX, p.z - beforeZ);
-        z.stuckFor = !z.airborne && z.hitBrakeT <= 0 && advanced < speed * dt * .2
-          ? z.stuckFor + dt : 0;
-        if (z.stuckFor > .35) this._tryLeap(z, directX, directZ);
+        if (!z.airborne && advanced < .012 && Math.hypot(z.pushX, z.pushZ) < .04) {
+          z.regenT += dt;
+          if (z.regenT >= this.rules.regenDelay && z.health < z.maxHealth) {
+            z.regenT = 0; z.health = Math.min(z.maxHealth, z.health + this.rules.zombieRegen);
+            z.lowHealth = z.health <= this.rules.lowHealthBlink;
+            this.sound?.bio('breath', p.x, p.y, p.z);
+          }
+        } else z.regenT = 0;
+        this._trackProgress(z, advanced, speed * dt, dt);
+        if (z.stuckFor > .62) this._tryLeap(z, directX, directZ);
         const actualSpeed = advanced / Math.max(dt, .001);
         const runTarget = (z.hazmat ? 3.2 : 1.6) *
           THREE.MathUtils.clamp(actualSpeed / ZOMBIE_RUN_SPEED, .4, 1.16);
@@ -1184,6 +1550,7 @@ export class BioMode {
       }
       humanSenses.set(h,sensed);
     }
+    const humanReservations = new Set();
     for (const h of aliveHumans) {
       const p = h.group.position;
       h.shotNoiseT = Math.max(0,h.shotNoiseT-dt);
@@ -1191,6 +1558,7 @@ export class BioMode {
       h.intentT = Math.max(0,h.intentT-dt);
       h.decisionT = Math.max(0,h.decisionT-dt);
       h.acquireT = Math.max(0,h.acquireT-dt);
+      h.combatGoalT = Math.max(0,(h.combatGoalT || 0)-dt);
       if (h.reloadT > 0) {
         h.reloadT = Math.max(0,h.reloadT-dt);
         if (h.reloadT === 0) {
@@ -1216,6 +1584,16 @@ export class BioMode {
       h.threatVisible = visible;
       const q = observed ? observed.pos : h.lastThreatT > 0 ? h.lastThreat : null;
       const dist = q ? Math.hypot(q.x-p.x,q.z-p.z) : Infinity;
+      if (visible && q) {
+        if (Number.isFinite(h.lastAimX)) {
+          const shifted = Math.hypot(q.x-h.lastAimX,q.z-h.lastAimZ);
+          if (shifted > .45) h.aimFocus *= .55;
+        }
+        h.lastAimX=q.x;h.lastAimZ=q.z;
+      } else {
+        h.aimFocus=Math.max(0,h.aimFocus-dt*1.8);
+        h.lastAimX=h.lastAimZ=NaN;
+      }
       const threatPositions = sensed.map(s=>s.pos);
       if (q && !threatPositions.length) threatPositions.push(q);
       this._reconsiderHold(h,threatPositions,dt);
@@ -1241,7 +1619,10 @@ export class BioMode {
           rotate:q&&threatPositions.length>1 ? .38+profile.aggression*.16 : 0,
         };
         const next = chooseIntent(h.intent,h.intentT,scores);
-        if (next !== h.intent) { h.intent=next;h.intentT=.7+h.traits.teamwork*.35;h.routeT=0; }
+        if (next !== h.intent) {
+          h.intent=next;h.intentT=.7+h.traits.teamwork*.35;h.routeT=0;
+          if (next==='engage'||next==='rotate') h.combatGoalT=0;
+        }
         h.decisionT=.18+h.traits.reaction*.45;
       }
 
@@ -1260,31 +1641,46 @@ export class BioMode {
         if (dist<8.2) {
           [vx,vz]=this._escapeDirection(h,q,threatPositions.length?threatPositions:[q]);
           speed=HUMAN_FLEE_SPEED;
-        } else if (dist<22&&h.role!=='anchor') {
-          const dx=q.x-p.x,dz=q.z-p.z,len=Math.hypot(dx,dz)||1;
-          vx=-dz/len*h.strafeSide;vz=dx/len*h.strafeSide;
-          if (!this._canMove(p.x+vx*1.1,p.z+vz*1.1,p.y,.45,h)) h.strafeSide*=-1;
-          speed=HUMAN_RUN_SPEED_AI*.42;
-        } else [vx,vz]=this._humanRoute(h,this._holdPoint(h),dt);
+        } else {
+          const goal=this._humanCombatGoal(h,q,threatPositions,humanReservations);
+          [vx,vz]=this._humanRoute(h,goal,dt);
+          if (Math.hypot(goal[0]-p.x,goal[2]-p.z)<1.25) {
+            const dx=q.x-p.x,dz=q.z-p.z,len=Math.hypot(dx,dz)||1;
+            vx=-dz/len*h.strafeSide;vz=dx/len*h.strafeSide;
+            speed=HUMAN_RUN_SPEED_AI*.28;
+          }
+        }
+      } else if (h.intent==='rotate'&&q) {
+        [vx,vz]=this._humanRoute(h,
+          this._humanCombatGoal(h,q,threatPositions,humanReservations),dt);
+        speed=HUMAN_RUN_SPEED_AI*.88;
       } else [vx,vz]=this._humanRoute(h,this._holdPoint(h),dt);
 
-      const motion=this._moveHuman(h,vx,vz,dt,speed);
+      const motion=this._moveHuman(h,vx,vz,dt,speed*this.rules.humanSpeed);
       if (q) {
         const wanted=Math.atan2(q.x-p.x,q.z-p.z);
         const error=Math.atan2(Math.sin(wanted-h.group.rotation.y),Math.cos(wanted-h.group.rotation.y));
         const turn=THREE.MathUtils.clamp(error,-5.6*dt,5.6*dt);
         h.group.rotation.y+=turn;h.turnRate=turn/Math.max(dt,.001);
+        if (visible) {
+          const focusRate=(.75+h.traits.accuracy*.95)*(motion.speed<.8?1:.54);
+          h.aimFocus=Math.min(1,h.aimFocus+dt*focusRate);
+        }
         if (h.shotCd<=0&&h.reloadT===0&&h.ammo>0&&visible&&h.acquireT<=0&&
-            dist<27&&Math.abs(error)<.48) {
+            h.aimFocus>.2&&dist<27&&Math.abs(error)<.48&&
+            !this._friendInLineOfFire(h,q,aliveHumans)) {
           h.ammo--;h.shotNoiseT=1.1;this.combatHeat=Math.min(1,this.combatHeat+.035);
           h.burstLeft--;
-          if (h.burstLeft<=0) { h.burstLeft=2+Math.floor(Math.random()*3);h.shotCd=.62+Math.random()*.34; }
-          else h.shotCd=.25+Math.random()*.13;
-          const hitChance=Math.max(.5,h.traits.accuracy-Math.max(0,dist-8)*.012-
+          if (h.burstLeft<=0) {
+            h.burstLeft=dist>18?2+Math.floor(Math.random()*2):3+Math.floor(Math.random()*3);
+            h.shotCd=(dist>18?.7:.48)+Math.random()*.28;
+          } else h.shotCd=(dist>18?.29:.2)+Math.random()*.12;
+          const hitChance=Math.max(.34,h.traits.accuracy*.66+h.aimFocus*.27-
+            Math.max(0,dist-8)*.012-
             Math.min(.12,motion.speed*.018)-(h.intent==='evade'?.12:0));
           if (Math.random()<hitChance) {
             if (direct.isPlayer) {
-              player.hp=Math.max(0,player.hp-9);
+              player.hp=Math.max(0,player.hp-9*this.humanDamageMultiplier);
               if (player.hp===0)this.killPlayerZombie(player);
             } else direct.actor.takeDamage(12,false,{x:q.x-p.x,z:q.z-p.z});
           }
@@ -1299,6 +1695,13 @@ export class BioMode {
       } else h.turnRate*=Math.exp(-dt*9);
       this._animateHuman(h,dt,motion,!!q&&visible);
     }
+    if (this.playerZombie && !this.playerOut && Math.hypot(player.vel?.x || 0, player.vel?.z || 0) < .04) {
+      this.playerRegenT = (this.playerRegenT || 0) + dt;
+      if (this.playerRegenT >= this.rules.regenDelay && player.hp < this.playerMaxHealth) {
+        this.playerRegenT = 0; player.hp = Math.min(this.playerMaxHealth, player.hp + this.rules.zombieRegen);
+        this.sound?.bio('breath', player.pos.x, player.pos.y, player.pos.z);
+      }
+    } else this.playerRegenT = 0;
     if (this.timer <= 0) this._end('human');
     else if (this.humans.every(h => !h.alive) && (this.playerZombie || this.playerOut)) this._end('zombie');
     this.onChange?.();
@@ -1307,18 +1710,24 @@ export class BioMode {
   onZombieDeath(z) {
     if (!z.dead || z.rewarded) return;
     z.rewarded = true;
-    this.kills++;
-    for (const h of this.humans) {
-      if (h.alive) h.reserve = refillTwoMagazines(h.reserve, HUMAN_MAG_SIZE, HUMAN_INITIAL_RESERVE);
-    }
+    this._advanceZombieKill();
     this.sound?.bio('death', z.group.position.x, z.group.position.y, z.group.position.z);
     this.onZombieKilled?.(z);
     this.onChange?.();
   }
 
+  _advanceZombieKill() {
+    this.kills++;
+    this.humanDamageMultiplier = bioHumanDamageMultiplier(this.kills);
+    for (const h of this.humans) {
+      if (h.alive) h.reserve = refillTwoMagazines(h.reserve, HUMAN_MAG_SIZE, HUMAN_INITIAL_RESERVE);
+    }
+  }
+
   _end(winner) {
     if (this.phase === 'ended') return;
     this.phase = 'ended';
+    this.sound?.bio(winner === 'human' ? 'humanwin' : 'zombiewin');
     this.onRoundEnd?.(winner);
   }
 
@@ -1335,8 +1744,14 @@ export class BioMode {
     return { phase: this.phase, time: this.timer, humans: this.humans.filter(h => h.alive).length +
       (!this.playerZombie && !this.playerOut ? 1 : 0),
       zombies: this.zombies.length + (this.playerZombie ? 1 : 0),
-      playerZombie: this.playerZombie, kills: this.kills, infections: this.infections,
+      playerZombie: this.playerZombie, kills: this.kills, playerKills: this.playerKills,
+      scoreKills: this.playerKills + Math.floor(this.playerDamage / BIO_DAMAGE_MILESTONE), infections: this.infections,
       playerDamage: this.playerDamage,
+      ruleVariant: this.rules.id, ruleLabel: this.rules.label,
+      humanDamageMultiplier: this.humanDamageMultiplier,
+      lowHealth: this.playerZombie && !this.playerOut && (this.playerRef?.hp || 0) <= this.rules.lowHealthBlink,
+      supplies: (this.map?.bio?.supplyWaves || []).map(({ wave, at, deployed, claimed, position }) =>
+        ({ wave, at, deployed, claimed, position })),
       nextDamageMilestone: (Math.floor(this.playerDamage / BIO_DAMAGE_MILESTONE) + 1) * BIO_DAMAGE_MILESTONE,
       playerRespawnT: this.playerRespawnT,
       directorPhase: this.director.phase, directorIntensity: this.director.intensity,

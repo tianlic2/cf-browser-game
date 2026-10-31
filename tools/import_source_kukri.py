@@ -15,6 +15,7 @@ import zlib
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 
 def unpack(blob, fmt, at=0):
@@ -103,6 +104,20 @@ def find_vtf(name):
 def png(name, suffix=""):
     target = OUT / (name.lower().replace("-", "_") + suffix + ".png")
     target.write_bytes(vtf_png(find_vtf(name)))
+    return target.name
+
+
+def source_phong_mask_to_roughness(mask_name):
+    """Convert Source's bright=sharp Phong mask to Three's dark=smooth map."""
+    source = Image.open(OUT / mask_name).convert("RGB")
+    mask = np.asarray(source, dtype=np.float32)[:, :, 1] / 255.0
+    # Arms.vmt uses a deliberately restrained $phongboost of .5.  Keep the
+    # fabric and glove body matte while allowing the authored mask to produce
+    # only narrow, modest highlights on reinforced areas.
+    roughness = np.clip(.96 - .68 * mask, .28, .96)
+    rgb = np.repeat(np.rint(roughness[:, :, None] * 255).astype(np.uint8), 3, axis=2)
+    target = OUT / "btr_af01_roughness.png"
+    Image.fromarray(rgb).save(target, optimize=True)
     return target.name
 
 
@@ -241,6 +256,7 @@ def import_view():
     maps["HANDS_NORMAL"] = png("BTR_AF01_NORMAL", "_normal")
     maps["HANDS_AO"] = png("BTR_AF01_AO", "_ao")
     maps["HANDS_MASK"] = png("BTR_AF01_MASK", "_mask")
+    maps["HANDS_ROUGHNESS"] = source_phong_mask_to_roughness(maps["HANDS_MASK"])
 
     bone_count, bone_at = unpack(mdl, "2i", 156)
     bones, bone_anim = [], []
@@ -269,7 +285,21 @@ def import_view():
         # layering without replacing the gold/red albedo.
         "PV-KUKRI_BEAST": {"unlit": True, "reflectionMap": maps["KUKRI_MASK"],
                             "reflectionOpacity": .22},
-        "Arms": {"normalMap": maps["HANDS_NORMAL"], "aoMap": maps["HANDS_AO"], "roughness": .72},
+        # The missing stock v_hands dependency has no authored VMT in this
+        # pack.  Keep its albedo unchanged, but stop the viewmodel environment
+        # from bleaching the exposed skin and black finger pads.
+        "v_hands": {"roughness": .94, "metalness": 0,
+                    "envMapIntensity": .08, "color": "#dcecff",
+                    "emissiveMap": maps["v_hands"], "emissive": "#dcecff",
+                    "emissiveIntensity": .16},
+        # Source normal maps use the DirectX convention.  Three's tangent-space
+        # normal expects OpenGL Y, so invert the green direction through
+        # normalScale.  Convert the VMT's Phong exponent mask into the PBR
+        # roughness domain instead of silently dropping it.
+        "Arms": {"normalMap": maps["HANDS_NORMAL"], "aoMap": maps["HANDS_AO"],
+                 "roughnessMap": maps["HANDS_ROUGHNESS"], "roughness": 1,
+                 "metalness": 0, "envMapIntensity": .30,
+                 "normalScale": [.55, -.55]},
     }
     for body, material, indices in optimized_parts(mdl, vtx, vertices):
         packed = bytearray()

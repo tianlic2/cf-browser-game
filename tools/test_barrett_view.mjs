@@ -76,8 +76,8 @@ assert.ok(wristRotationDot < .99,
   'idle hands must use the source weapon-holding pose, not the spread-arm reference bind pose');
 assert.match(main, /ClassicView\.load\('barrett'\)/);
 assert.match(main, /if\(barrettView&&vid==='barrett'\)/);
-assert.match(main, /BARRETT_VIEW_POSE = Object\.freeze\(\{[\s\S]*?x: \.99, y: -\.12, z: \.12, pitch: 0, yaw: \.01, roll: 0, scale: 4\.826,[\s\S]*?\}\)/,
-  'the Barrett should match the supplied reference position, scale and three-axis angle');
+assert.match(main, /BARRETT_VIEW_POSE = Object\.freeze\(\{[\s\S]*?\.\.\.WEAPON_TUNING\.barrett\.pose,[\s\S]*?\}\)/,
+  'the Barrett should use the approved exported position, scale and three-axis angle');
 assert.match(main, /const pose=viewmodelPoseLive\.barrett;[\s\S]*?barrettView\.root\.position\.set\(pose\.x\+bobX,[\s\S]*?pose\.y\+bobY[\s\S]*?pose\.z/,
   'the Barrett view uses its calibrated pose without changing internal proportions');
 assert.match(main, /ClassicView\.load\('barrett'\)\.then\(v=>\{[\s\S]*?v\.root\.scale\.setScalar\(viewmodelPoseLive\.barrett\.scale\)/,
@@ -87,7 +87,7 @@ assert.match(main, /VIEWMODEL_TUNER_ITEMS = Object\.freeze\(\[[\s\S]*?id: "ak"[\
 const tunerItems = main.slice(main.indexOf('const VIEWMODEL_TUNER_ITEMS'), main.indexOf('const VIEWMODEL_POSE_DEFAULTS'));
 assert.doesNotMatch(tunerItems, /id: "(?:awm|pistol)"/,
   'removed AWM and USP do not remain in the live tuner');
-assert.match(main, /deagle: Object\.freeze\(\{ x: \.23, y: -\.19, z: -\.55, pitch: 0, yaw: -\.04, roll: 0, scale: 1\.368 \}\)/,
+assert.match(main, /deagle: WEAPON_TUNING\.deagle\.pose/,
   'the newly imported Desert Eagle uses the user-approved live-tuned pose');
 assert.match(main, /key: "yaw"[^\n]*min: -6\.28, max: 6\.28/,
   'the tuner yaw range preserves the authored Desert Eagle angle');
@@ -97,11 +97,11 @@ assert.doesNotMatch(main, /vid === "awm"|vid === "pistol"/,
   'removed AWM and USP no longer participate in standard viewmodel posing');
 assert.match(main, /const pose=viewmodelPoseLive\.deagle;[\s\S]*?deagleFestaView\.root\.scale\.setScalar\(pose\.scale\);[\s\S]*?deagleFestaView\.root\.position\.set\(pose\.x\+bobX,[\s\S]*?deagleFestaView\.root\.rotation\.set\(pose\.pitch\+\(deploy\?0:swRx\),[\s\S]*?pose\.yaw\+\(deploy\?0:swRy\),pose\.roll\+\(deploy\?0:swRz\)\)/,
   'the Desert Eagle applies all seven live pose fields to the complete authored rig');
-assert.match(main, /ak: Object\.freeze\(\{ x: \.38, y: -\.18, z: \.01, pitch: \.01, yaw: \.02, roll: 0, scale: 2\.63 \}\)/,
+assert.match(main, /ak: WEAPON_TUNING\.ak\.pose/,
   'the AK uses the user-approved live-tuned pose');
-assert.match(main, /m4: Object\.freeze\(\{ x: -\.42, y: -\.20, z: -\.18, pitch: 0, yaw: -1\.58, roll: 0, scale: 1\.230 \}\)/,
+assert.match(main, /m4: WEAPON_TUNING\.m4\.pose/,
   'the M4 uses the user-approved live-tuned pose');
-assert.match(main, /knife: Object\.freeze\(\{ x: \.64, y: -\.42, z: -1\.39, pitch: \.01, yaw: 1\.55, roll: -\.05, scale: 2\.414 \}\)/,
+assert.match(main, /knife: WEAPON_TUNING\.knife\.pose/,
   'the imported Festa axe uses its calibrated complete-rig pose');
 assert.match(main, /VIEWMODEL_TUNER_ACTIVE[\s\S]*?mountViewmodelTuner\(\)/,
   'the opt-in multi-weapon tuner auto-starts a live preview without affecting the normal game URL');
@@ -109,7 +109,7 @@ assert.match(main, /history\.replaceState\(null, "", url\)/,
   'the tuner persists all live pose values into the URL for handoff');
 assert.match(main, /const BARRETT_SELECT_DURATION = 1\.371429/,
   'the Barrett deploy plays its complete authored bolt-rack animation at source timing');
-assert.match(main, /stats: \{ magSize: 10, reserve: 20, interval: 1\.55,[^\n]*boltTime: 2\.36/,
+assert.match(main, /stats: tunedFirearmStats\('barrett', \{ boltTime: 2\.36, zoom: true \}\)/,
   'Barrett firing stays locked for the deliberately slowed 2.36-second bolt cycle');
 assert.match(main, /const BARRETT_FIRE_LEAD = \.20;[\s\S]*?const BARRETT_BOLT_SLOWDOWN = 1\.20/,
   'the initial firing snap stays fast while only the post-shot bolt segment is slowed by 20%');

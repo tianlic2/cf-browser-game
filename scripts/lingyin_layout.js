@@ -6,6 +6,8 @@ import { SMALL_HALLS, smallHallFurnitureBounds } from './lingyin_small_halls.js?
 import { MAIN_HALL, MAIN_HALL_SCALE, mainHallPoint } from './lingyin_main_hall.js?v=1';
 import { stairLandingSupport } from './brush_collision.js?v=lingyin-jump-1';
 import {MAIN_INTERIOR_COLUMNS,MAIN_COLUMN_PARTS,MAIN_CENSER,MAIN_CENSER_PROFILE,MAIN_HALL_FIXTURES,hallPerimeterColumns,columnBrush} from './lingyin_columns.js?v=1';
+import { COURT_COVER } from './lingyin_court_cover.js?v=1';
+import { LINGYIN_WELL as W } from './lingyin_well_layout.js?v=1';
 
 export const LINGYIN_BOUNDS = { hw: 84, hl: 76 };
 export const LINGYIN_PLATFORM_Y = 3.25;
@@ -44,6 +46,13 @@ export function lingyinLayout({approvedLandscape=false}={}) {
   };
   const colliders = [];
   const add = (...args) => colliders.push(brush(...args));
+  for (const c of COURT_COVER) {
+    add(c.x,c.z,c.hx,c.hz,0,c.h);
+    colliders.at(-1).name = 'courtyard-stone-cover';
+  }
+  colliders.push(columnBrush(W.x,W.z,W.bodyBottom,W.bodyTop,W.bodyTopRadius,W.bodyBottomRadius,1,1,0,16,'old-well-body'));
+  for(const side of [-1,1]) colliders.push(columnBrush(W.x+side*W.postOffset,W.z,W.postBottom,W.postTop,W.postTopRadius,W.postBottomRadius,1,1,0,8,`old-well-post-${side}`));
+  add(W.x,W.z,W.roofHalfX,W.roofHalfZ,W.roofBottom,W.roofTop);colliders.at(-1).name='old-well-roof';
   // Perimeter solids match the visible walls and north terrace rail. The old
   // west pilgrimage gate is sealed by a low stone fence; the east bridge bay
   // stays open and its swung leaves and lintel use separate proxies.
@@ -62,7 +71,7 @@ export function lingyinLayout({approvedLandscape=false}={}) {
   add(27.5,28,.95,5.2,3.58,3.95); // tiled lintel, above player height
   // Bridge parapets follow the permanent stone visual and leave the full
   // centre deck clear for player and NPC capsules.
-  for(const z of [25.9,30.1])add(36,z,7.25,.16,.3,1.62);
+  for(const z of [24.05,31.95])add(36,z,7.25,.11,.3,1.62);
   // Grounded ochre side-wing extensions replace the former low stone rails.
   add(-24.5,45.75,10.5,.46,-.02,3.76);
   add(18.5,45.75,8.5,.46,-.02,3.76);
@@ -294,14 +303,16 @@ export function lingyinLayout({approvedLandscape=false}={}) {
 
   const insideTemple = (x,z) => x > -35.5 && x < 27.5 && z > -46.8 && z < 45.7;
   const eastBridgeSurfaceAt=(x,z,maxHeight=Infinity)=>{
-    if(Math.abs(z-28)>2.22||x<27.3||x>43.25)return null;
-    const profile=[[27.3,0],[28.38,.11],[29.1,.22],[29.82,.34],
-      [31,.34],[33.45,.52],[36,.66],[38.55,.52],[41.1,.34],[43.25,.34]];
-    let y=profile.at(-1)[1];
-    for(let i=0;i<profile.length-1;i++)if(x<=profile[i+1][0]) {
-      const a=profile[i],b=profile[i+1],t=(x-a[0])/(b[0]-a[0]);
-      y=a[1]+(b[1]-a[1])*Math.max(0,Math.min(1,t));break;
-    }
+    if(Math.abs(z-28)>4.1||x<27.3||x>43.25)return null;
+    // The visible bridge is made of five flat stone sections. Use their
+    // actual tops, rather than interpolating an invisible sloping surface.
+    const sections=[[30.9,.34],[33.45,.52],[36,.66],[38.55,.52],[41.1,.34]];
+    let y=null;
+    for(const [cx,top] of sections) if(Math.abs(x-cx)<=(cx===41.1?1.7251:1.2751)) y=Math.max(y??-Infinity,top);
+    for(let i=0;i<3;i++) if(Math.abs(x-(28.38+i*.72))<=.3601)
+      y=Math.max(y??-Infinity,.11+i*.11);
+    if(y===null && x<=28.02) y=0;
+    if(y===null) return null;
     return y<=maxHeight?y:null;
   };
   const surfacesAt = (x,z,maxHeight = Infinity) => {
@@ -353,12 +364,14 @@ export function lingyinLayout({approvedLandscape=false}={}) {
   };
   refreshSpawnHeights();
   const topdown = [
+    ...COURT_COVER.map(c=>({kind:'hull',x:c.x,z:c.z,hx:c.hx,hz:c.hz})),
+    {kind:'hull',x:W.x,z:W.z,hx:W.bodyBottomRadius,hz:W.bodyBottomRadius},
     {kind:'hull',x:-35.5,z:-21.1,hx:.2,hz:24.9},
     {kind:'hull',x:-35.5,z:27.95,hx:.2,hz:17.75},
     {kind:'hull',x:-35.5,z:7,hx:.22,hz:3},
     {kind:'hull',x:27.5,z:-12,hx:.2,hz:35},
     {kind:'hull',x:27.5,z:39,hx:.2,hz:6},
-    {kind:'bridge',x:35.25,z:28,hx:7.95,hz:2.3},
+    {kind:'bridge',x:35.25,z:28,hx:7.95,hz:4.1},
     {kind:'hull',x:-4,z:-47,hx:32,hz:.2},
     ...structures.map(({x,z,w,d,rot})=>({kind:'house',x,z,
       hx:Math.abs(Math.cos(rot))*w/2+Math.abs(Math.sin(rot))*d/2,

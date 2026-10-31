@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeKn57SourceMaterial } from './kn57_source_material.js?v=source-4';
 import { fetchJoinedAsset } from './chunked_asset.js?v=github-publish-1';
 
 // Original CF first-person AK: hands, fingers and gun share the authored rig.
@@ -7,7 +8,7 @@ export class ClassicView {
   static async load(asset='ak/view') {
     try {
       const base=new URL(`../assets/classic/${asset}/`,import.meta.url);
-      const version='kukri-scoped-vfx-1';
+      const version='kukri-hand-material-1';
       const assetUrl=name=>{const u=new URL(name,base);u.searchParams.set('v',version);return u;};
       const r=await fetch(assetUrl('view.json'));if(!r.ok)throw new Error('view.json');
       const data=await r.json();
@@ -16,7 +17,7 @@ export class ClassicView {
       const textures=await Promise.all(data.parts.map(async p=>{
         const load=async name=>name?loader.loadAsync(assetUrl(name).href):null;
         return {map:await load(p.map),normalMap:await load(p.normalMap),
-          metalnessMap:await load(p.metalnessMap),aoMap:await load(p.aoMap),
+          metalnessMap:await load(p.metalnessMap),roughnessMap:await load(p.roughnessMap),aoMap:await load(p.aoMap),
           emissiveMap:await load(p.emissiveMap),reflectionMap:await load(p.reflectionMap)};
       }));
       return new ClassicView(data,bytes,textures,asset!=='m4_ironbeast');
@@ -68,7 +69,9 @@ export class ClassicView {
       map.colorSpace=p.linearAdditive?THREE.NoColorSpace:THREE.SRGBColorSpace;
       if(maps.emissiveMap)maps.emissiveMap.colorSpace=THREE.SRGBColorSpace;
       let material;
-      if(p.additive) {
+      if(p.sourceMaterial) {
+        material=makeKn57SourceMaterial(p,maps);
+      } else if(p.additive) {
         // GoldSrc's compiled MDL marks both the S_ bodygroup and every VFX
         // texture STUDIO_NF_ADDITIVE. Preserve that independent overlay instead
         // of interpreting the S_ bitmap as a modern PBR metalness mask.
@@ -81,13 +84,22 @@ export class ClassicView {
         // and apply its $envmapmask as a separate low-energy overlay below.
         material=new THREE.MeshBasicMaterial({map,toneMapped:false});
       } else {
-        material=new THREE.MeshStandardMaterial({map,
+        const Material = p.sourcePhong ? THREE.MeshPhysicalMaterial : THREE.MeshStandardMaterial;
+        const physical = p.sourcePhong ? {specularIntensity:1,
+          specularIntensityMap:maps.specularIntensityMap||null,
+          specularColor:new THREE.Color(p.specularColor||'#ffffff')} : {};
+        material=new Material({map,...physical,
+          transparent:!!p.transparent,depthWrite:!p.transparent,
+          side:p.doubleSided?THREE.DoubleSide:THREE.FrontSide,
+          color:p.color?new THREE.Color(p.color):new THREE.Color(0xffffff),
           normalMap:maps.normalMap||null,metalnessMap:maps.metalnessMap||null,
+          roughnessMap:maps.roughnessMap||null,
           aoMap:maps.aoMap||null,emissiveMap:maps.emissiveMap||null,
           roughness:p.roughness??.85,metalness:p.metalness??.04,
           envMapIntensity:p.envMapIntensity??1,
           emissive:p.emissive?new THREE.Color(p.emissive):new THREE.Color(0),
           emissiveIntensity:p.emissiveIntensity??0});
+        if(p.normalScale)material.normalScale.fromArray(p.normalScale);
         if(maps.aoMap&&!g.attributes.uv1)g.setAttribute('uv1',g.attributes.uv.clone());
       }
       const mesh=new THREE.SkinnedMesh(g,material);

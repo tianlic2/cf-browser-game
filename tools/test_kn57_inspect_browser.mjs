@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {chromium} from '../lingyin-map/node_modules/playwright-core/index.mjs';
+const browser=await chromium.launch({channel:'chrome',headless:true});
+try {
+ const page=await browser.newPage({viewport:{width:1280,height:720}}), errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:8123/?debug&debugMap=transport&debugAutoStart=1&debugNoEnemies=1&qa=inspect-1');
+ await page.waitForFunction(()=>window.__tactical?.ready()&&__tactical.admittedView('kn57')?.clips.inspect,null,{timeout:120000});
+ await page.waitForSelector('#bootScreen',{state:'detached',timeout:120000});
+ await page.evaluate(()=>{Object.defineProperty(document,'pointerLockElement',{configurable:true,get:()=>document.getElementById('viewport')});document.dispatchEvent(new Event('pointerlockchange'));const t=__tactical;t.switchBackpack(7);t.clearSwitch();t.resume()});
+ const materials=await page.evaluate(()=>{const v=__tactical.admittedView('kn57'),out=[];v.root.traverse(o=>{if(o.isSkinnedMesh)out.push({source:o.material.customProgramCacheKey()==='kn57-source-phong-v1',normal:!!o.material.normalMap})});return out});
+ assert.ok(materials.filter(m=>m.source&&m.normal).length>=20,'gun uses Source-inspired materials and normal masks');
+ await page.waitForTimeout(5600);
+ assert.equal(await page.evaluate(()=>__tactical.admittedView('kn57').clip),'idle_0','idle never starts the original inspection');
+ await page.keyboard.press('v');
+ await page.waitForFunction(()=>__tactical.admittedView('kn57').clip==='inspect',null,{timeout:3000});
+ await page.waitForTimeout(500);
+ assert.ok(await page.evaluate(()=>__tactical.admittedView('kn57').seconds>.2),'inspection advances');
+ await page.evaluate(()=>{__tactical.owned.kn57.state.nextFireAt=0;__tactical.forceFire()});
+ await page.waitForFunction(()=>__tactical.admittedView('kn57').clip.startsWith('shoot'),null,{timeout:3000});
+ await page.waitForTimeout(1100); await page.keyboard.press('v');
+ await page.waitForFunction(()=>__tactical.admittedView('kn57').clip==='inspect');
+ await page.evaluate(()=>__tactical.startReload());
+ await page.waitForFunction(()=>__tactical.admittedView('kn57').clip==='reload');
+ await page.evaluate(()=>__tactical.clearReload()); await page.waitForTimeout(1000);
+ assert.equal(await page.evaluate(()=>__tactical.admittedView('kn57').clip),'idle_0','reload cancels inspect');
+ await page.keyboard.press('v');await page.waitForFunction(()=>__tactical.admittedView('kn57').clip==='inspect');
+ await page.evaluate(()=>{__tactical.switchWeapon('deagle');__tactical.clearSwitch();__tactical.switchWeapon('kn57');__tactical.clearSwitch()});
+ await page.waitForTimeout(200);assert.equal(await page.evaluate(()=>__tactical.admittedView('kn57').clip),'idle_0','switch cancels inspect');
+ await page.keyboard.press('v');await page.waitForFunction(()=>__tactical.admittedView('kn57').clip==='inspect');
+ await page.waitForFunction(()=>__tactical.admittedView('kn57').clip==='idle_0',null,{timeout:8000});
+ await page.evaluate(()=>{__tactical.switchWeapon('barrett',true);__tactical.clearSwitch()});await page.keyboard.press('v');
+ assert.equal(await page.evaluate(()=>__tactical.isScoped()),true,'V still scopes for Barrett');
+ assert.deepEqual(errors,[]);console.log('PASS: idle stays still; V plays inspection once; fire, reload and switching cancel it; Barrett V scope remains.');
+} finally {await browser.close()}

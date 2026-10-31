@@ -3,6 +3,70 @@
 export const SIGHT_MEMORY = 5.0;
 export const SOUND_MEMORY = 3.0;
 
+// A squad deliberately contains different jobs.  The slot comes from the
+// manager rather than Math.random(), so a respawn wave cannot accidentally be
+// made entirely of the same kind of bot.
+export const TACTICAL_ROLES = Object.freeze([
+  { id: 'entry',   lane:  0.18, radius: 9.0,  angle:  0.08, near: .82, far: .88, burst: 1, pause: .82 },
+  { id: 'flank-l', lane: -1.00, radius: 13.0, angle: -1.05, near: 1.0, far: 1.02, burst: 0, pause: 1.02 },
+  { id: 'support', lane:  0.58, radius: 16.5, angle:  0.48, near: 1.1, far: 1.12, burst: 0, pause: 1.10 },
+  { id: 'anchor',  lane: -0.48, radius: 21.0, angle: -0.30, near: 1.3, far: 1.28, burst: -1, pause: 1.22 },
+  { id: 'flank-r', lane:  1.00, radius: 13.0, angle:  1.05, near: 1.0, far: 1.02, burst: 0, pause: 1.02 },
+]);
+
+const ROUTE_LANES = Object.freeze([0, -1, 1, -.56, .56, -1.34, 1.34]);
+
+export function makeTacticalProfile(seed = 0, slot = 0) {
+  const role = TACTICAL_ROLES[((slot % TACTICAL_ROLES.length) + TACTICAL_ROLES.length) % TACTICAL_ROLES.length];
+  const lane = ROUTE_LANES[((slot % ROUTE_LANES.length) + ROUTE_LANES.length) % ROUTE_LANES.length];
+  const jitter = Math.sin(seed * 19.17 + slot * 2.31) * .12;
+  return { ...role, slot, lane: lane || role.lane, radius: role.radius + jitter };
+}
+
+const apartFromReservations = (x, z, reserved, spacing) =>
+  !(reserved || []).some(p => Math.hypot(x - p.x, z - p.z) < spacing);
+
+// Pick a committed intermediate waypoint instead of feeding every soldier the
+// same final target and therefore the same shortest-path flow field.
+export function chooseRouteDiversion(self, target, profile, valid, reserved = []) {
+  const dx = target.x - self.x, dz = target.z - self.z;
+  const distance = Math.hypot(dx, dz);
+  if (!Number.isFinite(distance) || distance < 9) return null;
+  const fx = dx / distance, fz = dz / distance;
+  const lane = profile?.lane || 0;
+  const forward = Math.min(13, Math.max(6.5, distance * .42));
+  const lateral = lane * Math.min(7.5, Math.max(3.2, distance * .18));
+  for (const scale of [1, .72, -.42]) {
+    const x = self.x + fx * forward - fz * lateral * scale;
+    const z = self.z + fz * forward + fx * lateral * scale;
+    if (apartFromReservations(x, z, reserved, 2.8) && valid(x, z))
+      return { x, y: self.y, z };
+  }
+  return null;
+}
+
+// Reserve distinct firing positions around the contact. Roles differ in
+// preferred range and approach angle; reservations prevent several valid
+// choices from collapsing onto the same corner.
+export function chooseCombatPosition(self, threat, profile, valid, reserved = []) {
+  const base = Math.atan2(self.x - threat.x, self.z - threat.z);
+  const preferred = profile?.radius || 14;
+  const roleAngle = profile?.angle || 0;
+  let best = null, bestScore = Infinity;
+  const turns = [0, .34, -.34, .68, -.68];
+  const radii = [preferred, preferred * .86, preferred * 1.12];
+  for (const turn of turns) for (const radius of radii) {
+    const angle = base + roleAngle + turn;
+    const x = threat.x + Math.sin(angle) * radius;
+    const z = threat.z + Math.cos(angle) * radius;
+    if (!apartFromReservations(x, z, reserved, 3.4) || !valid(x, z)) continue;
+    const travel = Math.hypot(x - self.x, z - self.z);
+    const score = travel * .08 + Math.abs(turn) * .7 + Math.abs(radius - preferred) * .05;
+    if (score < bestScore) { bestScore = score; best = { x, y: self.y, z }; }
+  }
+  return best;
+}
+
 export function makeAwareness(x, y, z, seed = 0) {
   return { x, y, z, homeX: x, homeY: y, homeZ: z, memory: 0,
     visible: false, reaction: 0, mode: 'patrol', searchT: 0,

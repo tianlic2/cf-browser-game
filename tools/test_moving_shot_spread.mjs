@@ -4,7 +4,7 @@ import { movementSpreadTangent, sampleShotOffset } from '../scripts/shot_spread.
 
 const main = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const ak = { stand: 0.00641, crouch: 0.00481, move: 0.17506, jumpInitial: 0.10094, jump: 0.14076 };
+const ak = { stand: 0.0025, crouch: 0, move: 0.17506, jumpInitial: 0.10094, jump: 0.14076 };
 const still = { onGround: true, crouching: false, sneaking: false,
   horizontalSpeed: 0, verticalSpeed: 0, runSpeed: 8, jumpVelocity: 7.5 };
 const walking = { ...still, horizontalSpeed: 4 };
@@ -37,8 +37,8 @@ assert.ok(Math.hypot(hip.x, hip.y) > 0.045, 'moving sniper retains and expands i
 
 assert.match(main, /pattern: AK_LIVE_PATTERN/);
 assert.match(main, /pattern: M4_LIVE_PATTERN/);
-assert.match(main, /const AK_LIVE_PATTERN = scalePattern\(akPattern\(\), 1\.25, 1\.25\)/);
-assert.match(main, /const M4_LIVE_PATTERN = scalePattern\(M4_PATTERN, 1\.25, 1\.25\)/);
+assert.match(main, /const AK_LIVE_PATTERN = tunedPattern\(akPattern\(\), 'ak'\)/);
+assert.match(main, /const M4_LIVE_PATTERN = tunedPattern\(M4_PATTERN, 'm4'\)/);
 assert.match(main, /function baseInaccuracy\(def\)[\s\S]*?movementShotSpread\(def\)/,
   'HUD crosshair includes the same movement radius');
 assert.match(main, /const offset = sampleShotOffset\(movementShotSpread\(def\)/,
@@ -48,4 +48,4 @@ assert.match(main, /WEAPON_STATE\.sinceShot = 0;\s*advancePunch\(\)/,
   'the current bullet resolves before next-shot recoil');
 assert.match(html, /main\.js\?v=[a-z0-9-]+/,
   'the entry module carries a cache-busting version');
-console.log('PASS: stronger recoil and real walking, sneaking and jumping shot spread; stationary aim and sniper hip ring preserved.');
+console.log('PASS: approved recoil and real walking, sneaking and jumping shot spread; stationary aim and sniper hip ring preserved.');

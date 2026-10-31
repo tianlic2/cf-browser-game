@@ -20,7 +20,9 @@ export function weaponPreview(renderer, source, key, environment, compact = fals
   const fill=new THREE.DirectionalLight(0xbadce7,.9);fill.position.set(-3,1,2);stage.add(fill);
   stage.updateMatrixWorld(true);
   const camera=new THREE.OrthographicCamera(-1,1,1,-1,.01,100);
-  camera.position.set(3,.4,.65);camera.lookAt(0,0,0);camera.updateMatrixWorld(true);
+  if(key === 'knife:stock') camera.position.set(3,2,.65);
+  else camera.position.set(3,.4,.65);
+  camera.lookAt(0,0,0);camera.updateMatrixWorld(true);
   const projected=new THREE.Box3(),corner=new THREE.Vector3();
   box.setFromObject(holder);
   for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z])

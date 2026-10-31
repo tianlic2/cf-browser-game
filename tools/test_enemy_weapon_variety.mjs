@@ -10,8 +10,8 @@ const [catalog, rig, enemies, main, bio] = await Promise.all([
 ]);
 
 // Execute the real draw function with a fixed random source. Every complete
-// bag must contain each available primary, while the sniper-only override must
-// not drain or change the ordinary match's next bag.
+// bag must contain each available primary. A filtered draw must not drain or
+// change the ordinary match's next bag.
 const bag = catalog.match(/const ENEMY_GUN_BAG = (\[[^;]+\]);/)?.[1];
 const fn = catalog.match(/export function randomGunRoll\([\s\S]*?\n\}/)?.[0];
 assert.ok(bag && fn, 'enemy gun draw remains available');
@@ -37,9 +37,9 @@ assert.match(enemies, /const load = this\.loadoutPicker \? this\.loadoutPicker\(
 assert.match(enemies, /e\.reset\(x, z, Object\.assign\(/);
 assert.match(enemies, /this\.rig\.setRifle\(opts\.rifle \|\| null, opts\.gunId\)/,
   'reused enemies replace the prior visible weapon even when an asset is absent');
-assert.match(main, /sniperOnly \? \["barrett"\] : undefined/,
-  'Watch City remains sniper-only');
-assert.match(main, /r\.id === "barrett" \? \(sniperOnly \? d\.stats\.interval : d\.stats\.boltTime\) : 0/,
+assert.match(main, /const r = randomGunRoll\(\)/,
+  'every retained team map uses the shared varied enemy loadout pool');
+assert.match(main, /r\.id === "barrett" \? d\.stats\.boltTime : 0/,
   'a Barrett in an ordinary match still uses single-shot bolt cadence');
 assert.match(main, /sfx\.enemyShoot\(mz\.x, mz\.y, mz\.z, e\.gunId\)/,
   'shot audio follows the equipped gun');
@@ -49,7 +49,7 @@ assert.match(rig, /this\.mount\.add\(this\.rifle\)/,
   'the equipped weapon is mounted on the classic actor');
 assert.match(rig, /muzzleBody\(out\)/,
   'gunfire position follows the classic weapon mount');
-assert.match(bio, /guncatalog\.js\?v=enemy-loadouts-1/,
+assert.match(bio, /guncatalog\.js\?v=gamebanana-admitted-1/,
   'biochemical NPCs share the same prebuilt world catalog');
 
-console.log('PASS: enemy respawn loadouts span AK/M4/Barrett, sniper rules persist, and classic hands/audio show the equipped gun.');
+console.log('PASS: enemy respawn loadouts span AK/M4/Barrett on every retained team map, with bolt cadence and matching hands/audio.');

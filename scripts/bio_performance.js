@@ -9,15 +9,16 @@ export function bioSenseOffset(index, count, interval) {
   return (Math.max(0, Number(index) || 0) % total) / total * interval;
 }
 
-// 返回 0 表示逐帧更新。真正处在玩家画面里的中近距离人物必须保持满帧动作；
-// 视野外人物只保留低频姿态推进，重新进入画面时最多补 250ms，不会从旧姿势瞬移。
+// 返回 0 表示逐帧更新。近战范围保持满帧；其余人物按距离和可见性错峰推进骨骼，
+// 位置、碰撞和攻击仍逐帧计算，重新进入画面时最多补 200ms。
 export function bioAnimationInterval(inView, distance) {
   const d = Number.isFinite(distance) ? Math.max(0, distance) : Infinity;
-  if (d <= 10) return 0;          // 身后近战也不能降频，玩家可能瞬间转身
-  if (inView && d <= 32) return 0;
-  if (inView) return .05;         // 远处仍在画面：20Hz 骨骼足够，位置仍逐帧
-  if (d <= 16) return .10;        // 近处但在视野外：10Hz，兼顾快速回头
-  return .25;                     // 远处视野外：4Hz
+  if (d <= 7) return 0;           // 近战距离保持逐帧，攻击和受击姿态不能降级
+  if (inView && d <= 18) return 1 / 30;
+  if (inView && d <= 36) return .05;
+  if (inView) return .10;
+  if (d <= 16) return .10;
+  return .20;
 }
 
 export function bioBudgetDue(elapsed, interval) {

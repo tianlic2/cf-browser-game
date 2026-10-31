@@ -1,0 +1,102 @@
+GameBanana 枪械候选检查记录 — 2026-10-24
+
+状态：11 套已转换进本地隔离预览。用户已批准 SCAR Light 白虎、CheyTac M200 与黄金 AK 分别接入本地游戏第 5、6、7 背包；其他候选保持隔离。NPC 随机配枪池不变，受限运行资源未上传 GitHub。
+入口：http://127.0.0.1:8123/preview/gamebanana-weapons.html
+
+白虎本地接入（baihu-game-1）
+安装：PYTHONPYCACHEPREFIX=/private/tmp/cf-candidate-pycache python3 tools/install_scar_light.py
+运行资源：assets/local/scar_light/（明确 gitignore，无公共再分发授权）。
+正式游戏 B + 5 使用；原四个背包不变，狙击限定地图仍只允许巴雷特/近战。
+验证：tools/test_scar_light.mjs、tools/test_scar_light_browser.mjs，以及背包 UI、
+既有 M4/巴雷特/沙鹰、音频中断、生化视模隐藏、曳光与候选隔离回归。
+Chrome 实测：52 骨骼、完整原生换弹（37 根骨骼在两个采样时点变化）、五个 WAV 成功解码；
+开火/出枪/换弹均使用原包采样，换弹事件 .818s / 1.773s，切枪正确取消未发生事件；
+丢枪/拾取保持剩余弹药，世界模型不含手臂，运行循环与资源请求零错误。
+正式游戏不请求任何 assets/preview/gamebanana-weapons/ 资源，其余八把未接入。
+
+M200 与黄金 AK 本地接入（gamebanana-admitted-1）
+安装：python3 tools/install_admitted_gamebanana_weapons.py
+运行资源：assets/local/m200/、assets/local/akgold/（明确 gitignore，无公共再分发授权）。
+M200 使用源 88 骨骼、.84s 出枪、1.29s 开火回膛和 2.19s 换弹，机械声事件为
+.01/.41s 与换弹 .08/.38/1.10/1.75s；黄金 AK 使用源 59 骨骼、.895s 出枪、
+三段 .2125s 开火和 2.615s 换弹，声音事件为 0s 与换弹 9/13、19/13、25/13s。
+地面掉落分别使用去手臂的 8885 与 5064 三角面世界模型；NPC 随机池不含二者。
+验证：tools/test_admitted_gamebanana_weapons.mjs 与对应浏览器回归确认零加载失败、
+原生贴图/动作/声音、B+6/B+7、掉落模型、缓存隔离及未请求候选预览目录。
+
+来源 A：Crossfire Weapons Pack Vol.3
+https://gamebanana.com/mods/475372
+发布者/移植：HLXX50；原素材：Smilegate。
+文件：crossfire-pack-vol3.rar，GameBanana file 1075994，35,633,172 bytes。
+MD5：bfa8287f11abb976b87ee25e4f2dd026
+SHA256：cdc275c351809f549e84c51214c7c0bdffb6e7a1cd0c8a7d2b20171b75004e41
+
+枪型                  骨骼/指骨    三角面   配套声音
+AN94                   52/30       3439     6
+SCAR Heavy             52/30       3968     6
+H&K MP7                51/30       2619     4
+TAR-21                 51/30       3438     5
+Colt M1911             51/30       2638     6
+DSR-1                  52/30       3396    10
+Remington 870          52/30       3552     6
+Armsel Striker         51/30       3988     5
+
+来源 B：Crossfire SCAR Light-BaiHu
+https://gamebanana.com/mods/468236
+发布者/移植：HLXX50；原模型、贴图、动作、声音：Smilegate。
+文件：scarlight-baihu.rar，GameBanana file 1054440，2,197,933 bytes。
+MD5：79c126ce900f639f72034c10f226064e
+SHA256：050ad4211e5eaf0e2731dbbe785222177bebe37996cbaa8fb6a792a5b7a1b099
+SCAR Light 白虎：52/30 骨骼/指骨，30244 三角面，5 段配套声音。
+这把包含额外的原生加法特效，约为其他候选的 8～12 倍几何负载；仅持用时显示完整视模，世界/掉落使用原包独立 2924 三角面模型，不携带手臂或高模特效。
+
+来源 C：CheyTac M200 Dominator Gaming Glory
+https://gamebanana.com/mods/620567
+编译：TenTails；移植：Compete-King；原模型、贴图、动作和声音：Smilegate；手部：Valve。
+文件：cheytac_m200_dominator_gaming_glory.7z，GameBanana file 1519268，726829 bytes。
+MD5：b8586c6bf4ab6693667570734467a227
+M200：88/30 骨骼/指骨，9895 三角面，7 段配套声音；原开火片段含回膛事件。
+
+来源 D：AK47-Knife Transformers Imperial Gold
+https://gamebanana.com/mods/223752
+移植：Lycanth；原模型、贴图、动作和声音：Smilegate。
+文件：ak47ironbeastgold.zip，GameBanana file 393580，1039917 bytes。
+MD5：dde8c5ffb70b3adcb9930edb59c85c4f
+黄金 AK：59/30 骨骼/指骨，6398 三角面，6 段配套声音。
+
+检查内容
+1. 每把有完整原生手部、手套/袖口，28 根指骨实际参与手部网格蒙皮。
+2. 原始待机、出枪、开火与换弹全帧保留；未合用旧 AK 手臂。
+3. 泵动/拉栓继续在原开火片段内，保留相应机械事件声音。
+4. 逐发装填以原 reload_0、reload_1、reload_2 组合展示三发装填流程。
+5. 源 MDL 声音事件严格按 frame/fps 调度；枪声使用同一包对应槽位的采样，在扳机事件触发。
+6. 十一把与全部 66 个声音文件均在浏览器中实际加载、解码；动作驱动真实骨骼，无脚本或资源失败。
+7. 完整性通过不代表自动获准正式使用；当前只有白虎、M200 和黄金 AK 经用户逐项确认后接入本地游戏。
+
+贴图映射修复（native-uv-3）
+GoldSrc 原生顶端起点的 t/h 必须以 1-t/h 写入本项目 SMD 兼容数据，
+以抵消 ClassicView 已有的 V 翻转；最终 GPU 采样坐标才与 MDL 相同。
+十一把共 73575 个三角面已逐一与源命令 UV 核对；不修改公用 ClassicView。
+非 UV 顶点数据、骨骼、动作帧、音效事件与全部 79 张 PNG、66 个音频均保持字节一致。
+预览改用中性白光与曝光 1；源白虎亮青/白色瞄具与加法特效仍保留。
+脚本、JSON、view.bin 均已刷新缓存版本，状态栏显示“贴图方向已校正”。
+
+淘汰记录
+https://gamebanana.com/mods/222996 — Crossfire JNG-90，crossfire_jng90.zip，file 203407。
+序列名为控制字符，只有 21 骨骼、无手指关节；事件要求 JNG90_* 声音，包中却是 AWP_* 文件名。
+未重命名猜测补齐，未接入预览候选和正式游戏。
+
+授权与隔离
+来源页面标注 CC BY-NC-ND 4.0；原商业游戏权利仍由原权利人持有。
+下载公开模组不等于允许跨游戏公开发布、改编分发或商业使用。
+资源和预览目录由 Git 忽略。禁止自动提交这些素材到公开仓库。
+正式游戏现有五个背包保持原样，M200 与黄金 AK 仅新增 6/7 号背包；NPC 武器池保持原样。
+
+复现
+PYTHONPYCACHEPREFIX=/private/tmp/cf-candidate-pycache python3 tools/build_gamebanana_weapons.py
+node --experimental-default-type=module tools/test_gamebanana_candidates.mjs
+node --experimental-default-type=module tools/test_gamebanana_candidates_browser.mjs
+
+格式依据（只参考数据布局，导入器为项目自行实现）
+https://github.com/ValveSoftware/halflife/blob/master/engine/studio.h
+https://github.com/ValveSoftware/halflife/blob/master/cl_dll/StudioModelRenderer.cpp

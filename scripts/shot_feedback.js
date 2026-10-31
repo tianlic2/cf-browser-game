@@ -5,6 +5,8 @@ export const SHOT_SHAKE_PROFILES = Object.freeze({
   m4:      Object.freeze({ duration: .095, pitch: .00172, yaw: .00092, roll: .00128 }),
   deagle:  Object.freeze({ duration: .120, pitch: .00255, yaw: .00135, roll: .00182 }),
   barrett: Object.freeze({ duration: .145, pitch: .00355, yaw: .00168, roll: .00235 }),
+  m200:    Object.freeze({ duration: .145, pitch: .00355, yaw: .00168, roll: .00235 }),
+  akgold:  Object.freeze({ duration: .105, pitch: .00215, yaw: .00118, roll: .00155 }),
   default: Object.freeze({ duration: .100, pitch: .00165, yaw: .00090, roll: .00120 }),
 });
 

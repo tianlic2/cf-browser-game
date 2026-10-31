@@ -1,0 +1,12 @@
+{
+  "name": "crossfire-browser-local",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "multiplayer:server": "node server/multiplayer-server.mjs",
+    "test:multiplayer": "node tools/test_multiplayer_server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

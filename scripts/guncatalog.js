@@ -19,10 +19,10 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
-import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=kukri-dragon-1";
+import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=weapon-world-3";
 
-// 会出现在世界里的枪。普通团队竞技包含少量巴雷特；守望之城仍只用狙击。
-const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle", "knife"];
+// 会出现在世界里的枪。普通团队竞技包含少量巴雷特。
+const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle", "knife", "scar", "m200", "akgold", "kn57"];
 export const ENEMY_GUN_IDS = ["ak", "m4", "barrett"];
 // 每五次普通敌人出生覆盖三种主武器，同时让栓动狙保持稀有。
 const ENEMY_GUN_BAG = ["ak", "ak", "m4", "m4", "barrett"];

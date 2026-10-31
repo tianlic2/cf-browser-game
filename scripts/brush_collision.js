@@ -24,6 +24,7 @@ export function brushSupportIsExposed(colliders, source, x, z, surface,
 
 export function intersectsBrush(c, x, z, feet = 0, radius = .45, step = .5,
     height = 1.78, solidSet = null, surfaceAt = null, blockerAt = null) {
+  if (c.active === false) return false;
   if ((c.y0 ?? 0) >= feet + height) return false;
   if (Math.abs(x-c.x) >= c.hx+radius || Math.abs(z-c.z) >= c.hz+radius) return false;
   // Rectangular/programmatic brushes keep the classic global-top shortcut.
@@ -130,6 +131,35 @@ export function brushHorizontalEscape(c, x, z, radius = .45, feet = 0,
   return candidates[0];
 }
 
+// Resolve a capsule overlapping several adjacent brushes as one cluster.
+// Escaping one brush at a time can push the actor into its neighbour and then
+// back again. Test the cluster's outer boundaries and choose the shortest
+// point that clears every brush.
+export function brushClusterEscape(colliders, x, z, feet = 0, radius = .45,
+    step = 0, height = 1.78, surfaceAt = null, blockerAt = null) {
+  const overlaps = colliders.filter(c => intersectsBrush(c, x, z, feet, radius,
+    step, height, colliders, surfaceAt, blockerAt));
+  if (!overlaps.length) return null;
+  const eps = 3e-5;
+  const xs = [], zs = [], candidates = [];
+  for (const c of overlaps) {
+    if (c.preciseEscape && c.planes) {
+      const push = brushHorizontalEscape(c, x, z, radius, feet, step, height);
+      if (push?.x || push?.z) candidates.push({ x: x + push.x, z: z + push.z });
+    }
+    xs.push(c.x - c.hx - radius - eps, c.x + c.hx + radius + eps);
+    zs.push(c.z - c.hz - radius - eps, c.z + c.hz + radius + eps);
+  }
+  for (const px of xs) candidates.push({ x: px, z });
+  for (const pz of zs) candidates.push({ x, z: pz });
+  for (const px of xs) for (const pz of zs) candidates.push({ x: px, z: pz });
+  candidates.sort((a, b) => Math.hypot(a.x - x, a.z - z) -
+    Math.hypot(b.x - x, b.z - z));
+  return candidates.find(candidate => !colliders.some(c => intersectsBrush(c,
+    candidate.x, candidate.z, feet, radius, step, height, colliders,
+    surfaceAt, blockerAt))) || null;
+}
+
 export function brushTop(c, x, z) {
   if (Math.abs(x-c.x)>c.hx || Math.abs(z-c.z)>c.hz) return -Infinity;
   if (!c.planes) return c.h;
@@ -147,6 +177,7 @@ export function brushTop(c, x, z) {
 // A heel/toe contact patch lets the foot land on a tread before the torso hits
 // the next riser. Restrict this to imported stair flights, never box edges.
 export function brushSupport(c,x,z) {
+  if (c.active === false) return -Infinity;
   const center=brushTop(c,x,z);
   return c.stair ? Math.max(center,brushTop(c,x,z-.12),brushTop(c,x,z+.12)) : center;
 }

@@ -18,14 +18,14 @@ assert.equal(BIO_HUMAN_SENSE_INTERVAL, .14, 'human LOS refreshes at about 7 Hz')
 assert.equal(BIO_ZOMBIE_ROUTE_INTERVAL, .18, 'zombie flow-field steering is cached');
 assert.ok(bioSenseOffset(5, 12, .12) > bioSenseOffset(4, 12, .12),
   'initial perception work is staggered instead of spiking on one frame');
-assert.equal(bioAnimationInterval(true, 20), 0,
-  'on-screen mid-range actors keep full-rate animation');
+assert.equal(bioAnimationInterval(true, 12), 1 / 30,
+  'on-screen mid-range actors use a stable 30 Hz skeleton budget');
 assert.equal(bioAnimationInterval(false, 12), .10,
   'near off-screen actors use a responsive 10 Hz pose update');
-assert.equal(bioAnimationInterval(false, 40), .25,
-  'far off-screen actors use a 4 Hz pose update');
-assert.equal(bioAnimationInterval(true, 40), .05,
-  'far but visible actors retain 20 Hz animation');
+assert.equal(bioAnimationInterval(false, 40), .20,
+  'far off-screen actors use a 5 Hz pose update');
+assert.equal(bioAnimationInterval(true, 40), .10,
+  'far but visible actors retain a 10 Hz animation budget');
 assert.equal(bioBudgetDue(.119, .12), false);
 assert.equal(bioBudgetDue(.12, .12), true);
 
@@ -54,6 +54,8 @@ assert.match(bio, /_zombieRoute\(z, target, dt[\s\S]*?BIO_ZOMBIE_ROUTE_INTERVAL/
   'zombie navigation steering is reused for several render frames');
 assert.match(bio, /performanceStats\(\)[\s\S]*?animationSkipRate/,
   'runtime QA exposes actual skipped animation work');
+assert.match(bio, /if \(this\.map\.lineClear\)/,
+  'Zone 13 perception uses the map acceleration structure instead of render meshes');
 
 // Real-map safety proof: the cached 3×3 neighborhood must return the same
 // capsule blockers as the complete 1,541-leaf list at representative nodes.

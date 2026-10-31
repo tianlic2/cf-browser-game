@@ -18,25 +18,10 @@
 - 本地场景按用户要求沿 X 轴左右镜像，几何、碰撞、出生点和雷达同步变换；补回原 BSP 中被旧过滤器遗漏的 156 个地下凸体，保留楼梯、地道和出口木箱。
 - 产物：`transport/map.bin`、`map.json`、`lightmap.png` 和对应 PNG 贴图。
 
-## 守望之城（源素材 CF Prison）
-
-- 来源：[CF Prison](https://gamebanana.com/mods/119449)，下载文件 `cf_prison_fixed.rar`，GameBanana 文件编号 `288675`；下载包 MD5 `85a39a78351e992d760cf4e4585daf02`。
-- 本地使用包内 `maps/cf_prison.bsp` 的 Source BSP v20 世界几何、光照、实体出生点和凸体碰撞，以及包内 `materials/` 的贴图。转换器为 `tools/import_cf_prison.py`，输出 `prison/map.json`、`map.bin`、`lightmap.png` 和 PNG 贴图。
-- 该移植包依赖的少数 CS:S 基础材质并未随包提供；`fallback_*.png` 是本项目生成的中性色替代纹理。天空使用本项目程序生成的冷灰色云层。原地图比例按 Source 英寸换算到场景米，并将长轴对齐游戏的 Z 轴；出生点和碰撞同步转换。
-- 游戏加载时不再额外拉伸地图：`scripts/prison_scale.js` 的 X/Z/Y 均为 `1`，保留源 BSP 英寸转米后的几何、碰撞、出生点、雷达和边界。漫反射 UV 与烘焙光照 UV 直接使用源转换产物。源包未包含的 CS:S 基础材质仍使用上述中性色替代贴图，天空仍是本项目生成的冷灰云层；这两项不是源文件的逐字节还原。
-- 这是一份社区移植素材，不属于本项目原创或 CC0。来源页的移植或下载许可不等于原游戏权利人授予本项目再分发、商用或公开部署许可。
-
-## 雪地求生（用户提供 GoldSrc `de_survivor` 包）
-
-- 原始文件由用户放入本地 `cstrike/` 目录，包含 `de_survivor_new.bsp` / `de_survivor_night.bsp`、双方 NAV、地图说明、`zeditor.wad`、两套天空盒、34 个 GoldSrc v10 场景模型、环境音和部分精灵。地图说明标注作者为 Michael Visser（3D_Mike），并注明为 Condition Zero 制作、由 Rotary_chicken 提供协助。
-- 正式游戏使用白天版 `de_survivor_new.bsp`。`tools/import_goldsrc_survivor.py` 直接读取 BSP v30 世界与静态子模型，转换 10 个 CT 与 10 个 T 出生点、内嵌调色板纹理、RGB 烘焙光照、凸体碰撞、天空盒及 230 个树木/山体/围栏等 MDL 实例；原 `func_bomb_target` 不进入团队竞技规则。
-- 源包实体引用了未随包提供的 `snow.spr`、`flare1.spr`、`3dmflared.spr` 和 `3dmflaora.spr`。游戏没有伪造这些原文件，而是用程序化雪花点和加色光晕实现等价天气/亮点效果。GoldSrc 的轨道车辆、可破坏物脚本、镜头触发器与爆破流程没有移植为互动逻辑；其静态可见场景仍随 BSP 几何导入。
-- 原始包没有附带可核验的再分发或商业授权说明。转换产物仅按用户要求用于本地项目，不据此推定公开发布或商用权。
-
 ## 黑色城镇（用户提供 GoldSrc `de_blackwidow` 包）
 
 - 原始文件由用户放入本地 `黑色城镇/` 目录，包含 GoldSrc BSP v30、NAV、地图/overview 说明、overview 位图和 `btown` 六面 TGA 天空盒；BSP 内嵌 84 张调色板贴图与 RGB 烘焙光照，不依赖外置 WAD 或场景模型。
-- `tools/import_goldsrc_survivor.py 黑色城镇 blacktown` 读取原 BSP 世界与静态 brush 子模型，转换双方各 16 个出生点、29,874 个三角面、1,541 个凸体碰撞单元、雷达轮廓、原天空盒和光照。为匹配本项目人物胶囊，黑色城镇画面、碰撞、出生点与雷达三轴统一使用标准英寸换算的 1.2 倍；原 `func_bomb_target`、地图镜头与爆破流程不进入团队竞技规则。
+- `tools/import_goldsrc_blacktown.py 黑色城镇` 读取原 BSP 世界与静态 brush 子模型，转换双方各 16 个出生点、29,874 个三角面、1,541 个凸体碰撞单元、雷达轮廓、原天空盒和光照。为匹配本项目人物胶囊，黑色城镇画面、碰撞、出生点与雷达三轴统一使用标准英寸换算的 1.2 倍；原 `func_bomb_target`、地图镜头与爆破流程不进入团队竞技规则。
 - 原始包没有附带可核验的作者署名、再分发或商业授权说明。转换产物仅按用户要求用于本地项目，不据此推定公开发布或商用权。
 
 ## SWAT
@@ -88,8 +73,7 @@
 - `tools/import_cf_m4c_view.py`：可重复提取 M4A1-C Source v44 的完整第一人称骨骼、蒙皮、六段动作与动作事件。
 - `tools/import_ironbeast_smd.py`：从用户提供的 Iron Beast SMD/QC 转换第一人称完整视模、Specular/VFX 层与原始动作（Python 标准库）。
 - `tools/import_ironbeast_m4.py`：从用户提供的 GoldSrc v10 MDL 转换铁兽-帝皇金静态枪模和内嵌贴图（Python 标准库）。
-- `tools/import_cf_prison.py`：可重复转换守望之城源 BSP/VTF，并生成缺失基础材质的替代贴图。
-- `tools/import_goldsrc_survivor.py`：从用户提供的 GoldSrc BSP v30、可选 MDL v10 与 TGA 天空盒重复生成雪地求生或黑色城镇地图资产；仅依赖 Python 标准库与 numpy。
+- `tools/import_goldsrc_blacktown.py`：从用户提供的 GoldSrc BSP v30 与 TGA 天空盒重复生成黑色城镇地图资产；仅依赖 Python 标准库与 numpy。
 - `tools/import_cf_deagle.py`：可重复转换沙漠之鹰 Source 模型/VTF，并复制四段 WAV。
 - `tools/import_cf_view.py`：转换 AK 第一人称手臂、枪械与动画。
 - 格式依据：[Valve Source SDK](https://github.com/ValveSoftware/source-sdk-2013/tree/master/src/public) 的 `bspfile.h`、`studio.h`、`optimize.h`。

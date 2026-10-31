@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 
 // The game uses an import map rather than package.json's type=module.
 const source = await readFile(new URL('../scripts/npc_tactics.js', import.meta.url), 'utf8');
-const { makeAwareness, updateAwareness, awarenessGoal, chooseCover } =
+const { makeAwareness, updateAwareness, awarenessGoal, chooseCover,
+  makeTacticalProfile, chooseRouteDiversion, chooseCombatPosition } =
   await import(`data:text/javascript,${encodeURIComponent(source)}`);
 
 const bot = makeAwareness(10, 0, 0, .5);
@@ -42,4 +43,36 @@ assert.deepEqual(awarenessGoal(searcher, firstSearch), firstSearch,
 updateAwareness(searcher, 1, null, null);
 assert.notDeepEqual(awarenessGoal(searcher, firstSearch), firstSearch,
   'a new waypoint is selected after the observation hold finishes');
-console.log('NPC memory, investigation, patrol and cover selection: OK');
+
+const profiles = Array.from({ length: 7 }, (_, i) => makeTacticalProfile(.42, i));
+assert.equal(new Set(profiles.slice(0, 5).map(p => p.id)).size, 5,
+  'the first squad cycle must contain five different combat jobs');
+assert.equal(new Set(profiles.map(p => p.lane)).size, 7,
+  'the first seven soldiers must not receive the same travel lane');
+
+const routeReservations = [];
+for (const profile of profiles.slice(0, 3)) {
+  const goal = chooseRouteDiversion({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 40 },
+    profile, () => true, routeReservations);
+  assert.ok(goal, 'long travel receives a committed diversion waypoint');
+  assert.ok(routeReservations.every(p => Math.hypot(p.x - goal.x, p.z - goal.z) >= 2.8),
+    'route waypoints remain physically separated');
+  routeReservations.push(goal);
+}
+assert.equal(chooseRouteDiversion({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 8 },
+  profiles[0], () => true), null, 'short approaches stay direct');
+
+const combatReservations = [];
+for (const profile of profiles.slice(0, 5)) {
+  const goal = chooseCombatPosition({ x: 0, y: 0, z: 18 }, { x: 0, y: 0, z: 0 },
+    profile, () => true, combatReservations);
+  assert.ok(goal, `${profile.id} receives a reachable combat position`);
+  assert.ok(combatReservations.every(p => Math.hypot(p.x - goal.x, p.z - goal.z) >= 3.4),
+    'reserved combat positions do not collapse onto one corner');
+  combatReservations.push(goal);
+}
+assert.ok(Math.hypot(combatReservations[0].x, combatReservations[0].z) <
+  Math.hypot(combatReservations[3].x, combatReservations[3].z),
+  'entry closes distance while anchor holds farther back');
+
+console.log('NPC memory, cover, squad roles, route splitting and combat reservations: OK');

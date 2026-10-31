@@ -2,11 +2,13 @@
 import * as THREE from "three";
 import { createNpcNamePool } from './npc_names.js';
 import { FoxSoldierRig as SoldierRig } from "./fox_soldier.js?v=fox-published-1";
+import { addEnemyOutline } from './enemy_outline.js?v=yellow-1';
 import { makeBlobShadow } from "./blobshadow.js";
 import { intersectsBrush } from "./brush_collision.js?v=goldsrc-visible-wall-1";
 import { overlapsActors, sweepActorAxis, findActorSpawn } from "./actor_collision.js";
 import { chooseDistributedSpawnIndex } from './distributed_spawns.js';
-import { makeAwareness, updateAwareness, awarenessGoal, chooseCover } from "./npc_tactics.js?v=stable-search-1";
+import { makeAwareness, updateAwareness, awarenessGoal, chooseCover,
+  makeTacticalProfile, chooseRouteDiversion, chooseCombatPosition } from "./npc_tactics.js?v=squad-tactics-1";
 import { advanceFacing, angleDelta, separationOffset } from './npc_motion.js';
 import { selectFoxDeathDirection } from './fox_death_direction.js';
 
@@ -21,9 +23,9 @@ const ENEMY_DAMAGE = 12;
 export const ENEMY_TUNING = { dmg: 1, acc: 1, speed: 1, pause: 1, aggro: 1 };
 const ENGAGE_NEAR = 7;    // 比这更近就后撤
 const ENGAGE_FAR = 16;    // 比这更远就压上
-const CORPSE_HOLD = 5.0;  // 尸身平躺保留时长
-const CORPSE_SINK = 0.9;  // 之后下沉消失的时长
+const CORPSE_GROUND_HOLD = 1.0; // 死亡动作落地后平躺约 1 秒，再瞬间回收
 const CORPSE_FALL = 0.4;  // 普通击杀前扑用时
+const NATIVE_DEATH_FALL = 0.70; // Fox 原生死亡片段在 fox_soldier.js 中固定为 .70s
 const HEADSHOT_KNOCKBACK = 0.72; // 致命爆头只向身后推出小半步（场景米）
 const HEADSHOT_KNOCKBACK_TIME = 0.28;
 const HEADSHOT_FALL = 0.40; // 后仰腾空到仰面落地，一条连续动作
@@ -114,6 +116,7 @@ export class Enemy {
     // 步枪不进 meshes：① 受击闪红不该闪到枪上；② 子弹可以穿过枪身不算命中
     this.meshes = this.rig.meshes;
     for (const m of this.meshes) m.userData.enemy = this;
+    this.outlineMeshes = addEnemyOutline(this.meshes);
 
     // 贴地假影：静态阴影被冻结、敌人骨架又不投射真实阴影（enemy_model.js 显式关掉），
     // 接地感由这一层补。挂在 group 下（跟着走位与朝向转），**不进 rig.meshes**——
@@ -176,10 +179,19 @@ export class Enemy {
     this.coverGoal = null;
     this.flankGoal = null;
     this.flankGoalT = 0;
+    this.routeGoal = null;
+    this.routeGoalT = 0;
+    this.routeTargetX = x;
+    this.routeTargetZ = z;
+    this.combatGoal = null;
+    this.combatPlanT = 0;
+    this.combatTargetX = x;
+    this.combatTargetZ = z;
     this.postKillGoal = null;
     this.postKillT = 0;
     this.postKillRole = '';
-    this.tacticRole = Math.floor(this.seed * 3) % 3 - 1;
+    this.tacticalProfile = makeTacticalProfile(this.seed, Math.floor(this.seed * 997));
+    this.tacticRole = Math.sign(this.tacticalProfile.lane);
 
     // ---- 每敌性格：全部从 seed **哈希派生** ----
     // 纯函数 ⇒ 同一个 seed 必得同一组性格（可断言；不是再掷一次骰子）。
@@ -277,6 +289,10 @@ export class Enemy {
     this.coverGoal = null;
     this.flankGoal = null;
     this.flankGoalT = 0;
+    this.routeGoal = null;
+    this.routeGoalT = 0;
+    this.combatGoal = null;
+    this.combatPlanT = 0;
     this.postKillGoal = goal;
     this.postKillRole = role;
     this.postKillT = role === 'killer' ? 1.65 : 2.15;
@@ -381,8 +397,9 @@ export class Enemy {
       // 交战距离偏好：`engage` 是**小幅杀伤力旋钮**（它改敌人停在哪 ⇒ 改 dist ⇒ 改 hitProb
       // 里的 0.72-dist/46），所以范围故意压在 ±12%，并且要进验证第 3 条的中性测量。
       // 后撤阈值与压上阈值一起缩放；横移和绕行监工共用本局的交战距离。
-      const near = (ENGAGE_NEAR * this.traits.engage) / ENEMY_TUNING.aggro;
-      const far = this.engageFar * this.traits.engage;
+      const near = (ENGAGE_NEAR * this.traits.engage * (this.tacticalProfile?.near || 1)) /
+        ENEMY_TUNING.aggro;
+      const far = this.engageFar * this.traits.engage * (this.tacticalProfile?.far || 1);
       if (dist > far) { wx = dir.x; wz = dir.z; }                        // 压上
       else if (dist < near) { wx = -dir.x * 0.75; wz = -dir.z * 0.75; }  // 后撤
       if (dist < this.engageFar + 3) {
@@ -445,10 +462,10 @@ export class Enemy {
     // ② 加在 route 覆写之前等于白写 —— 那两行是**替换**不是叠加，而
     //    GroundNavigation.steer 只在 dist < 8 && clear 时返回 null，即 dist ≥ 8m 时
     //    route 恒非空 ⇒ 敌人扑向你（正是叠坨的时候）的那一段分离力全被丢掉。
-    // 门控 dist < engageFar + 3 与 noProgT 监工的累积带 dist > engageFar + 3
-    // **不相交** ⇒ 分离力在结构上不可能造成「远离玩家」的假卡死翻转（可证明，非调参）。
+    // 全程生效：过去只在交火距离内分离，几个人沿同一条远距离路线时仍会排成一列。
+    // 位移仍受 SEP_MAX_FRAC 严格限幅，并继续经过 avoid()/moveBy() 的实体碰撞。
     let sepX = 0, sepZ = 0;
-    if (peers && !blind && this.detourT <= 0 && dist < this.engageFar + 3) {
+    if (peers && !blind && this.detourT <= 0) {
       separationOffset(this, peers, dt, SEP_R, SEP_PUSH, SEP_MAX_FRAC, this.separation);
       sepX = this.separation.x; sepZ = this.separation.z;
     }
@@ -595,9 +612,11 @@ export class Enemy {
     } else {
       this.burstPause -= dt;
       if (this.burstPause <= 0) {
-        this.burstLeft = 3 + Math.round(this.traits.burst * 2); // 3/4/5 连发，均值 4 = 改前
+        this.burstLeft = Math.max(2, 3 + Math.round(this.traits.burst * 2) +
+          (this.tacticalProfile?.burst || 0));
         this.burstTimer = 0;
-        this.burstPause = pauseFor(0.85, 0.75, this.fireMul);
+        this.burstPause = pauseFor(0.85, 0.75, this.fireMul) *
+          (this.tacticalProfile?.pause || 1);
       }
     }
     this.wantShoot = false;
@@ -643,6 +662,7 @@ export class Enemy {
   // 玩家同款判据，使用当前脚底高度，支持甲板以下的地道。
   // 三个条件与玩家逐条对应：顶面矮于一个台阶不挡、y0 高过头顶的悬空物不挡、其余按矩形外扩。
   blockedAt(x, z) {
+    if (this.navigation?.canOccupy && !this.navigation.canOccupy(x,z,this.group.position.y)) return { mapBoundary:true };
     const colliders = this.colliders;
     if (!colliders) return null;
     for (const c of colliders) {
@@ -675,13 +695,15 @@ export class Enemy {
       this.actorBodies || [], this, 'x');
     const nx = gp.x + actorX;
     const floorX = this.navigation?.heightAt(nx, gp.z, gp.y) ?? gp.y;
-    if ((stuck || !this.blockedAt(nx, gp.z)) &&
+    if ((!this.navigation?.canMoveSegment || this.navigation.canMoveSegment(gp.x,gp.z,nx,gp.z,gp.y,ENEMY_RADIUS,ENEMY_HEAD_ROOM)) &&
+        (stuck || !this.blockedAt(nx, gp.z)) &&
         (this.dead || !overlapsActors(nx, floorX, gp.z, this.actorBodies || [], this))) gp.x = nx;
     const actorZ = this.dead ? z : sweepActorAxis(gp.z, z, gp.x, gp.y,
       this.actorBodies || [], this, 'z');
     const nz = gp.z + actorZ;
     const floorZ = this.navigation?.heightAt(gp.x, nz, gp.y) ?? gp.y;
-    if ((stuck || !this.blockedAt(gp.x, nz)) &&
+    if ((!this.navigation?.canMoveSegment || this.navigation.canMoveSegment(gp.x,gp.z,gp.x,nz,gp.y,ENEMY_RADIUS,ENEMY_HEAD_ROOM)) &&
+        (stuck || !this.blockedAt(gp.x, nz)) &&
         (this.dead || !overlapsActors(gp.x, floorZ, nz, this.actorBodies || [], this))) gp.z = nz;
     // 甲板边界：与玩家同一道夹紧（bounds 由 EnemyManager 每帧灌进来），
     // 免得被绕行逻辑推出舷外。
@@ -771,7 +793,7 @@ export class Enemy {
     const drop = this.helmetDrop;
     if (!drop) return;
     drop.age += dt;
-    if (drop.age >= CORPSE_HOLD + CORPSE_SINK) { this.clearHelmetDrop(); return; }
+    if (drop.age >= this.corpseLifetime) { this.clearHelmetDrop(); return; }
     const substeps = Math.max(1, Math.ceil(dt / (1 / 60)));
     const step = dt / substeps;
     for (let i = 0; i < substeps; i++) {
@@ -795,9 +817,7 @@ export class Enemy {
         drop.spin.multiplyScalar(0.77);
       }
     }
-    // Leave the helmet on the deck briefly, then shrink it with the corpse.
-    const fade = Math.max(0, Math.min(1, (CORPSE_HOLD + CORPSE_SINK - drop.age) / CORPSE_SINK));
-    drop.group.scale.setScalar(fade);
+    // 头盔与尸体一起瞬间清理，不再在最后阶段缩小或沉入地面。
   }
 
   clearHelmetDrop() {
@@ -810,7 +830,16 @@ export class Enemy {
     this.helmetDrop = null;
   }
 
-  // 倒地 → 平躺保留 → 下沉消失（主程序据此回收进对象池）
+  get corpseFallDuration() {
+    if (this.rig.nativeDeath === true) return NATIVE_DEATH_FALL;
+    return this.deathHeadshot ? HEADSHOT_FALL : CORPSE_FALL;
+  }
+
+  get corpseLifetime() {
+    return this.corpseFallDuration + CORPSE_GROUND_HOLD;
+  }
+
+  // 倒地 → 在地面停留约 1 秒 → 瞬间回收（主程序据此回收进对象池）
   updateCorpse(dt) {
     this.corpseT += dt;
     this.updateHelmetDrop(dt);
@@ -878,14 +907,6 @@ export class Enemy {
     this.tilt.rotation.z = 0;
     // 假影留在甲板；只有落地时才随尸体拉长。每帧从基准尺寸重设，避免帧率漂移。
     this.blob.position.z = nativeDeath?0:(this.deathHeadshot ? -0.30 : 0.30) * fallEase;
-    if (this.corpseT > CORPSE_HOLD) {
-      const sink=nativeDeath?1.2:restHeight;
-      this.tilt.position.y -= sink * Math.min(1,(this.corpseT-CORPSE_HOLD)/CORPSE_SINK);
-      // 尸身正沉进甲板，影子必须跟着收掉 —— 否则尸体没了、地上一块黑斑还留着。
-      // **只能改 scale**：材质是全敌人共享的（见 blobshadow.js 第三条约束）。
-      const k = Math.max(0, 1 - (this.corpseT - CORPSE_HOLD) / CORPSE_SINK);
-      this.blob.scale.multiplyScalar(k);
-    }
     // 骨架同步进入瘫倒姿势：膝盖跪折、上身塌下、双手松开
     // （所以尸体是「瘫下去」的，而不是一整块板子拍在甲板上）
     const headSnap = this.deathHeadshot ? Math.max(0, 1 - this.corpseT / 0.18) : 0;
@@ -894,7 +915,7 @@ export class Enemy {
   }
 
   get corpseDone() {
-    return this.dead && this.corpseT > CORPSE_HOLD + CORPSE_SINK;
+    return this.dead && this.corpseT >= this.corpseLifetime;
   }
 }
 
@@ -917,6 +938,7 @@ export class EnemyManager {
     this.postKillSerial = 0;
     this.lastKiller = null;
     this.lastPlayerDown = null;
+    this.tacticalSerial = 0;
     // 每次刷出抽一份「枪型 + 皮肤」，由 main.js 注入（它才有 WEAPON_DEFS 与 guncatalog）。
     // 返回 { rifle, gunId, gunSkin, weaponName, fireMul }；没注入就退回裸 AK 的旧行为。
     this.loadoutPicker = opts.loadoutPicker || null;
@@ -936,6 +958,7 @@ export class EnemyManager {
   resetNamePool() {
     this._namePool = createNpcNamePool(32);
     this._nameSeq = 0;
+    this.tacticalSerial = 0;
   }
 
   // 复用池里的尸体/新建，避免一局创建上百个敌人导致材质与纹理泄漏。
@@ -951,6 +974,12 @@ export class EnemyManager {
       e.bounds = this._bounds || null;
     }
     e.reset(x, z, Object.assign({ name: this.nextName() }, load || {}));
+    const tacticalSlot = this.tacticalSerial++;
+    const travelProfile = makeTacticalProfile(e.seed, tacticalSlot);
+    e.tacticalProfile = e.sniperCadence
+      ? { ...makeTacticalProfile(e.seed, 3), slot: tacticalSlot, lane: travelProfile.lane }
+      : travelProfile;
+    e.tacticRole = Math.sign(e.tacticalProfile.lane);
     return e;
   }
 
@@ -971,6 +1000,7 @@ export class EnemyManager {
       const y = point ? point[1] : (this.navigation?.heightAt(x, z, 0) ?? 0);
       const valid = (px, py, pz) => Math.abs(px) <= hw - ENEMY_RADIUS &&
         Math.abs(pz) <= hl - ENEMY_RADIUS &&
+        (!this.navigation?.canOccupy || this.navigation.canOccupy(px,pz,py)) &&
         (!this.distributedSpawns||!player||
           Math.hypot(px-player.pos.x,pz-player.pos.z)>=8) &&
         !(this._colliders || []).some(c => intersectsBrush(c, px, pz, py,
@@ -984,10 +1014,10 @@ export class EnemyManager {
       if(this.distributedSpawns)this.lastSpawnZone=point?.[3]??null;
       const e = this.acquire(spot[0], spot[2]);
       e.group.position.y = spot[1];
-      // Patrol toward a broad central lane rather than orbiting the spawn or
-      // receiving the player's live position through the whole map.
+      // Each squad slot owns a different central lane. The committed route
+      // diversion below then keeps those lanes distinct beyond the spawn.
       e.awareness.homeX = Math.max(-hw + 2, Math.min(hw - 2,
-        spot[0] * .2 + e.tacticRole * 3.5));
+        spot[0] * .2 + e.tacticalProfile.lane * 5.2));
       e.awareness.homeZ = spot[2] * .2;
       e.awareness.homeY = spot[1];
       this.enemies.push(e);
@@ -1064,6 +1094,8 @@ export class EnemyManager {
 
     if (!this.frozen) {
       const sight = new Map();
+      const routeReservations = [];
+      const combatReservations = [];
       for (const e of this.enemies) {
         e.colliders = this._colliders;
         e.bounds = this._bounds;
@@ -1111,6 +1143,8 @@ export class EnemyManager {
         const remembered = awarenessGoal(e.awareness, p);
         let moveGoal = null;
         if (visible) {
+          e.routeGoal = null;
+          e.routeGoalT = 0;
           const dist = Math.hypot(player.pos.x - p.x, player.pos.z - p.z);
           if (e.coverT > 0) {
             e.coverT = Math.max(0, e.coverT - dt);
@@ -1120,20 +1154,57 @@ export class EnemyManager {
             if (e.coverGoal) moveGoal = e.coverGoal;
             else e.coverT = 0;
           } else e.coverGoal = null;
-          if (!moveGoal && e.tacticRole && !e.sniperCadence && dist > 8 && dist < 28) {
-            e.flankGoalT -= dt;
-            if (e.flankGoalT <= 0) {
-              const nx = (p.x - player.pos.x) / dist, nz = (p.z - player.pos.z) / dist;
-              const flank = { x: player.pos.x - nz * e.tacticRole * 3.5 + nx * 10,
-                y: player.pos.y, z: player.pos.z + nx * e.tacticRole * 3.5 + nz * 10 };
-              e.flankGoal = !e.blockedAt(flank.x, flank.z) &&
-                Math.abs(flank.x) < arena.hw - ENEMY_RADIUS &&
-                Math.abs(flank.z) < arena.hl - ENEMY_RADIUS ? flank : null;
-              e.flankGoalT = .45;
+          if (!moveGoal && dist > 5 && dist < 34) {
+            e.combatPlanT -= dt;
+            const reachedCombat = e.combatGoal &&
+              Math.hypot(e.combatGoal.x - p.x, e.combatGoal.z - p.z) <= .9;
+            const contactShifted = Math.hypot(player.pos.x - e.combatTargetX,
+              player.pos.z - e.combatTargetZ) > 4.5;
+            const invalid = e.combatGoal && (e.blockedAt(e.combatGoal.x, e.combatGoal.z) ||
+              Math.abs(e.combatGoal.x) >= arena.hw - ENEMY_RADIUS ||
+              Math.abs(e.combatGoal.z) >= arena.hl - ENEMY_RADIUS);
+            if (!e.combatGoal || invalid ||
+                (e.combatPlanT <= 0 && (reachedCombat || contactShifted))) {
+              e.combatGoal = chooseCombatPosition(p, player.pos, e.tacticalProfile,
+                (x,z) => !e.blockedAt(x,z) && Math.abs(x) < arena.hw - ENEMY_RADIUS &&
+                  Math.abs(z) < arena.hl - ENEMY_RADIUS &&
+                  (!this.navigation || this.navigation.nearest(x,z,p.y) >= 0),
+                combatReservations);
+              e.combatPlanT = 1.8 + (e.tacticalProfile.slot % 4) * .25;
+              e.combatTargetX = player.pos.x;
+              e.combatTargetZ = player.pos.z;
             }
-            if (e.flankGoal) moveGoal = e.flankGoal;
+            if (e.combatGoal) {
+              combatReservations.push(e.combatGoal);
+              if (Math.hypot(e.combatGoal.x - p.x, e.combatGoal.z - p.z) > .9)
+                moveGoal = e.combatGoal;
+            }
           }
-        } else { e.coverT = 0; e.coverGoal = null; e.flankGoal = null; e.flankGoalT = 0; }
+        } else {
+          e.coverT = 0; e.coverGoal = null; e.flankGoal = null; e.flankGoalT = 0;
+          e.combatGoal = null; e.combatPlanT = 0;
+          const remaining = Math.hypot(remembered.x - p.x, remembered.z - p.z);
+          e.routeGoalT -= dt;
+          const reached = e.routeGoal && Math.hypot(e.routeGoal.x - p.x, e.routeGoal.z - p.z) < 1.0;
+          const routeContactShifted = Math.hypot(remembered.x - e.routeTargetX,
+            remembered.z - e.routeTargetZ) > 5;
+          const routeInvalid = e.routeGoal && (e.blockedAt(e.routeGoal.x, e.routeGoal.z) ||
+            Math.abs(e.routeGoal.x) >= arena.hw - ENEMY_RADIUS ||
+            Math.abs(e.routeGoal.z) >= arena.hl - ENEMY_RADIUS);
+          if (remaining > 9 && (!e.routeGoal || reached || routeInvalid ||
+              (e.routeGoalT <= 0 && (routeContactShifted || e.noProgT > 1)))) {
+            e.routeGoal = chooseRouteDiversion(p, remembered, e.tacticalProfile,
+              (x,z) => !e.blockedAt(x,z) && Math.abs(x) < arena.hw - ENEMY_RADIUS &&
+                Math.abs(z) < arena.hl - ENEMY_RADIUS &&
+                (!this.navigation || this.navigation.nearest(x,z,p.y) >= 0),
+              routeReservations);
+            e.routeGoalT = 3.0 + (e.tacticalProfile.slot % 5) * .28;
+            e.routeTargetX = remembered.x;
+            e.routeTargetZ = remembered.z;
+          }
+          if (remaining <= 9) e.routeGoal = null;
+          if (e.routeGoal) { routeReservations.push(e.routeGoal); moveGoal = e.routeGoal; }
+        }
         const goal = moveGoal || remembered;
         this.navigation?.update(goal);
         e.update(dt, { pos: visible ? player.pos : remembered },

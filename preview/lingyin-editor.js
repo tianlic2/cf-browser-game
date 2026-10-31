@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { buildLingyinMap } from '../scripts/lingyin_map.js?v=static-solids-1';
-import { LingyinMasterplanBlockout } from '../scripts/lingyin_world.js?v=85';
+import { buildLingyinMap } from '../scripts/lingyin_map.js?v=new-map-3';
+import { LingyinMasterplanBlockout } from '../scripts/lingyin_world.js?v=new-map-3';
 import { RenderBudget } from '../scripts/render_budget.js?v=1';
 import { prepareMapMaterials,prepareMapTextures } from '../scripts/map_material_warmup.js?v=2';
 

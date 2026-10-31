@@ -10,6 +10,7 @@ export const FOX_HEAD_CENTER_OFFSET_X = -.01 * FOX_MODEL_SCALE;
 export const FOX_HEAD_CENTER_OFFSET_Z = .05 * FOX_MODEL_SCALE;
 
 const bonePosition = new THREE.Vector3();
+const actorPosition = new THREE.Vector3();
 const cylinderCenter = new THREE.Vector3();
 const centerOffset = new THREE.Vector3();
 const axisQuaternion = new THREE.Quaternion();
@@ -17,6 +18,11 @@ const axisQuaternion = new THREE.Quaternion();
 export function isHeadshotIntersection(hit, options = null) {
   const part = hit?.object?.userData?.part;
   if (part !== 'head' && part !== 'body') return false;
+  const actor = hit.object.userData.enemy;
+  if (Number.isFinite(actor?.headshotHeight) && actor.group && hit.point) {
+    actor.group.getWorldPosition(actorPosition);
+    return hit.point.y >= actorPosition.y + actor.headshotHeight;
+  }
   const region = hit.object.userData.headRegion;
   if (!region) return part === 'head'; // Other characters keep their hit map.
   // Use the same world matrix the skinned-mesh raycast used. Updating bones

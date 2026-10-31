@@ -49,6 +49,27 @@
 // ---- 素材表：槽位 id → 一组 stem（每个 stem 展开成 .ogg + .m4a 两个候选 URL）----
 // 变体数 > 1 的槽位在每次播放时轮换（见 _pick），这是「同一段录音听不出在重复」的前提。
 const SAMPLES = {
+  m200_fire: ["./assets/local/m200/audio/awp1.wav"],
+  m200_blowback: ["./assets/local/m200/audio/cheytac_blowback.wav"],
+  m200_clipin: ["./assets/local/m200/audio/cheytac_clipin.wav"],
+  m200_clipout: ["./assets/local/m200/audio/cheytac_clipout.wav"],
+  kn57_fire: ["./assets/local/kn57/ak47-1.wav"],
+  kn57_out: ["./assets/local/kn57/rifle_clip_out_1.wav"],
+  kn57_in: ["./assets/local/kn57/rifle_clip_in_1.wav"],
+  kn57_lock: ["./assets/local/kn57/rifle_clip_locked_1.wav"],
+  m200_reload: ["./assets/local/m200/audio/cheytac_dominator_pvp_reload.wav"],
+  m200_reload_tail: ["./assets/local/m200/audio/cheytac_reload.wav"],
+  m200_select: ["./assets/local/m200/audio/cheytac_select.wav"],
+  akgold_clipin: ["./assets/local/akgold/audio/ak47-beast_clipin.wav"],
+  akgold_reload: ["./assets/local/akgold/audio/ak47-beast_reload.wav"],
+  akgold_select: ["./assets/local/akgold/audio/ak47-beast_select.wav"],
+  akgold_fire: ["./assets/local/akgold/audio/ak47-beast_shoot_1.wav",
+    "./assets/local/akgold/audio/ak47-beast_shoot_2.wav"],
+  akgold_gas: ["./assets/local/akgold/audio/ak47ironbeast_gasejection.wav"],
+  scar_fire: ["./assets/local/scar_light/audio/galil-1.wav", "./assets/local/scar_light/audio/galil-2.wav"],
+  scar_select: ["./assets/local/scar_light/audio/scarlight-s-baihu_select.wav"],
+  scar_clipout: ["./assets/local/scar_light/audio/scarlight-s-baihu_r_clipout.wav"],
+  scar_clipin: ["./assets/local/scar_light/audio/scarlight-s-baihu_r_clipin.wav"],
   axe_festa_attack_1: ["classic/axe_festa/attack_1.wav"],
   axe_festa_attack_2: ["classic/axe_festa/attack_2.wav"],
   axe_festa_attack_3: ["classic/axe_festa/attack_3.wav"],
@@ -66,10 +87,17 @@ const SAMPLES = {
   ironbeast_clipin: ["classic/ironbeast/clipin.wav"],
   ironbeast_knife_attack: ["classic/ironbeast/knife_attack.wav"],
   bio_attack: ["bio/attack.wav"],
-  bio_infect: ["bio/infect.wav"],
+  bio_infect: ["./assets/local/cf_bio_candidates/zone13/pak/sound/zombie_infec1.wav",
+    "./assets/local/cf_bio_candidates/zone13/pak/sound/zombie_infec2.wav",
+    "./assets/local/cf_bio_candidates/zone13/pak/sound/zombie_infec3.wav"],
   bio_mother: ["bio/mother.wav"],
-  bio_death: ["bio/death.wav"],
+  bio_death: ["./assets/local/cf_bio_candidates/zone13/pak/sound/grandterminatordie.wav"],
   bio_countdown: ["bio/countdown.ogg"],
+  bio_breath: ["./assets/local/cf_bio_candidates/zone13/pak/sound/nanoghostbreath5.wav"],
+  bio_supply: ["./assets/local/cf_bio_candidates/zone13/pak/sound/box.wav"],
+  bio_humanwin: ["./assets/local/cf_bio_candidates/zone13/pak/sound/win_human.wav"],
+  bio_zombiewin: ["./assets/local/cf_bio_candidates/zone13/pak/sound/win_zombie1.wav"],
+  bio_bgm: ["./assets/local/cf_bio_candidates/zone13/pak/sound/ok111.wav"],
   cf_ak_fire: ["classic/ak47_fire.wav"],
   cf_ak_out: ["classic/ak47_out.wav"],
   cf_ak_in: ["classic/ak47_in.wav"],
@@ -154,6 +182,33 @@ const SAMPLES = {
   cf_streak_8: ["announcer/cf_gr_8"],
 };
 
+// Zone13 原包里此前未使用的声音只属于该地图。它们不能加入上面的全局表，
+// 否则打开大厅就会提前下载本地受限素材。prepareSelectedMap('bio') 会在地图
+// 加载页内显式调用 preloadBioExtras()，让下载、解码和地图构建处于同一加载阶段。
+const BIO_EXTRA_SAMPLES = {
+  bio_countdown_1: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z1.wav"],
+  bio_countdown_2: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z2.wav"],
+  bio_countdown_3: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z3.wav"],
+  bio_countdown_4: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z4.wav"],
+  bio_countdown_5: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z5.wav"],
+  bio_countdown_6: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z6.wav"],
+  bio_countdown_7: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z7.wav"],
+  bio_countdown_8: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z8.wav"],
+  bio_countdown_9: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z9.wav"],
+  bio_countdown_10: ["./assets/local/cf_bio_candidates/zone13/pak/sound/z10.wav"],
+  bio_humanwin_alt: [
+    "./assets/local/cf_bio_candidates/zone13/pak/sound/win_humans1off.wav",
+    "./assets/local/cf_bio_candidates/zone13/pak/sound/win_humans2off.wav",
+  ],
+  bio_carstart: ["./assets/local/cf_bio_candidates/zone13/pak/sound/carstart.wav"],
+  bio_shutdown: ["./assets/local/cf_bio_candidates/zone13/pak/sound/232off.wav"],
+  bio_drop: ["./assets/local/cf_bio_candidates/zone13/pak/sound/hoho1.wav"],
+  bio_hoho: ["./assets/local/cf_bio_candidates/zone13/pak/sound/hoho2.wav"],
+  bio_laser: ["./assets/local/cf_bio_candidates/zone13/pak/sound/hoho3.wav"],
+  bio_container: ["./assets/local/cf_bio_candidates/zone13/pak/sound/hoho4.wav"],
+  bio_drop4: ["./assets/local/cf_bio_candidates/zone13/pak/sound/hoho5.wav"],
+};
+
 // 只有 .m4a、没有 .ogg 的 stem（**按 stem 路径写，不是槽位 id**）。
 // 原因：本机没有 Vorbis 编码器 —— macOS 的 afconvert 能解码 ogg、能写 AAC/m4a，但只写
 // m4af / WAVE / AIFF / AIFC / CAF / ADTS，**写不了 Ogg 容器**。而这些不是从参考项目搬来的，
@@ -167,6 +222,10 @@ const M4A_ONLY = new Set([
 // 自动武器只播「初始爆裂声」，丢掉 1.7 s 的尾巴（不丢的话 0.09 s 的射击间隔会堆成一团糊音）。
 // window = 0 表示整段播完（巴雷特原声含较长的回响尾部）。
 const GUN = {
+  kn57: { sample: "kn57_fire", rate: 1, window: 0, vol: 1, crack: 0 },
+  m200:   { sample: "m200_fire", rate: 1.00, window: 0, vol: 1.00, crack: 0 },
+  akgold: { sample: "akgold_fire", rate: 1.00, window: 0, vol: .92, crack: 0 },
+  scar:   { sample: "scar_fire", rate: 1.00, window: 0, vol: .92, crack: 0 },
   ak:     { sample: "cf_ak_fire", rate: 1.00, window: 0.8, vol: 0.85, crack: 0 },
   m4:     { sample: "cf_m4c_fire", rate: 1.00, window: 0, vol: 0.92, crack: 0 },
   awm:    { sample: "awp_fire",  rate: 1.00, window: 0,    vol: 1.00, crack: 0 },
@@ -192,10 +251,13 @@ function decode(dec, ab) {
 
 export class SFX {
   bio(kind, x, y, z) {
-    const id = 'bio_' + kind;
-    const opts = { id, vol: kind === 'mother' ? .72 : kind === 'countdown' ? .7 : .53,
-      rateJitter: kind === 'countdown' ? 0 : .08, wet: kind === 'countdown' ? 0 : .3,
-      hudBus: kind === 'countdown' };
+    const id = kind === 'humanwin' && this._bioExtrasLoaded ? 'bio_humanwin_alt' : 'bio_' + kind;
+    const isMusic = kind === 'bgm';
+    const isCountdown = kind === 'countdown' || kind.startsWith('countdown_');
+    const opts = { id, vol: isMusic ? .25 : kind === 'mother' ? .72 : isCountdown ? .78 : .53,
+      rateJitter: isMusic || isCountdown ? 0 : .08,
+      wet: isMusic || isCountdown ? 0 : .3,
+      hudBus: isMusic || isCountdown };
     if (Number.isFinite(x)) Object.assign(opts, { x, y, z });
     return this._playMapped('bio', opts, () => {});
   }
@@ -215,6 +277,8 @@ export class SFX {
     this._total = 0;
     this._preloadPromise = null;
     this._preloadDone = false;
+    this._bioExtrasPromise = null;
+    this._bioExtrasLoaded = false;
     this._decoder = null;        // OfflineAudioContext，纯解码器（AudioBuffer 与创建它的 context 无关）
     this._scheduled = new Set(); // 可取消的排程句柄（换弹 / 拉栓）
     this._last = null;           // 最近一次发声尝试（?debug 读口）
@@ -328,16 +392,45 @@ export class SFX {
     return this;
   }
 
+  preloadBioExtras() {
+    if (this._bioExtrasPromise) return this._bioExtrasPromise;
+    this._bioExtrasPromise = this._doPreloadBioExtras();
+    return this._bioExtrasPromise;
+  }
+
+  async _doPreloadBioExtras() {
+    await this.preload();
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    let dec = this.ctx;
+    if (!dec && !this._decoder) this._decoder = OAC ? new OAC(1, 1, 48000) : null;
+    if (!dec) dec = this._decoder;
+    if (!dec) return this;
+    const jobs = [];
+    for (const [id, stems] of Object.entries(BIO_EXTRA_SAMPLES)) {
+      if (this._buffers.has(id)) continue;
+      for (const stem of stems) {
+        this._total++;
+        jobs.push(this._loadOne(dec, id, stem));
+      }
+    }
+    await Promise.all(jobs);
+    this._bioExtrasLoaded = true;
+    return this;
+  }
+
   async _loadOne(dec, id, stem) {
     // stem **自带扩展名**（`.wav` / `.mp3`）时原样用、不拼候选 —— 这叫「这条素材就这一个文件」：
     // `classic/*.wav` 是 CF 原始 wav，`impacts/headshot_kill.mp3` 与 `vo/fireinthehole.wav`
     // 是用户提供的原始素材（**不做转码**：mp3 / wav 三家浏览器都原生解，转一道只是白挨一次
     // 有损转码；何况 wav 转出来的只能是没有 ogg 的 m4a，白白多一份 404）。
     const cands = /\.(wav|mp3|ogg)$/i.test(stem) ? [""] : M4A_ONLY.has(stem) ? [".m4a"] : [".ogg", ".m4a"];
-    let last = "./audio/" + stem + cands[0];
+    // Explicit document-relative local-only weapon paths retain their directory;
+    // all existing audio stems keep the original ./audio/ resolution unchanged.
+    const base = stem.startsWith('./') ? '' : './audio/';
+    let last = base + stem + cands[0];
     let err = null;
     for (const ext of cands) {
-      last = "./audio/" + stem + ext;
+      last = base + stem + ext;
       try {
         // These two files were replaced in place. Version only their requests so
         // an already-played local build cannot reuse the old decoded HTTP body.
@@ -654,6 +747,18 @@ export class SFX {
   // `def.type` 都是 "rifle"。省略时按 type 兜底。
   shoot(kind, id, skin) {
     if (!this.ready()) return;
+    if (id === "scar") {
+      // Keep the reviewed source shot intact; no AK fallback or extra foley.
+      this._playMapped("shoot", {id, sample:"scar_fire", kind, rate:1,
+        rateJitter:0, vol:.92, volJitter:0, wet:0});
+      return;
+    }
+    if (id === "m200" || id === "akgold" || id === "kn57") {
+      const g=GUN[id];
+      this._playMapped("shoot", {id,sample:g.sample,kind,rate:1,window:g.window,
+        vol:g.vol,rateJitter:0,volJitter:0,wet:0});
+      return;
+    }
     const key = GUN[id] ? id : (GUN_BY_TYPE[kind] || "ak");
     const g = GUN[key];
     const exactM4C = id === "m4" && skin === "classic";
@@ -679,12 +784,12 @@ export class SFX {
   // AWM 的两个 take 是独立录音、随机选一个；巴雷特只有原枪专用的一段。
   bolt(id = "awm", options = {}) {
     if (!this.ready()) return;
-    const sample = id === "barrett" ? "barrett_bolt" : "awp_bolt";
-    const sourceDelay = id === "barrett" ? 50 / 35 : 0.2;
+    const sample = id === "barrett" ? "barrett_bolt" : id === "m200" ? "m200_blowback" : "awp_bolt";
+    const sourceDelay = id === "barrett" ? 50 / 35 : id === "m200" ? 41 / 100 : 0.2;
     const delay = Number.isFinite(options.delay) ? options.delay : sourceDelay;
     this._playMapped("bolt", {
-      id: sample, delay, vol: 1.0, wet: id === "barrett" ? 0 : 0.4,
-      rateJitter: id === "barrett" ? 0 : 0.03, schedule: "bolt",
+      id: sample, delay, vol: 1.0, wet: id === "barrett" || id === "m200" ? 0 : 0.4,
+      rateJitter: id === "barrett" || id === "m200" ? 0 : 0.03, schedule: "bolt",
     });
   }
 
@@ -695,6 +800,34 @@ export class SFX {
     if (!this.ready()) return;
     const dur = (o && o.dur) || 2.43;
     const wid = (o && o.id) || "reload";
+    if (wid === "kn57") {
+      const times=[.216216,.756757,1.351351], ids=["kn57_out","kn57_in","kn57_lock"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:times[i]/(91/37)*dur,vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:times},hits.every(Boolean)?"sample":"missing",times[2]);return;
+    }
+    if (wid === "scar") {
+      // Native reload: 54 frames at 22 fps; sample time is frames 0..53.
+      const frames=[18,39],ids=["scar_clipout","scar_clipin"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/53*dur,
+        vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:frames},hits.every(Boolean)?"sample":"missing",frames[1]/53*dur);
+      return;
+    }
+    if (wid === "m200") {
+      const frames=[8,38,110,175];
+      const ids=["m200_clipout","m200_reload","m200_clipin","m200_reload_tail"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/100,
+        vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:frames},hits.every(Boolean)?"sample":"missing",frames.at(-1)/100);
+      return;
+    }
+    if (wid === "akgold") {
+      const frames=[9,19,25],ids=["akgold_gas","akgold_clipin","akgold_reload"];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:frames[i]/34*dur,
+        vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
+      this._note("reload",{id:wid,kind:wid,events:frames},hits.every(Boolean)?"sample":"missing",frames.at(-1)/34*dur);
+      return;
+    }
     if (wid === "barrett") {
       // Original Barrett QC: clip out frame 10, clip in frame 35, bolt frame 70
       // of the 90-frame reload. Keep each source recording at its original rate.
@@ -1112,6 +1245,19 @@ export class SFX {
   // 其余武器没有对应源原声时静音，不再叠通用摆弄录音或合成扫频。
   deploy(type, options = {}) {
     if (!this.ready()) return;
+    if (options.weaponId === "kn57") { this._playMapped("deploy", {id:"cf_ak_bolt",kind:type,delay:0,vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"deploy"}); return; }
+    if (options.weaponId === "m200" || options.weaponId === "akgold") {
+      const m200=options.weaponId === "m200";
+      this._playMapped("deploy", {id:m200?"m200_select":"akgold_select",kind:type,
+        delay:m200 ? .01 : 0,vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"deploy"});
+      return;
+    }
+    if (options.weaponId === "scar") {
+      // Native select event frame 3 / 30 fps, on the cancellable deploy lane.
+      this._playMapped("deploy", {id:"scar_select",kind:type,delay:3/30,
+        vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"deploy"});
+      return;
+    }
     const ironbeast = options.skin === "ironbeastgold";
     const barrett = options.weaponId === "barrett";
     const axe = options.weaponId === "knife" && options.meleeSkin !== "dragon";

@@ -7,8 +7,12 @@ export const WEAPON_MOVE_SCALE = Object.freeze({
   frag: .98, flash: .98, smoke: .98,
   deagle: .94,
   m4: .91,
+  scar: .91,
+  akgold: .89,
+  kn57: .89,
   ak: .89,
   barrett: .72,
+  m200: .72,
 });
 
 export function weaponMoveScale(id) {

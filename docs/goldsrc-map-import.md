@@ -4,7 +4,7 @@
 
 ## 强制实现规则
 
-1. 所有由 `tools/import_goldsrc_survivor.py` 产生的凸体必须带 `localStep=true`，地图 JSON 必须声明 `collisionSurfaceMode="visible-mesh-v1"`。
+1. 所有由 `tools/import_goldsrc_blacktown.py` 产生的凸体必须带 `localStep=true`，地图 JSON 必须声明 `collisionSurfaceMode="visible-mesh-v1"`。
 2. 新地图加载 `map.bin` 后必须调用 `prepareGoldsrcCollision(data, binary)`，并把返回的 `surfaceAt`、`surfacesAt`、`blockerAt` 全部放进地图对象。禁止重新使用 `max(brushSupport(...))` 作为 GoldSrc 地图的落脚高度。
 3. BSP 凸体负责精确实体范围与顶棚判定，但水平阻挡必须同时得到 `blockerAt` 的可见陡直三角面确认；玩家、NPC、爬阶放行和导航节点的 Y 高度以不透明、非 MDL 装饰的可见三角形为准。透明水面和无碰撞场景模型不能成为支撑面或墙面。
 4. `brushSupportIsExposed()` 必须过滤仍位于另一实心叶内部的候选顶面。不能通过简单提高 `stepHeight`、缩小人物胶囊或删除大块碰撞来掩盖问题。

@@ -13,11 +13,11 @@ var n = {
 	mistHeight: { value: 20 },
 	hazeFar: { value: 11e-6 },
 	time: { value: 0 }
-}, r = "\nfloat cgHash11(float p){ p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }\nfloat cgHash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\nvec3 cgHash33(vec3 p3){ p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yxz + 33.33); return fract((p3.xxy + p3.yxx) * p3.zyx); }\nfloat cgNoise2(vec2 p){\n  vec2 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float a = cgHash12(i), b = cgHash12(i + vec2(1,0)), c = cgHash12(i + vec2(0,1)), d = cgHash12(i + vec2(1,1));\n  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);\n}\nfloat cgNoise3(vec3 p){\n  vec3 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float n000 = cgHash12(i.xy + i.z * 19.19);\n  float n100 = cgHash12(i.xy + vec2(1,0) + i.z * 19.19);\n  float n010 = cgHash12(i.xy + vec2(0,1) + i.z * 19.19);\n  float n110 = cgHash12(i.xy + vec2(1,1) + i.z * 19.19);\n  float n001 = cgHash12(i.xy + (i.z + 1.0) * 19.19);\n  float n101 = cgHash12(i.xy + vec2(1,0) + (i.z + 1.0) * 19.19);\n  float n011 = cgHash12(i.xy + vec2(0,1) + (i.z + 1.0) * 19.19);\n  float n111 = cgHash12(i.xy + vec2(1,1) + (i.z + 1.0) * 19.19);\n  return mix(mix(mix(n000,n100,f.x), mix(n010,n110,f.x), f.y), mix(mix(n001,n101,f.x), mix(n011,n111,f.x), f.y), f.z);\n}\nfloat cgFbm2(vec2 p){ float s = 0.0, a = 0.5; for (int i=0;i<5;i++){ s += a * cgNoise2(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }\nfloat cgFbm3(vec3 p){ float s = 0.0, a = 0.5; for (int i=0;i<4;i++){ s += a * cgNoise3(p); p = p * 2.05 + 7.3; a *= 0.5; } return s; }\nfloat cgRidge2(vec2 p){ float s = 0.0, a = 0.55; for (int i=0;i<4;i++){ float n = 1.0 - abs(cgNoise2(p) * 2.0 - 1.0); s += a * n * n; p = p * 2.1 + 3.1; a *= 0.5; } return s; }\n// anti-aliased thin line: distance d in world units, width w, pixel footprint aa\nfloat cgLine(float d, float w, float aa){ return 1.0 - smoothstep(w, w + aa, abs(d)); }\n", i = "\nvarying vec3 vCgWorld;\nvarying vec3 vCgNormalW;\nvarying vec3 vCgObj;\nvarying float vCgSeed;\n", a = "\n{\n  vec4 cgP = vec4(transformed, 1.0);\n  vec3 cgN = objectNormal;\n  float cgSeedV = 0.0;\n  #ifdef USE_INSTANCING\n    cgP = instanceMatrix * cgP;\n    cgN = mat3(instanceMatrix) * cgN;\n    cgSeedV = fract(sin(dot(instanceMatrix[3].xyz, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n  #endif\n  vCgWorld = (modelMatrix * cgP).xyz;\n  vCgNormalW = normalize(mat3(modelMatrix) * cgN);\n  vCgObj = transformed;\n  vCgSeed = cgSeedV;\n}\n";
-function o(t = {}) {
+}, r = "\nuniform vec3 uSunDir;\nuniform vec3 uSunColor;\nuniform vec3 uHazeColor;\nuniform vec3 uMistColor;\nuniform float uHazeDensity;\nuniform float uHazeHeight;\nuniform float uMistDensity;\nuniform float uMistHeight;\nuniform float uHazeFar;\nuniform float uTime;\n\nfloat atmoHG(float mu, float g){\n  float g2 = g * g;\n  return (1.0 - g2) / (12.5663706 * pow(max(1.0 + g2 - 2.0 * g * mu, 1e-4), 1.5));\n}\n// optical depth of an exponential height layer along a ray\nfloat atmoOD(float y0, float dy, float dist, float dens, float H){\n  float a = dens * exp(clamp(-y0 / H, -40.0, 40.0));\n  float k = dy * dist / H;\n  float f = abs(k) > 1e-3 ? (1.0 - exp(-clamp(k, -40.0, 40.0))) / k : 1.0 - 0.5 * k;\n  return a * dist * f;\n}\nvec3 atmoApply(vec3 col, vec3 camPos, vec3 wp){\n  vec3 V = wp - camPos;\n  float dist = length(V);\n  if (dist < 0.01) return col;\n  vec3 dir = V / dist;\n  float odH = atmoOD(camPos.y, dir.y, dist, uHazeDensity, uHazeHeight);\n  float odM = atmoOD(camPos.y, dir.y, dist, uMistDensity, uMistHeight);\n  odH += uHazeFar * dist * dist;\n  vec3 TH = exp(-odH * vec3(0.85, 1.0, 1.18));\n  float TM = exp(-odM);\n  float mu = dot(dir, uSunDir);\n  float phase = atmoHG(mu, 0.72) * 12.5663706;\n  vec3 hz = uHazeColor + uSunColor * (0.22 * phase);\n  vec3 mz = uMistColor + uSunColor * (0.10 * (atmoHG(mu, 0.45) * 12.5663706));\n  // warm sun-side tint low in the valley, cool shade away from it\n  hz = mix(hz, hz * vec3(1.06, 1.0, 0.92), smoothstep(0.0, 0.5, mu));\n  col = col * TH + hz * (1.0 - TH);\n  col = col * TM + mz * (1.0 - TM);\n  return col;\n}\n", i = "\nfloat cgHash11(float p){ p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }\nfloat cgHash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\nvec3 cgHash33(vec3 p3){ p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yxz + 33.33); return fract((p3.xxy + p3.yxx) * p3.zyx); }\nfloat cgNoise2(vec2 p){\n  vec2 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float a = cgHash12(i), b = cgHash12(i + vec2(1,0)), c = cgHash12(i + vec2(0,1)), d = cgHash12(i + vec2(1,1));\n  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);\n}\nfloat cgNoise3(vec3 p){\n  vec3 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float n000 = cgHash12(i.xy + i.z * 19.19);\n  float n100 = cgHash12(i.xy + vec2(1,0) + i.z * 19.19);\n  float n010 = cgHash12(i.xy + vec2(0,1) + i.z * 19.19);\n  float n110 = cgHash12(i.xy + vec2(1,1) + i.z * 19.19);\n  float n001 = cgHash12(i.xy + (i.z + 1.0) * 19.19);\n  float n101 = cgHash12(i.xy + vec2(1,0) + (i.z + 1.0) * 19.19);\n  float n011 = cgHash12(i.xy + vec2(0,1) + (i.z + 1.0) * 19.19);\n  float n111 = cgHash12(i.xy + vec2(1,1) + (i.z + 1.0) * 19.19);\n  return mix(mix(mix(n000,n100,f.x), mix(n010,n110,f.x), f.y), mix(mix(n001,n101,f.x), mix(n011,n111,f.x), f.y), f.z);\n}\nfloat cgFbm2(vec2 p){ float s = 0.0, a = 0.5; for (int i=0;i<5;i++){ s += a * cgNoise2(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }\nfloat cgFbm3(vec3 p){ float s = 0.0, a = 0.5; for (int i=0;i<4;i++){ s += a * cgNoise3(p); p = p * 2.05 + 7.3; a *= 0.5; } return s; }\nfloat cgRidge2(vec2 p){ float s = 0.0, a = 0.55; for (int i=0;i<4;i++){ float n = 1.0 - abs(cgNoise2(p) * 2.0 - 1.0); s += a * n * n; p = p * 2.1 + 3.1; a *= 0.5; } return s; }\n// anti-aliased thin line: distance d in world units, width w, pixel footprint aa\nfloat cgLine(float d, float w, float aa){ return 1.0 - smoothstep(w, w + aa, abs(d)); }\n", a = "\nvarying vec3 vCgWorld;\nvarying vec3 vCgNormalW;\nvarying vec3 vCgObj;\nvarying float vCgSeed;\n", o = "\n{\n  vec4 cgP = vec4(transformed, 1.0);\n  vec3 cgN = objectNormal;\n  float cgSeedV = 0.0;\n  #ifdef USE_INSTANCING\n    cgP = instanceMatrix * cgP;\n    cgN = mat3(instanceMatrix) * cgN;\n    cgSeedV = fract(sin(dot(instanceMatrix[3].xyz, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n  #endif\n  vCgWorld = (modelMatrix * cgP).xyz;\n  vCgNormalW = normalize(mat3(modelMatrix) * cgN);\n  vCgObj = transformed;\n  vCgSeed = cgSeedV;\n}\n";
+function s(t = {}) {
 	let n = new e.MeshStandardMaterial(t.params ?? {});
 	t.name && (n.name = t.name);
-	let o = t.uniforms ?? {}, c = "proc:" + s([
+	let r = t.uniforms ?? {}, s = "proc:" + c([
 		t.head,
 		t.vertexHead,
 		t.vertexPre,
@@ -28,20 +28,20 @@ function o(t = {}) {
 		t.emissive,
 		t.ao
 	].join("|"));
-	return n.customProgramCacheKey = () => c, n.onBeforeCompile = (e) => {
-		Object.assign(e.uniforms, o);
+	return n.customProgramCacheKey = () => s, n.onBeforeCompile = (e) => {
+		Object.assign(e.uniforms, r);
 		let n = e.vertexShader, s = e.fragmentShader;
-		n = n.replace("#include <common>", `#include <common>\n${i}\n${t.vertexHead ?? ""}`), t.vertexPre && (n = n.replace("#include <begin_vertex>", `#include <begin_vertex>\n{\n${t.vertexPre}\n}`)), n = n.replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${a}`), s = s.replace("#include <common>", `#include <common>\n${i}\n${r}\n${t.head ?? ""}`), s = s.replace("void main() {", "void main() {\nvec3 cgP = vCgWorld; vec3 cgN = normalize(vCgNormalW); vec3 cgO = vCgObj; float cgSeed = vCgSeed; vec3 cgBump = vec3(0.0); float cgAO = 1.0;"), t.color && (s = s.replace("#include <color_fragment>", `#include <color_fragment>\n{\n${t.color}\n}`)), t.roughness && (s = s.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\n{\n${t.roughness}\n}`)), t.metalness && (s = s.replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>\n{\n${t.metalness}\n}`)), t.normal && (s = s.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n{\n${t.normal}\n}\nnormal = normalize(normal + (viewMatrix * vec4(cgBump, 0.0)).xyz);`)), t.emissive && (s = s.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n{\n${t.emissive}\n}`)), t.ao && (s = s.replace("#include <aomap_fragment>", `#include <aomap_fragment>\n{\n${t.ao}\n}\nreflectedLight.indirectDiffuse *= cgAO; reflectedLight.indirectSpecular *= mix(1.0, cgAO, 0.7);`)), e.vertexShader = n, e.fragmentShader = s;
+		n = n.replace("#include <common>", `#include <common>\n${a}\n${t.vertexHead ?? ""}`), t.vertexPre && (n = n.replace("#include <begin_vertex>", `#include <begin_vertex>\n{\n${t.vertexPre}\n}`)), n = n.replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${o}`), s = s.replace("#include <common>", `#include <common>\n${a}\n${i}\n${t.head ?? ""}`), s = s.replace("void main() {", "void main() {\nvec3 cgP = vCgWorld; vec3 cgN = normalize(vCgNormalW); vec3 cgO = vCgObj; float cgSeed = vCgSeed; vec3 cgBump = vec3(0.0); float cgAO = 1.0;"), t.color && (s = s.replace("#include <color_fragment>", `#include <color_fragment>\n{\n${t.color}\n}`)), t.roughness && (s = s.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\n{\n${t.roughness}\n}`)), t.metalness && (s = s.replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>\n{\n${t.metalness}\n}`)), t.normal && (s = s.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n{\n${t.normal}\n}\nnormal = normalize(normal + (viewMatrix * vec4(cgBump, 0.0)).xyz);`)), t.emissive && (s = s.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n{\n${t.emissive}\n}`)), t.ao && (s = s.replace("#include <aomap_fragment>", `#include <aomap_fragment>\n{\n${t.ao}\n}\nreflectedLight.indirectDiffuse *= cgAO; reflectedLight.indirectSpecular *= mix(1.0, cgAO, 0.7);`)), e.vertexShader = n, e.fragmentShader = s;
 	}, n;
 }
-function s(e) {
+function c(e) {
 	let t = 2166136261;
 	for (let n = 0; n < e.length; n++) t ^= e.charCodeAt(n), t = Math.imul(t, 16777619);
 	return (t >>> 0).toString(36);
 }
 //#endregion
 //#region src/core/sky.ts
-var c = "\nvarying vec3 vDir;\nvoid main(){\n  vDir = position;\n  vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);\n  gl_Position = p.xyww;\n}\n", l = `
+var l = "\nvarying vec3 vDir;\nvoid main(){\n  vDir = position;\n  vec4 p = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);\n  gl_Position = p.xyww;\n}\n", u = `
 varying vec3 vDir;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
@@ -56,7 +56,7 @@ uniform float uCloudSpeed;
 uniform float uTime;
 uniform float uEnvPass;
 uniform vec3 uHazeColor;
-${r}
+${i}
 
 vec3 skyHeight(vec3 d){
   float mu = dot(d, uSunDir);
@@ -64,10 +64,13 @@ vec3 skyHeight(vec3 d){
   float hh = max(h, 0.0);
   float t = pow(1.0 - hh, 5.0);
   vec3 zen = uZenith * (1.0 + 0.25 * (1.0 - hh));
+  // Deepen only the upper dome. The authored horizon stays pale and hazy,
+  // which is what keeps the layered ridges reading at distance.
+  zen = mix(zen, zen * vec3(0.54, 0.76, 1.10), smoothstep(0.08, 0.82, hh) * 0.82);
   vec3 col = mix(zen, uHorizon, t);
   // warm band near the horizon on the sun side
   float band = smoothstep(0.0, 0.35, 1.0 - hh) * smoothstep(-0.05, 0.12, h);
-  col = mix(col, col * vec3(1.16, 1.02, 0.86), band * smoothstep(-0.2, 0.9, mu) * 0.55);
+  col = mix(col, col * vec3(1.22, 1.06, 0.84), band * smoothstep(-0.2, 0.9, mu) * 0.66);
   // soft aureole
   float m = max(mu, 0.0);
   col += uSunColor * (0.16 * pow(m, 6.0) + 0.5 * pow(m, 90.0) + 1.6 * pow(m, 900.0)) * (0.35 + 0.65 * t);
@@ -84,15 +87,24 @@ vec3 clouds(vec3 d, float quality){
   float n2 = cgFbm2(p * 1.75 + 13.0);
   float cover = mix(n, n2, 0.4);
   float mask = smoothstep(0.62 - uCloudCover * 0.34, 0.78 - uCloudCover * 0.22, cover);
+  // A broad, low-contrast veil softens the empty gradient even when the
+  // authored cover is low; it is deliberately much weaker than the cumulus.
+  float veil = smoothstep(0.54, 0.80, n) * smoothstep(0.04, 0.24, d.y) * 0.045;
+  mask = max(mask, veil);
   mask *= smoothstep(0.02, 0.2, d.y);
   float mu = dot(d, uSunDir);
   float lit = 0.55 + 0.45 * smoothstep(-0.2, 0.7, mu);
   float thick = smoothstep(0.55, 0.9, n2);
   vec3 c = mix(vec3(0.55, 0.58, 0.61), vec3(1.1, 1.02, 0.9), lit);
-  c *= mix(1.0, 0.72, thick);
+  c *= mix(1.0, 0.62, thick);
   // bright silver rim where the sun grazes the deck
   c += uSunColor * pow(max(mu, 0.0), 18.0) * 0.5 * mask;
-  return c * mask * 0.85;
+  // High, thin altostratus: larger scale and paler than the lower deck.
+  vec2 hp = p * 0.22 + vec2(11.0, -7.0);
+  float high = smoothstep(0.5, 0.76, cgFbm2(hp * 1.3)) * smoothstep(0.10, 0.32, d.y);
+  vec3 highCol = mix(vec3(0.72, 0.76, 0.78), vec3(1.04, 1.0, 0.94), lit);
+  c = mix(c * mask * 0.85, highCol, high * 0.11);
+  return c;
 }
 
 vec3 cirrus(vec3 d){
@@ -101,8 +113,10 @@ vec3 cirrus(vec3 d){
   p = mat2(0.86, -0.5, 0.5, 0.86) * p;
   vec2 q = vec2(p.x * 0.22, p.y * 1.35);
   float n = cgFbm2(q * 1.6 + vec2(uTime * 0.0007, 0.0));
-  float streak = smoothstep(0.5, 0.82, n) * smoothstep(0.08, 0.22, d.y) * (1.0 - smoothstep(0.35, 0.75, d.y));
-  return vec3(0.92, 0.93, 0.95) * streak * 0.14;
+  float n2 = cgFbm2(q * 3.4 + vec2(-uTime * 0.0004, 4.0));
+  float streak = smoothstep(0.47, 0.8, n) * smoothstep(0.08, 0.22, d.y) * (1.0 - smoothstep(0.35, 0.75, d.y));
+  streak += smoothstep(0.55, 0.85, n2) * smoothstep(0.14, 0.3, d.y) * 0.45;
+  return vec3(0.92, 0.93, 0.95) * streak * 0.20;
 }
 
 void main(){
@@ -124,7 +138,7 @@ void main(){
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
-`, u = class {
+`, d = class {
 	mesh;
 	material;
 	uniforms;
@@ -145,8 +159,8 @@ void main(){
 			uHazeColor: n.hazeColor
 		}, this.material = new e.ShaderMaterial({
 			uniforms: this.uniforms,
-			vertexShader: c,
-			fragmentShader: l,
+			vertexShader: l,
+			fragmentShader: u,
 			side: e.BackSide,
 			depthWrite: !1,
 			depthTest: !0,
@@ -162,11 +176,65 @@ void main(){
 			uEnvPass: { value: 1 }
 		}, e.scale.setScalar(100), e;
 	}
-}, d = (e, t, n) => e < t ? t : e > n ? n : e, f = (e, t, n) => e + (t - e) * n, p = (e, t, n) => {
-	let r = d((n - e) / (t - e), 0, 1);
+}, f = class {
+	group = new e.Group();
+	constructor() {
+		this.group.name = "backdrop", this.addRidge(330, 32, "#5a6a60", 17, .18), this.addRidge(580, 74, "#687970", 29, .34), this.addRidge(900, 138, "#7d8c83", 41, .52), this.addRidge(1260, 206, "#98a39b", 57, .7);
+	}
+	addRidge(t, i, a, o, s) {
+		let c = [], l = [], u = [], d = new e.Color(a);
+		for (let e = 0; e <= 240; e++) {
+			let n = e / 240 * Math.PI * 2, r = Math.cos(n) * t, a = Math.sin(n) * t, s = .48 + .22 * Math.sin(n * 2.7 + o) + .14 * Math.sin(n * 5.3 + o * 1.6) + .08 * Math.sin(n * 11.1 + o * 2.2), f = .035 * Math.sin(n * 47 + o * 3.1) + .022 * Math.sin(n * 89 + o * 1.3), p = Math.max(.18, s + f), m = i * p;
+			c.push(r, -8, a, r, m, a);
+			let h = .9 + .16 * (p - .4);
+			if (l.push(d.r * h * .93, d.g * h * .93, d.b * h * .93, d.r * h, d.g * h, d.b * h), e < 240) {
+				let t = e * 2;
+				u.push(t, t + 2, t + 1, t + 1, t + 2, t + 3);
+			}
+		}
+		let f = new e.BufferGeometry();
+		f.setAttribute("position", new e.Float32BufferAttribute(c, 3)), f.setAttribute("color", new e.Float32BufferAttribute(l, 3)), f.setIndex(u);
+		let p = new e.ShaderMaterial({
+			uniforms: {
+				uSunDir: n.sunDir,
+				uSunColor: n.sunColor,
+				uHazeColor: n.hazeColor,
+				uMistColor: n.mistColor,
+				uHazeDensity: n.hazeDensity,
+				uHazeHeight: n.hazeHeight,
+				uMistDensity: n.mistDensity,
+				uMistHeight: n.mistHeight,
+				uHazeFar: n.hazeFar,
+				uTime: n.time,
+				uRidgeHaze: { value: new e.Color("#b3bdb4") },
+				uRidgeMix: { value: s }
+			},
+			vertexShader: "\n        varying vec3 vColor;\n        varying vec3 vWorld;\n        void main(){\n          vColor = color;\n          vec4 wp = modelMatrix * vec4(position, 1.0);\n          vWorld = wp.xyz;\n          gl_Position = projectionMatrix * viewMatrix * wp;\n        }\n      ",
+			fragmentShader: `
+        varying vec3 vColor;
+        varying vec3 vWorld;
+        uniform vec3 uRidgeHaze;
+        uniform float uRidgeMix;
+        ${r}
+        void main(){
+          vec3 c = atmoApply(vColor, cameraPosition, vWorld);
+          // Lift far ridges toward the pale horizon; this is the aerial
+          // perspective the shared height-fog alone could not provide.
+          c = mix(c, uRidgeHaze, uRidgeMix);
+          gl_FragColor = vec4(c, 1.0);
+        }
+      `,
+			vertexColors: !0,
+			side: e.DoubleSide,
+			depthWrite: !0
+		}), m = new e.Mesh(f, p);
+		m.frustumCulled = !1, m.renderOrder = -5, this.group.add(m);
+	}
+}, p = (e, t, n) => e < t ? t : e > n ? n : e, m = (e, t, n) => e + (t - e) * n, h = (e, t, n) => {
+	let r = p((n - e) / (t - e), 0, 1);
 	return r * r * (3 - 2 * r);
 };
-function m(e) {
+function g(e) {
 	let t = e >>> 0;
 	return () => {
 		t |= 0, t = t + 1831565813 | 0;
@@ -174,11 +242,11 @@ function m(e) {
 		return e = e + Math.imul(e ^ e >>> 7, 61 | e) ^ e, ((e ^ e >>> 14) >>> 0) / 4294967296;
 	};
 }
-var h = class {
+var _ = class {
 	next;
 	constructor(e) {
-		let t = typeof e == "number" ? e : g(e);
-		this.next = m(t);
+		let t = typeof e == "number" ? e : v(e);
+		this.next = g(t);
 	}
 	value() {
 		return this.next();
@@ -203,29 +271,29 @@ var h = class {
 		return Math.sqrt(-2 * Math.log(e)) * Math.cos(6.2831853 * this.next());
 	}
 };
-function g(e) {
+function v(e) {
 	let t = 2166136261;
 	for (let n = 0; n < e.length; n++) t ^= e.charCodeAt(n), t = Math.imul(t, 16777619);
 	return t >>> 0;
 }
-function _(e, t) {
+function y(e, t) {
 	let n = Math.imul(e | 0, 374761393) + Math.imul(t | 0, 668265263);
 	return n = Math.imul(n ^ n >>> 13, 1274126177), ((n ^ n >>> 16) >>> 0) / 4294967296;
 }
-var v = (e) => e * e * (3 - 2 * e);
-function y(e, t) {
-	let n = Math.floor(e), r = Math.floor(t), i = e - n, a = t - r, o = v(i), s = v(a), c = _(n, r), l = _(n + 1, r), u = _(n, r + 1), d = _(n + 1, r + 1);
-	return f(f(c, l, o), f(u, d, o), s) * 2 - 1;
+var b = (e) => e * e * (3 - 2 * e);
+function x(e, t) {
+	let n = Math.floor(e), r = Math.floor(t), i = e - n, a = t - r, o = b(i), s = b(a), c = y(n, r), l = y(n + 1, r), u = y(n, r + 1), d = y(n + 1, r + 1);
+	return m(m(c, l, o), m(u, d, o), s) * 2 - 1;
 }
-function b(e, t, n = 4, r = 2.02, i = .5) {
+function S(e, t, n = 4, r = 2.02, i = .5) {
 	let a = .5, o = 1, s = 0, c = 0;
-	for (let l = 0; l < n; l++) s += a * y(e * o + l * 17.31, t * o - l * 9.13), c += a, a *= i, o *= r;
+	for (let l = 0; l < n; l++) s += a * x(e * o + l * 17.31, t * o - l * 9.13), c += a, a *= i, o *= r;
 	return s / c;
 }
-function x(e, t, n) {
+function C(e, t, n) {
 	let r = Infinity, i = 0, a = 0;
 	for (let o = 0; o < n.length - 1; o++) {
-		let s = n[o][0], c = n[o][1], l = n[o + 1][0], u = n[o + 1][1], f = l - s, p = u - c, m = f * f + p * p || 1, h = d(((e - s) * f + (t - c) * p) / m, 0, 1), g = s + f * h, _ = c + p * h, v = Math.hypot(e - g, t - _);
+		let s = n[o][0], c = n[o][1], l = n[o + 1][0], u = n[o + 1][1], d = l - s, f = u - c, m = d * d + f * f || 1, h = p(((e - s) * d + (t - c) * f) / m, 0, 1), g = s + d * h, _ = c + f * h, v = Math.hypot(e - g, t - _);
 		v < r && (r = v, i = h, a = o);
 	}
 	return {
@@ -235,8 +303,8 @@ function x(e, t, n) {
 	};
 }
 //#endregion
-//#region ../scripts/lingyin_main_hall.js
-var S = Object.freeze({
+//#region src/shared/lingyin_main_hall.js
+var w = Object.freeze({
 	name: "main",
 	x: -2,
 	z: -26,
@@ -245,10 +313,10 @@ var S = Object.freeze({
 	eave: 11,
 	plinth: 1.1,
 	rot: 0
-}), C = Object.freeze({
-	x: S.w / 27,
-	z: S.d / 17
-}), w = [[
+}), T = Object.freeze({
+	x: w.w / 27,
+	z: w.d / 17
+}), E = [[
 	[
 		-36.4,
 		7,
@@ -314,7 +382,7 @@ var S = Object.freeze({
 		62,
 		13
 	]
-]], T = 2.45, E = T + .27, ee = T + 1.45, te = 7.2, ne = .14, D = [{
+]], D = 2.45, O = D + .27, k = D + 1.45, ee = 7.2, te = .14, ne = [{
 	x: -50,
 	z: 62,
 	y: 13,
@@ -323,14 +391,14 @@ var S = Object.freeze({
 	entrySide: "east",
 	entryX: -44.8,
 	entryZ: 62
-}], re = {
+}], A = {
 	x0: -24,
 	x1: 20,
 	z0: 45.5,
 	z1: 74.5,
 	y: 0
 };
-function ie(e, t = .9) {
+function re(e, t = .9) {
 	let n = [];
 	for (let t = 0; t < e.length - 1; t++) {
 		let r = e[t + 1][0] - e[t][0], i = e[t + 1][1] - e[t][1], a = Math.hypot(r, i);
@@ -376,7 +444,7 @@ function ie(e, t = .9) {
 		along: a
 	}), i;
 }
-function ae(e, t, n) {
+function ie(e, t, n) {
 	let r = Infinity;
 	for (let i = 0; i < n.length - 1; i++) {
 		let a = n[i], o = n[i + 1], s = o[0] - a[0], c = o[1] - a[1], l = Math.max(0, Math.min(1, ((e - a[0]) * s + (t - a[1]) * c) / (s * s + c * c)));
@@ -384,23 +452,23 @@ function ae(e, t, n) {
 	}
 	return r;
 }
-function oe(e, t = .9) {
-	let n = ie(w[e], t), r = [];
+function ae(e, t = .9) {
+	let n = re(E[e], t), r = [];
 	n.at(-1).along;
 	for (let t of [-1, 1]) {
 		let i = [];
 		for (let a = 0; a < n.length - 1; a++) {
 			let o = n[a], s = n[a + 1], c = {
-				x: o.x + o.nx * t * E,
-				z: o.z + o.nz * t * E,
+				x: o.x + o.nx * t * O,
+				z: o.z + o.nz * t * O,
 				y: o.y,
 				along: o.along
 			}, l = {
-				x: s.x + s.nx * t * E,
-				z: s.z + s.nz * t * E,
+				x: s.x + s.nx * t * O,
+				z: s.z + s.nz * t * O,
 				y: s.y,
 				along: s.along
-			}, u = (c.x + l.x) / 2, d = (c.z + l.z) / 2, f = (c.along + l.along) / 2 < 2.4, p = D.some((e) => Math.abs(u - e.x) < e.hx + .3 && Math.abs(d - e.z) < e.hz + .3), m = w.some((t, n) => n !== e && ae(u, d, t) < 2.6100000000000003);
+			}, u = (c.x + l.x) / 2, d = (c.z + l.z) / 2, f = (c.along + l.along) / 2 < 2.4, p = ne.some((e) => Math.abs(u - e.x) < e.hx + .3 && Math.abs(d - e.z) < e.hz + .3), m = E.some((t, n) => n !== e && ie(u, d, t) < 2.6100000000000003);
 			!f && !p && !m ? (i.length || i.push(c), i.push(l)) : i.length && (i.length > 1 && r.push({
 				routeIndex: e,
 				side: t,
@@ -415,10 +483,10 @@ function oe(e, t = .9) {
 	}
 	return r;
 }
-function se(e, t) {
+function oe(e, t) {
 	let n = Infinity, r = null, i = 0;
-	for (let a = 0; a < w.length; a++) {
-		let o = w[a];
+	for (let a = 0; a < E.length; a++) {
+		let o = E[a];
 		for (let s = 0; s < o.length - 1; s++) {
 			let c = o[s], l = o[s + 1], u = l[0] - c[0], d = l[1] - c[1], f = Math.hypot(u, d), p = Math.max(0, Math.min(1, ((e - c[0]) * u + (t - c[1]) * d) / (f * f))), m = c[0] + u * p, h = c[1] + d * p, g = Math.hypot(e - m, t - h);
 			g < n && (n = g, r = {
@@ -435,20 +503,20 @@ function se(e, t) {
 	}
 	return r;
 }
-function ce(e, t) {
-	let n = se(e, t).distance;
-	for (let r of D) n = Math.min(n, Math.hypot(Math.max(0, Math.abs(e - r.x) - r.hx), Math.max(0, Math.abs(t - r.z) - r.hz)));
+function se(e, t) {
+	let n = oe(e, t).distance;
+	for (let r of ne) n = Math.min(n, Math.hypot(Math.max(0, Math.abs(e - r.x) - r.hx), Math.max(0, Math.abs(t - r.z) - r.hz)));
 	return n;
 }
 //#endregion
 //#region src/world/heightfield.ts
-var O = {
+var j = {
 	size: 170,
 	terrainSegments: 180,
 	center: [0, 0],
 	temple: {
-		x: S.x,
-		z: S.z
+		x: w.x,
+		z: w.z
 	},
 	platform: {
 		x0: -36,
@@ -467,7 +535,7 @@ var O = {
 		x: 36,
 		z: 28
 	}
-}, k = [
+}, ce = [
 	[46, -120],
 	[43, -82],
 	[40, -48],
@@ -479,11 +547,11 @@ var O = {
 	[18, 66]
 ], le = (() => {
 	let e = [];
-	for (let t = 0; t < k.length - 1; t++) {
-		let n = k[t], r = k[t + 1];
-		for (let t = 0; t < 12; t++) e.push([f(n[0], r[0], t / 12), f(n[1], r[1], t / 12)]);
+	for (let t = 0; t < ce.length - 1; t++) {
+		let n = ce[t], r = ce[t + 1];
+		for (let t = 0; t < 12; t++) e.push([m(n[0], r[0], t / 12), m(n[1], r[1], t / 12)]);
 	}
-	return e.push(k[k.length - 1]), e;
+	return e.push(ce[ce.length - 1]), e;
 })(), ue = [
 	[-2, 46],
 	[-2, 56],
@@ -495,63 +563,63 @@ var O = {
 	[34, 36],
 	[36, 28]
 ];
-function de(e, t) {
-	let { d: n, t: r, i } = x(e, t, k);
+function M(e, t) {
+	let { d: n, t: r, i } = C(e, t, ce);
 	return {
 		d: n,
-		t: d((i + r) / (k.length - 1), 0, 1)
+		t: p((i + r) / (ce.length - 1), 0, 1)
 	};
 }
-function fe(e) {
-	return f(2.8, 7.2, e ** .7);
+function N(e) {
+	return m(2.8, 7.2, e ** .7);
 }
-function pe(e) {
-	return f(6.3, .55, d(e, 0, 1) ** .82);
+function P(e) {
+	return m(6.3, .55, p(e, 0, 1) ** .82);
 }
-function me(e, t) {
-	return Math.hypot(e - O.pond.x, t - O.pond.z) - O.pond.r;
+function F(e, t) {
+	return Math.hypot(e - j.pond.x, t - j.pond.z) - j.pond.r;
 }
-function he(e, t) {
-	let { d: n, t: r } = de(e, t), i = n - fe(r), a = me(e, t);
+function de(e, t) {
+	let { d: n, t: r } = M(e, t), i = n - N(r), a = F(e, t);
 	return Math.min(i, a);
 }
-var ge = O.pond.y;
-function _e(e, t, n, r, i, a, o) {
+var I = j.pond.y;
+function fe(e, t, n, r, i, a, o) {
 	let s = Math.max(n - e, e - i, 0), c = Math.max(r - t, t - a, 0);
-	return p(0, o, Math.hypot(s, c));
+	return h(0, o, Math.hypot(s, c));
 }
-function ve(e, t) {
-	return 1.55 + .22 * b(e * .045, t * .045, 3) + .07 * b(e * .18 + 4.2, t * .18 - 2.1, 2);
+function pe(e, t) {
+	return 1.55 + .22 * S(e * .045, t * .045, 3) + .07 * S(e * .18 + 4.2, t * .18 - 2.1, 2);
 }
-function A(e, t) {
-	let n = ve(e, t), r = O.platform, i = _e(e, t, r.x0, r.z0, r.x1, r.z1, 13);
-	n = f(r.y + .04 * b(e * .12, t * .12, 2), n, i);
-	let a = x(e, t, ue).d;
-	if (a < 5 && he(e, t) > .8) {
-		let e = p(.9, 4.5, a);
-		n = f(Math.max(n, r.y - .7), n, e);
+function L(e, t) {
+	let n = pe(e, t), r = j.platform, i = fe(e, t, r.x0, r.z0, r.x1, r.z1, 13);
+	n = m(r.y + .04 * S(e * .12, t * .12, 2), n, i);
+	let a = C(e, t, ue).d;
+	if (a < 5 && de(e, t) > .8) {
+		let e = h(.9, 4.5, a);
+		n = m(Math.max(n, r.y - .7), n, e);
 	}
-	let { d: o, t: s } = de(e, t), c = fe(s), l = pe(s) - .85 - .25 * b(e * .2, t * .2, 2), u = p(c * .55, c * 1.9 + 2.5, o);
-	n = f(Math.min(n, l), n, u);
-	let d = me(e, t);
+	let { d: o, t: s } = M(e, t), c = N(s), l = P(s) - .85 - .25 * S(e * .2, t * .2, 2), u = h(c * .55, c * 1.9 + 2.5, o);
+	n = m(Math.min(n, l), n, u);
+	let d = F(e, t);
 	if (d < 12) {
-		let r = O.pond.y - 1.5 - .8 * b(e * .09 + 8, t * .09 - 3, 3);
-		n = f(Math.min(n, r), n, p(-2, 11, d));
+		let r = j.pond.y - 1.5 - .8 * S(e * .09 + 8, t * .09 - 3, 3);
+		n = m(Math.min(n, r), n, h(-2, 11, d));
 	}
-	let m = re, h = _e(e, t, m.x0, m.z0, m.x1, m.z1, 7);
-	n = f(r.y, n, h);
-	let g = se(e, t), _ = 1 - p(ee, te, g.distance);
-	_ > 0 && (n = f(n, O.platform.y + g.y, _));
-	for (let r of D) {
+	let f = A, p = fe(e, t, f.x0, f.z0, f.x1, f.z1, 7);
+	n = m(r.y, n, p);
+	let g = oe(e, t), _ = 1 - h(k, ee, g.distance);
+	_ > 0 && (n = m(n, j.platform.y + g.y, _));
+	for (let r of ne) {
 		let i = Math.hypot(Math.max(0, Math.abs(e - r.x) - r.hx), Math.max(0, Math.abs(t - r.z) - r.hz)), a = i > 0 && g.distance < 4.9 && g.y < r.y - .8;
-		i < 4 && !a && (n = f(O.platform.y + r.y, n, p(0, 4, i)));
+		i < 4 && !a && (n = m(j.platform.y + r.y, n, h(0, 4, i)));
 	}
 	return n;
 }
-function ye(e, t, n) {
-	let r = A(e, t), i = O.platform, a = re, o = e > i.x0 && e < i.x1 && t > i.z0 && t < i.z1, s = e > a.x0 && e < a.x1 && t > a.z0 && t < a.z1;
+function me(e, t, n) {
+	let r = L(e, t), i = j.platform, a = A, o = e > i.x0 && e < i.x1 && t > i.z0 && t < i.z1, s = e > a.x0 && e < a.x1 && t > a.z0 && t < a.z1;
 	if (o || s) return Math.min(r, i.y - .14);
-	let c = se(e, t);
+	let c = oe(e, t);
 	if (c.distance > 2.45 + n) return r;
 	let l = Infinity;
 	for (let n of [
@@ -563,105 +631,105 @@ function ye(e, t, n) {
 		0,
 		1.4
 	]) {
-		let i = se(e + n, t + r);
-		i.distance < 2.6500000000000004 && (l = Math.min(l, O.platform.y + i.y));
+		let i = oe(e + n, t + r);
+		i.distance < 2.6500000000000004 && (l = Math.min(l, j.platform.y + i.y));
 	}
 	if (!Number.isFinite(l)) return r;
-	let u = d((T + n - c.distance) / n, 0, 1);
+	let u = p((D + n - c.distance) / n, 0, 1);
 	return Math.max(r - .42 * u, Math.min(r, l - .06));
 }
-function be(e, t, n = O.terrainSegments) {
-	let r = O.size / n, i = O.size / 2, a = (e + i) / r, o = (t + i) / r, s = Math.floor(a), c = Math.floor(o), l = a - s, u = o - c, d = -i + s * r, f = -i + c * r, p = ye(d, f, r), m = ye(d + r, f, r), h = ye(d, f + r, r), g = ye(d + r, f + r, r);
+function he(e, t, n = j.terrainSegments) {
+	let r = j.size / n, i = j.size / 2, a = (e + i) / r, o = (t + i) / r, s = Math.floor(a), c = Math.floor(o), l = a - s, u = o - c, d = -i + s * r, f = -i + c * r, p = me(d, f, r), m = me(d + r, f, r), h = me(d, f + r, r), g = me(d + r, f + r, r);
 	return l + u <= 1 ? p * (1 - l - u) + m * l + h * u : g * (l + u - 1) + m * (1 - u) + h * (1 - l);
 }
-function xe(e, t, n = 1.2) {
-	let r = A(e + n, t) - A(e - n, t), i = A(e, t + n) - A(e, t - n), a = -r, o = 2 * n, s = -i, c = Math.hypot(a, o, s) || 1;
+function ge(e, t, n = 1.2) {
+	let r = L(e + n, t) - L(e - n, t), i = L(e, t + n) - L(e, t - n), a = -r, o = 2 * n, s = -i, c = Math.hypot(a, o, s) || 1;
 	return [
 		a / c,
 		o / c,
 		s / c
 	];
 }
-function Se(e, t, n = 1.2) {
-	return 1 - xe(e, t, n)[1];
+function _e(e, t, n = 1.2) {
+	return 1 - ge(e, t, n)[1];
 }
-function Ce(e, t, n = 0) {
-	let r = O.platform;
+function ve(e, t, n = 0) {
+	let r = j.platform;
 	return e > r.x0 - n && e < r.x1 + n && t > r.z0 - n && t < r.z1 + n;
 }
-function we(e, t, n = 0) {
-	let r = O.size / 2 - n;
+function ye(e, t, n = 0) {
+	let r = j.size / 2 - n;
 	return r > 0 && Math.abs(e) <= r && Math.abs(t) <= r;
 }
-function Te(e, t) {
-	return Math.min(x(e, t, ue).d, ce(e, t));
+function R(e, t) {
+	return Math.min(C(e, t, ue).d, se(e, t));
 }
 //#endregion
 //#region src/world/terrain_baked.ts
-function Ee(e, t, n, r, i, a, o) {
-	let s = d((b(e * .045, n * .045) + 1) * .5, 0, 1), c = d((b(e * .22 + 7.3, n * .22 + 7.3) + 1) * .5, 0, 1), l = [
-		f(.055, .135, s * .7 + c * .3),
-		f(.082, .17, s * .7 + c * .3),
-		f(.032, .062, s * .7 + c * .3)
+function be(e, t, n, r, i, a, o) {
+	let s = p((S(e * .045, n * .045) + 1) * .5, 0, 1), c = p((S(e * .22 + 7.3, n * .22 + 7.3) + 1) * .5, 0, 1), l = [
+		m(.055, .135, s * .7 + c * .3),
+		m(.082, .17, s * .7 + c * .3),
+		m(.032, .062, s * .7 + c * .3)
 	], u = (e, t) => {
-		for (let n = 0; n < 3; n++) l[n] = f(l[n], e[n], d(t, 0, 1));
+		for (let n = 0; n < 3; n++) l[n] = m(l[n], e[n], p(t, 0, 1));
 	};
 	u([
 		.12 + c * .08,
 		.09 + c * .07,
 		.06 + c * .05
-	], p(.42, .82, s) * .34), u([
+	], h(.42, .82, s) * .34), u([
 		.26 + s * .16,
 		.255 + s * .15,
 		.225 + s * .12
-	], p(.13, .56, r)), u([
+	], h(.13, .56, r)), u([
 		.078,
 		.095,
 		.057
-	], (1 - p(0, 2.2, a)) * .72);
-	let m = Math.abs(e + 3) < 30 && Math.abs(n) < 44 && Math.abs(t - O.platform.y) < .55, h = .32 + _(Math.floor(e / 1.35), Math.floor(n / .78)) * .14;
+	], (1 - h(0, 2.2, a)) * .72);
+	let d = Math.abs(e + 3) < 30 && Math.abs(n) < 44 && Math.abs(t - j.platform.y) < .55, f = .32 + y(Math.floor(e / 1.35), Math.floor(n / .78)) * .14;
 	u([
-		h,
-		h * .99,
-		h * .91
-	], Math.max(+!!m, 1 - p(.15, .55, i)) * (1 - p(.5, .9, r)));
-	let g = (1 - p(.43, .73, (b(e * .011 + 3.2, n * .011 + 3.2) + 1) * .5) * .21) * f(.62, 1, o);
+		f,
+		f * .99,
+		f * .91
+	], Math.max(+!!d, 1 - h(.15, .55, i)) * (1 - h(.5, .9, r)));
+	let g = (1 - h(.43, .73, (S(e * .011 + 3.2, n * .011 + 3.2) + 1) * .5) * .21) * m(.62, 1, o);
 	for (let e = 0; e < 3; e++) l[e] *= g;
 	return l;
 }
-var j = null, De = null, Oe = null, ke = null, Ae = null;
-function je() {
-	if (Ae) return Ae;
+var z = null, xe = null, Se = null, Ce = null, we = null;
+function Te() {
+	if (we) return we;
 	let t = new e.TextureLoader(), n = async (n, r) => {
 		let i = new URL(`./assets/lingyin/runtime-textures/${n}.webp`, document.baseURI).href + "?v=1", a = await t.loadAsync(i);
 		return a.name = `lingyin-${n}`, a.colorSpace = r ? e.SRGBColorSpace : e.NoColorSpace, a.wrapS = a.wrapT = e.RepeatWrapping, a.repeat.set(1 / 2.8, 1 / 2.8), a.minFilter = e.LinearMipmapLinearFilter, a.magFilter = e.LinearFilter, a.anisotropy = 8, a;
 	};
-	return Ae = Promise.all([n("forest-ground-albedo", !0), n("forest-ground-normal", !1)]).then(([e, t]) => {
-		Oe = e, ke = t;
-	}), Ae;
+	return we = Promise.all([n("forest-ground-albedo", !0), n("forest-ground-normal", !1)]).then(([e, t]) => {
+		Se = e, Ce = t;
+	}), we;
 }
-function Me() {
-	if (Oe && ke) return new e.MeshStandardMaterial({
+function Ee() {
+	if (Se && Ce) return new e.MeshStandardMaterial({
 		name: "terrain-scanned-forest-floor",
-		map: Oe,
-		normalMap: ke,
+		map: Se,
+		normalMap: Ce,
 		normalScale: new e.Vector2(.29, .29),
 		color: new e.Color().setRGB(1.38, 1.38, 1.38),
 		vertexColors: !0,
 		roughness: .97,
 		metalness: 0
 	});
-	if (!j) {
+	if (!z) {
 		let t = document.createElement("canvas");
 		t.width = t.height = 512;
 		let n = t.getContext("2d"), r = n.createImageData(512, 512), i = new Float32Array(512 * 512);
 		for (let e = 0; e < 512; e++) for (let t = 0; t < 512; t++) {
-			let n = b(t * .035, e * .035, 3), a = _(t, e) - .5, o = d(.91 + n * .075 + a * .065, .77, 1);
+			let n = S(t * .035, e * .035, 3), a = y(t, e) - .5, o = p(.91 + n * .075 + a * .065, .77, 1);
 			i[e * 512 + t] = o;
 			let s = (e * 512 + t) * 4;
 			r.data[s] = Math.round(o * 255), r.data[s + 1] = Math.round(o * 253), r.data[s + 2] = Math.round(o * 247), r.data[s + 3] = 255;
 		}
-		n.putImageData(r, 0, 0), j = new e.CanvasTexture(t), j.name = "terrain-baked-grain", j.colorSpace = e.SRGBColorSpace, j.wrapS = j.wrapT = e.RepeatWrapping, j.repeat.set(1 / 3, 1 / 3), j.minFilter = e.LinearMipmapLinearFilter, j.magFilter = e.LinearFilter, j.anisotropy = 8;
+		n.putImageData(r, 0, 0), z = new e.CanvasTexture(t), z.name = "terrain-baked-grain", z.colorSpace = e.SRGBColorSpace, z.wrapS = z.wrapT = e.RepeatWrapping, z.repeat.set(1 / 3, 1 / 3), z.minFilter = e.LinearMipmapLinearFilter, z.magFilter = e.LinearFilter, z.anisotropy = 8;
 		let a = document.createElement("canvas");
 		a.width = a.height = 512;
 		let o = a.getContext("2d"), s = o.createImageData(512, 512), c = (e, t) => i[(t + 512 & 511) * 512 + (e + 512 & 511)];
@@ -669,12 +737,12 @@ function Me() {
 			let n = (c(t + 1, e) - c(t - 1, e)) * 1.9, r = (c(t, e + 1) - c(t, e - 1)) * 1.9, i = 1 / Math.hypot(n, r, 1), a = (e * 512 + t) * 4;
 			s.data[a] = Math.round((-.5 * n * i + .5) * 255), s.data[a + 1] = Math.round((-.5 * r * i + .5) * 255), s.data[a + 2] = Math.round((.5 * i + .5) * 255), s.data[a + 3] = 255;
 		}
-		o.putImageData(s, 0, 0), De = new e.CanvasTexture(a), De.name = "terrain-baked-normal", De.wrapS = De.wrapT = e.RepeatWrapping, De.repeat.copy(j.repeat), De.minFilter = e.LinearMipmapLinearFilter, De.magFilter = e.LinearFilter, De.anisotropy = 8;
+		o.putImageData(s, 0, 0), xe = new e.CanvasTexture(a), xe.name = "terrain-baked-normal", xe.wrapS = xe.wrapT = e.RepeatWrapping, xe.repeat.copy(z.repeat), xe.minFilter = e.LinearMipmapLinearFilter, xe.magFilter = e.LinearFilter, xe.anisotropy = 8;
 	}
 	return new e.MeshStandardMaterial({
 		name: "terrain-baked-pbr",
-		map: j,
-		normalMap: De,
+		map: z,
+		normalMap: xe,
 		normalScale: new e.Vector2(.7, .7),
 		vertexColors: !0,
 		roughness: .91,
@@ -683,56 +751,62 @@ function Me() {
 }
 //#endregion
 //#region src/world/terrain.ts
-var Ne = class {
+var De = class {
 	group = new e.Group();
 	mesh;
 	material;
 	constructor(t = 1, n = !1) {
-		let r = O.size, i = Math.round(O.terrainSegments * d(t, .5, 1)), a = r / 2, o = i + 1, s = new Float32Array(o * o * 3), c = new Float32Array(o * o * 2), l = new Float32Array(o * o * 3), u = [], f = r / i;
+		let r = j.size, i = Math.round(j.terrainSegments * p(t, .5, 1)), a = r / 2, o = i + 1, s = new Float32Array(o * o * 3), c = new Float32Array(o * o * 2), l = new Float32Array(o * o * 3), u = [], d = r / i;
 		for (let e = 0; e < o; e++) {
-			let t = -a + e * f;
+			let t = -a + e * d;
 			for (let n = 0; n < o; n++) {
-				let r = -a + n * f, i = ye(r, t, f), u = e * o + n;
+				let r = -a + n * d, i = me(r, t, d), u = e * o + n;
 				s[u * 3] = r, s[u * 3 + 1] = i, s[u * 3 + 2] = t, c[u * 2] = r, c[u * 2 + 1] = t;
-				let p = 1 - xe(r, t, 1.4)[1], m = 0;
-				m += A(r + 3, t), m += A(r - 3, t), m += A(r, t + 3), m += A(r, t - 3);
-				let h = d((m / 4 - i) / 3.5, -.4, 1), g = Ee(r, i, t, p, d(Te(r, t) / 6, 0, 1), d(he(r, t), -4, 18), d(.35 + p * .9 - h * .55, 0, 1));
+				let f = 1 - ge(r, t, 1.4)[1], m = 0;
+				m += L(r + 3, t), m += L(r - 3, t), m += L(r, t + 3), m += L(r, t - 3);
+				let h = p((m / 4 - i) / 3.5, -.4, 1), g = be(r, i, t, f, p(R(r, t) / 6, 0, 1), p(de(r, t), -4, 18), p(.35 + f * .9 - h * .55, 0, 1));
 				l[u * 3] = g[0], l[u * 3 + 1] = g[1], l[u * 3 + 2] = g[2];
 			}
 		}
 		for (let e = 0; e < i; e++) for (let t = 0; t < i; t++) {
-			let r = -a + t * f, i = -a + e * f, s = O.platform;
-			if (n && (r > s.x0 + 1.2 && r + f < s.x1 - 1.2 && i > s.z0 + 1.7 && i + f < s.z1 - 1.05 || r > -23.5 && r + f < 19.5 && i > 46 && i + f < 74)) continue;
-			let c = e * o + t, l = c + 1, d = c + o, p = d + 1;
-			u.push(c, d, l, l, d, p);
+			let r = -a + t * d, i = -a + e * d, s = j.platform;
+			if (n && (r > s.x0 + 1.2 && r + d < s.x1 - 1.2 && i > s.z0 + 1.7 && i + d < s.z1 - 1.05 || r > -23.5 && r + d < 19.5 && i > 46 && i + d < 74)) continue;
+			let c = e * o + t, l = c + 1, f = c + o, p = f + 1;
+			u.push(c, f, l, l, f, p);
 		}
-		let p = new e.BufferGeometry();
-		p.setAttribute("position", new e.BufferAttribute(s, 3)), p.setAttribute("uv", new e.BufferAttribute(c, 2)), p.setAttribute("color", new e.BufferAttribute(l, 3)), p.setIndex(u), p.computeVertexNormals(), p.computeBoundingSphere(), this.material = Me(), this.mesh = new e.Mesh(p, this.material), this.mesh.name = "terrain", this.mesh.receiveShadow = !0, this.mesh.castShadow = !1, this.group.add(this.mesh);
+		let f = new e.BufferGeometry();
+		f.setAttribute("position", new e.BufferAttribute(s, 3)), f.setAttribute("uv", new e.BufferAttribute(c, 2)), f.setAttribute("color", new e.BufferAttribute(l, 3)), f.setIndex(u), f.computeVertexNormals(), f.computeBoundingSphere(), this.material = Ee(), this.mesh = new e.Mesh(f, this.material), this.mesh.name = "terrain", this.mesh.receiveShadow = !0, this.mesh.castShadow = !1, this.group.add(this.mesh);
 	}
 };
 //#endregion
 //#region src/world/geom.ts
-function Pe(t) {
+function Oe(t) {
 	if (!t.getAttribute("uv")) {
 		let n = t.getAttribute("position").count;
 		t.setAttribute("uv", new e.BufferAttribute(new Float32Array(n * 2), 2));
 	}
 	return t;
 }
-function M(t, n, r, i = 0, a = 0, o = 0, s = 0) {
+function B(t, n, r, i = 0, a = 0, o = 0, s = 0) {
 	let c = new e.BoxGeometry(t, n, r);
-	return s && c.rotateY(s), c.translate(i, a, o), Pe(c);
+	return s && c.rotateY(s), c.translate(i, a, o), Oe(c);
 }
-function N(t, n, r, i, a = 0, o = 0, s = 0) {
+function V(t, n, r, i, a = 0, o = 0, s = 0) {
 	let c = new e.CylinderGeometry(t, n, r, i, 1, !1);
-	return c.translate(a, o, s), Pe(c);
+	return c.translate(a, o, s), Oe(c);
 }
-function P(e) {
-	let n = e.filter((e) => e && e.getAttribute("position")?.count), r = n.every((e) => e.index !== null), i = t(n.map((e) => Pe(r ? e : e.index ? e.toNonIndexed() : e)), !1);
-	if (!i) throw Error("merge failed");
-	return i.computeBoundingSphere(), i;
+function H(n) {
+	let r = n.filter((e) => e && e.getAttribute("position")?.count), i = r.every((e) => e.index !== null), a = r.map((e) => Oe(i ? e : e.index ? e.toNonIndexed() : e));
+	if (a.some((e) => e.getAttribute("color"))) for (let t of a) {
+		if (t.getAttribute("color")) continue;
+		let n = t.getAttribute("position").count, r = new Float32Array(n * 3).fill(1);
+		t.setAttribute("color", new e.BufferAttribute(r, 3));
+	}
+	let o = t(a, !1);
+	if (!o) throw Error("merge failed");
+	return o.computeBoundingSphere(), o;
 }
-function F(t, n) {
+function U(t, n) {
 	let r = t.index ? t.toNonIndexed() : t, i = r.getAttribute("position"), a = r.getAttribute("normal"), o = new Float32Array(i.count * 2);
 	for (let e = 0; e < i.count; e += 3) {
 		let t = Math.abs(a.getX(e) + a.getX(e + 1) + a.getX(e + 2)), r = Math.abs(a.getY(e) + a.getY(e + 1) + a.getY(e + 2)), s = Math.abs(a.getZ(e) + a.getZ(e + 1) + a.getZ(e + 2));
@@ -743,7 +817,7 @@ function F(t, n) {
 	}
 	return r.setAttribute("uv", new e.BufferAttribute(o, 2)), r;
 }
-function Fe(t) {
+function ke(t) {
 	let { w: n, d: r, eaveY: i, rise: a } = t, o = t.overhang ?? 1.1, s = t.cornerLift ?? .85, c = t.ridgeFrac ?? .52, l = t.nu ?? 40, u = t.nv ?? 18, d = n / 2 + o, f = r / 2 + o, p = n * c / 2, m = [], h = [], g = [], _ = Math.hypot(f, a), v = (e, t, n) => {
 		let r = m.length / 3;
 		for (let r = 0; r <= u; r++) {
@@ -780,7 +854,7 @@ function Fe(t) {
 	let b = new e.BufferGeometry();
 	return b.setAttribute("position", new e.Float32BufferAttribute(m, 3)), b.setAttribute("uv", new e.Float32BufferAttribute(h, 2)), b.setIndex(g), b.computeVertexNormals(), b.computeBoundingSphere(), b;
 }
-function Ie(t) {
+function Ae(t) {
 	let { wOuter: n, dOuter: r, wInner: i, dInner: a, eaveY: o, rise: s } = t, c = t.cornerLift ?? .7, l = t.nu ?? 40, u = t.nv ?? 10, d = n / 2, f = r / 2, p = i / 2, m = a / 2, h = [], g = [], _ = [], v = (e, t) => {
 		let n = h.length / 3;
 		for (let n = 0; n <= u; n++) {
@@ -814,7 +888,7 @@ function Ie(t) {
 	let b = new e.BufferGeometry();
 	return b.setAttribute("position", new e.Float32BufferAttribute(h, 3)), b.setAttribute("uv", new e.Float32BufferAttribute(g, 2)), b.setIndex(_), b.computeVertexNormals(), b.computeBoundingSphere(), b;
 }
-function Le(t, n, r, i, a) {
+function je(t, n, r, i, a) {
 	let o = new e.Shape();
 	o.moveTo(-t / 2, 0), o.lineTo(t / 2, 0), o.lineTo(t / 2, n), o.lineTo(-t / 2, n), o.lineTo(-t / 2, 0);
 	let s = new e.Path();
@@ -824,18 +898,18 @@ function Le(t, n, r, i, a) {
 		bevelEnabled: !1,
 		curveSegments: 16
 	});
-	return c.translate(0, 0, -r / 2), Pe(c);
+	return c.translate(0, 0, -r / 2), Oe(c);
 }
-function Re(e, t, n = .19, r = .055, i = 0) {
+function Me(e, t, n = .19, r = .055, i = 0) {
 	let a = [];
-	for (let o = -e / 2; o <= e / 2 + .001; o += n) a.push(M(r, t, .06, o, t / 2, i));
-	for (let o = 0; o <= t + .001; o += n * 1.35) a.push(M(e, r, .055, 0, o, i));
+	for (let o = -e / 2; o <= e / 2 + .001; o += n) a.push(B(r, t, .06, o, t / 2, i));
+	for (let o = 0; o <= t + .001; o += n * 1.35) a.push(B(e, r, .055, 0, o, i));
 	return {
-		bars: P(a),
-		backing: M(e, t, .04, 0, t / 2, i - .06)
+		bars: H(a),
+		backing: B(e, t, .04, 0, t / 2, i - .06)
 	};
 }
-function ze(t, n = 512, r = 160, i = {}) {
+function Ne(t, n = 512, r = 160, i = {}) {
 	let a = document.createElement("canvas");
 	a.width = n, a.height = r;
 	let o = a.getContext("2d");
@@ -846,7 +920,7 @@ function ze(t, n = 512, r = 160, i = {}) {
 }
 //#endregion
 //#region src/world/materials.ts
-var Be = null, Ve = null, He = null, I = null, L = null, Ue = {}, We = null, Ge = /* @__PURE__ */ new Map(), Ke = [
+var Pe = null, Fe = null, Ie = null, W = null, Le = null, Re = {}, ze = null, Be = /* @__PURE__ */ new Map(), Ve = [
 	"courtyard-albedo",
 	"courtyard-normal",
 	"courtyard-roughness",
@@ -866,32 +940,37 @@ var Be = null, Ve = null, He = null, I = null, L = null, Ue = {}, We = null, Ge 
 	"plaque-gate",
 	"plaque-main"
 ];
-Ke.filter((e) => !e.startsWith("courtyard-") && e !== "plaque-gate");
-function qe(t) {
-	let n = Ge.get(t);
+Ve.filter((e) => !e.startsWith("courtyard-") && e !== "plaque-gate");
+function He(t) {
+	let n = Be.get(t);
 	if (n) return n;
 	let r = new URL(`./assets/lingyin/temple-textures/${t}.webp`, document.baseURI).href + "?v=3", i = new e.TextureLoader().loadAsync(r).then((n) => {
-		n.name = `lingyin-${t}`, n.colorSpace = t.endsWith("albedo") || t.startsWith("plaque-") ? e.SRGBColorSpace : e.NoColorSpace, n.wrapS = n.wrapT = t.startsWith("plaque-") ? e.ClampToEdgeWrapping : e.RepeatWrapping, n.minFilter = e.LinearMipmapLinearFilter, n.magFilter = e.LinearFilter, n.anisotropy = 16, Ue[t] = n;
+		n.name = `lingyin-${t}`, n.colorSpace = t.endsWith("albedo") || t.startsWith("plaque-") ? e.SRGBColorSpace : e.NoColorSpace, n.wrapS = n.wrapT = t.startsWith("plaque-") ? e.ClampToEdgeWrapping : e.RepeatWrapping, n.minFilter = e.LinearMipmapLinearFilter, n.magFilter = e.LinearFilter, n.anisotropy = 16, Re[t] = n;
 	});
-	return Ge.set(t, i), i;
+	return Be.set(t, i), i;
 }
-function Je() {
-	return We || (We = Promise.all(Ke.map(qe)).then(() => {}), We);
+function Ue() {
+	return ze || (ze = Promise.all(Ve.map(He)).then(() => {}), ze);
 }
-function Ye(e) {
-	return Ue[`plaque-${e}`];
+function We(e) {
+	return Re[`plaque-${e}`];
 }
-var Xe = null;
-function Ze() {
-	if (Xe) return Xe;
-	let t = Ue["courtyard-albedo"], n = Ue["courtyard-normal"], r = Ue["courtyard-roughness"];
-	if (!t || !n || !r) throw Error("Lingyin courtyard maps must be preloaded");
+var Ge = null;
+function Ke() {
+	if (Ge) return Ge;
+	let t = Re["courtyard-albedo"], n = Re["courtyard-normal"], r = Re["courtyard-roughness"];
+	if (!t || !n || !r) return Ge = new e.MeshStandardMaterial({
+		name: "courtyard-procedural-fallback",
+		color: 12037789,
+		roughness: .95,
+		metalness: 0
+	}), Ge;
 	for (let e of [
 		t,
 		n,
 		r
 	]) e.repeat.set(48 / 5.1, 32 / 5.1);
-	return Xe = new e.MeshStandardMaterial({
+	return Ge = new e.MeshStandardMaterial({
 		name: "courtyard-photogrammetry",
 		map: t,
 		normalMap: n,
@@ -900,10 +979,10 @@ function Ze() {
 		normalScale: new e.Vector2(.43, .43),
 		roughness: .94,
 		metalness: 0
-	}), Xe;
+	}), Ge;
 }
-function Qe(e, t) {
-	let n = Ze().clone();
+function qe(e, t) {
+	let n = Ke().clone();
 	n.name = "courtyard-photogrammetry-extension";
 	for (let r of [
 		"map",
@@ -917,24 +996,24 @@ function Qe(e, t) {
 	}
 	return n;
 }
-function $e(t, n, r, i, a, o) {
-	let s = Ue[n];
+function Je(t, n, r, i, a, o) {
+	let s = Re[n];
 	return s ? new e.MeshStandardMaterial({
 		name: t,
 		map: s,
-		normalMap: Ue[r],
+		normalMap: Re[r],
 		normalScale: new e.Vector2(o, o),
-		roughnessMap: Ue[i],
+		roughnessMap: Re[i],
 		roughness: a,
 		metalness: 0
 	}) : null;
 }
-function et(e, t = !1) {
-	let n = $e(`gate-photographic-${e}${t ? "-dark" : ""}`, e === "wood" ? "wood-albedo" : "plaster-albedo", e === "wood" ? "wood-normal" : "plaster-normal", e === "wood" ? "wood-roughness" : "plaster-roughness", .94, e === "wood" ? .22 : .2);
+function Ye(e, t = !1) {
+	let n = Je(`gate-photographic-${e}${t ? "-dark" : ""}`, e === "wood" ? "wood-albedo" : "plaster-albedo", e === "wood" ? "wood-normal" : "plaster-normal", e === "wood" ? "wood-roughness" : "plaster-roughness", .94, e === "wood" ? .22 : .2);
 	return n && n.color.set(e === "plaster" ? "#b9a276" : t ? "#978575" : "#b39a80"), n;
 }
-function tt() {
-	if (He) return He;
+function Xe() {
+	if (Ie) return Ie;
 	let t = document.createElement("canvas");
 	t.width = t.height = 256;
 	let n = t.getContext("2d"), r = n.createImageData(256, 256), i = 1919509349, a = () => ((i = Math.imul(i, 1664525) + 1013904223 | 0) >>> 0) / 4294967296;
@@ -942,10 +1021,10 @@ function tt() {
 		let n = Math.sin(t * .36 + e * .015) * .012, i = Math.max(.78, Math.min(.96, .88 + (a() - .5) * .065 + n)), o = (e * 256 + t) * 4;
 		r.data[o] = Math.round(i * 255), r.data[o + 1] = Math.round(i * 248), r.data[o + 2] = Math.round(i * 230), r.data[o + 3] = 255;
 	}
-	return n.putImageData(r, 0, 0), He = new e.CanvasTexture(t), He.colorSpace = e.SRGBColorSpace, He.wrapS = He.wrapT = e.RepeatWrapping, He.minFilter = e.LinearMipmapLinearFilter, He.magFilter = e.LinearFilter, He.anisotropy = 8, He;
+	return n.putImageData(r, 0, 0), Ie = new e.CanvasTexture(t), Ie.colorSpace = e.SRGBColorSpace, Ie.wrapS = Ie.wrapT = e.RepeatWrapping, Ie.minFilter = e.LinearMipmapLinearFilter, Ie.magFilter = e.LinearFilter, Ie.anisotropy = 8, Ie;
 }
-function nt() {
-	if (Ve) return Ve;
+function Ze() {
+	if (Fe) return Fe;
 	let t = document.createElement("canvas");
 	t.width = t.height = 512;
 	let n = t.getContext("2d"), r = n.createImageData(512, 512), i = 44444561, a = () => ((i = Math.imul(i, 1664525) + 1013904223 | 0) >>> 0) / 4294967296, o = new Float32Array(1024);
@@ -958,10 +1037,10 @@ function nt() {
 		let n = s(t, e), i = a() - .5, o = Math.max(.57, Math.min(.96, .75 + n * .15 + i * .07)), c = (e * 512 + t) * 4, l = Math.round(o * 255);
 		r.data[c] = r.data[c + 1] = r.data[c + 2] = l, r.data[c + 3] = 255;
 	}
-	return n.putImageData(r, 0, 0), Ve = new e.CanvasTexture(t), Ve.colorSpace = e.SRGBColorSpace, Ve.wrapS = Ve.wrapT = e.RepeatWrapping, Ve.minFilter = e.LinearMipmapLinearFilter, Ve.magFilter = e.LinearFilter, Ve.anisotropy = 8, Ve;
+	return n.putImageData(r, 0, 0), Fe = new e.CanvasTexture(t), Fe.colorSpace = e.SRGBColorSpace, Fe.wrapS = Fe.wrapT = e.RepeatWrapping, Fe.minFilter = e.LinearMipmapLinearFilter, Fe.magFilter = e.LinearFilter, Fe.anisotropy = 8, Fe;
 }
-function rt() {
-	if (Be) return Be;
+function Qe() {
+	if (Pe) return Pe;
 	let t = document.createElement("canvas");
 	t.width = t.height = 512;
 	let n = t.getContext("2d"), r = n.createImageData(512, 512), i = 6396596, a = () => ((i = Math.imul(i, 1664525) + 1013904223 | 0) >>> 0) / 4294967296, o = new Float32Array(4096);
@@ -978,7 +1057,7 @@ function rt() {
 	}
 	n.putImageData(r, 0, 0);
 	let d = new e.CanvasTexture(t);
-	return d.colorSpace = e.SRGBColorSpace, d.wrapS = d.wrapT = e.RepeatWrapping, d.minFilter = e.LinearMipmapLinearFilter, d.magFilter = e.LinearFilter, d.anisotropy = 8, Be = new e.MeshStandardMaterial({
+	return d.colorSpace = e.SRGBColorSpace, d.wrapS = d.wrapT = e.RepeatWrapping, d.minFilter = e.LinearMipmapLinearFilter, d.magFilter = e.LinearFilter, d.anisotropy = 8, Pe = new e.MeshStandardMaterial({
 		name: "weathered-stone-slabs",
 		map: d,
 		bumpMap: d,
@@ -986,9 +1065,9 @@ function rt() {
 		roughness: .94,
 		metalness: 0,
 		vertexColors: !0
-	}), Be;
+	}), Pe;
 }
-function it(t, n) {
+function $e(t, n) {
 	let r = t.getAttribute("position").count, i = new Float32Array(r * 3);
 	for (let e = 0; e < r; e++) {
 		let t = n * (.96 + e % 3 * .04);
@@ -996,8 +1075,8 @@ function it(t, n) {
 	}
 	return t.setAttribute("color", new e.BufferAttribute(i, 3)), t;
 }
-function R(e = 0) {
-	return at(e) || o({
+function et(e = 0) {
+	return tt(e) || s({
 		name: "stone",
 		params: {
 			color: 16777215,
@@ -1011,16 +1090,16 @@ function R(e = 0) {
 		roughness: "\n      roughnessFactor = .82+.15*cgNoise3(cgP*2.3);\n    "
 	});
 }
-function at(e = 0) {
-	let t = $e("stone-photogrammetry", "stone-albedo", "stone-normal", "stone-roughness", .96, .32);
+function tt(e = 0) {
+	let t = Je("stone-photogrammetry", "stone-albedo", "stone-normal", "stone-roughness", .96, .32);
 	return t && t.color.set(e > .5 ? 14076600 : 16777215), t;
 }
-function ot() {
-	let e = $e("bark-photogrammetry", "wood-albedo", "wood-normal", "wood-roughness", .97, .42);
+function nt() {
+	let e = Je("bark-photogrammetry", "wood-albedo", "wood-normal", "wood-roughness", .97, .42);
 	return e && (e.color.set(11709588), e.vertexColors = !0), e;
 }
-function st() {
-	let t = Ue["roof-albedo"], n = Ue["roof-normal"];
+function rt() {
+	let t = Re["roof-albedo"], n = Re["roof-normal"];
 	if (t && n) return t.repeat.set(1 / 5, 1 / 5), n.repeat.set(1 / 5, 1 / 5), new e.MeshStandardMaterial({
 		name: "roof-tile-photogrammetry",
 		map: t,
@@ -1030,7 +1109,7 @@ function st() {
 		metalness: .02,
 		side: e.DoubleSide
 	});
-	if (!I) {
+	if (!W) {
 		let t = document.createElement("canvas");
 		t.width = 768, t.height = 512;
 		let n = t.getContext("2d"), r = n.createImageData(t.width, t.height), i = (e, t) => {
@@ -1041,36 +1120,36 @@ function st() {
 			let a = n / 64, o = e / 64, s = a - Math.floor(a), c = o - Math.floor(o), l = Math.sqrt(Math.max(0, 1 - (Math.abs(s - .5) * 2) ** 2)), u = Math.max(0, (Math.abs(c - .5) * 2 - .58) / .28), d = i(Math.floor(a), Math.floor(o)), f = i(Math.floor(a * 3), Math.floor(o * 3)), p = i(n, e) - .5, m = Math.max(0, i(Math.floor(a * .5), Math.floor(o * .5)) - .58) * (1 - l), h = (76 + l * 29 + d * 22 + (f - .5) * 18 + p * 13) * (1 - u * .27), g = (e * t.width + n) * 4;
 			r.data[g] = Math.max(0, Math.min(255, h + m * 2)), r.data[g + 1] = Math.max(0, Math.min(255, h + 3 + m * 30)), r.data[g + 2] = Math.max(0, Math.min(255, h + 5 - m * 20)), r.data[g + 3] = 255;
 		}
-		n.putImageData(r, 0, 0), I = new e.CanvasTexture(t), I.name = "baked-weathered-roof-tiles", I.colorSpace = e.SRGBColorSpace, I.wrapS = I.wrapT = e.RepeatWrapping, I.repeat.set(1 / (12 * .34), 1 / (8 * .52)), I.minFilter = e.LinearMipmapLinearFilter, I.magFilter = e.LinearFilter, I.anisotropy = 8;
+		n.putImageData(r, 0, 0), W = new e.CanvasTexture(t), W.name = "baked-weathered-roof-tiles", W.colorSpace = e.SRGBColorSpace, W.wrapS = W.wrapT = e.RepeatWrapping, W.repeat.set(1 / (12 * .34), 1 / (8 * .52)), W.minFilter = e.LinearMipmapLinearFilter, W.magFilter = e.LinearFilter, W.anisotropy = 8;
 	}
 	return new e.MeshStandardMaterial({
 		name: "roof-tile-baked",
-		map: I,
-		bumpMap: I,
+		map: W,
+		bumpMap: W,
 		bumpScale: .045,
 		roughness: .82,
 		metalness: .02,
 		side: e.DoubleSide
 	});
 }
-function ct() {
-	let e = st();
+function it() {
+	let e = rt();
 	return e.name = "main-hall-weathered-red-roof", e.color.set(10178883), e.roughness = .91, e.metalness = 0, e.normalScale && e.normalScale.set(.36, .36), e;
 }
-function lt() {
-	let e = ht();
+function at() {
+	let e = dt();
 	return e.name = "main-hall-cool-grey-plaster", e.color.set(12170669), e.roughness = 1, e.normalScale && e.normalScale.set(.24, .24), e;
 }
-function ut() {
-	let e = R(0);
+function ot() {
+	let e = et(0);
 	return e.name = "main-hall-grey-stone-plinth", e.color.set(11119270), e.roughness = .98, e;
 }
-function dt(e = !1) {
-	let t = gt(e);
+function st(e = !1) {
+	let t = ft(e);
 	return t.name = e ? "main-hall-dark-red-joinery" : "main-hall-weathered-red-timber", t.color.set(e ? 10716535 : 14136229), t.roughness = e ? .9 : .86, t.normalScale && t.normalScale.set(.22, .22), t;
 }
-function ft() {
-	if (L) return L;
+function ct() {
+	if (Le) return Le;
 	let t = document.createElement("canvas");
 	t.width = 1024, t.height = 256;
 	let n = t.getContext("2d");
@@ -1081,10 +1160,10 @@ function ft() {
 		let e = i() * .1;
 		n.fillStyle = `rgba(${i() > .5 ? 235 : 18},${i() > .5 ? 215 : 25},${i() > .5 ? 170 : 25},${e})`, n.fillRect(i() * t.width, i() * t.height, 1 + i() * 3, 1 + i() * 2);
 	}
-	return L = new e.CanvasTexture(t), L.name = "main-hall-painted-beam-pattern", L.colorSpace = e.SRGBColorSpace, L.wrapS = L.wrapT = e.RepeatWrapping, L.repeat.set(2.5, 1), L.minFilter = e.LinearMipmapLinearFilter, L.magFilter = e.LinearFilter, L.anisotropy = 8, L;
+	return Le = new e.CanvasTexture(t), Le.name = "main-hall-painted-beam-pattern", Le.colorSpace = e.SRGBColorSpace, Le.wrapS = Le.wrapT = e.RepeatWrapping, Le.repeat.set(2.5, 1), Le.minFilter = e.LinearMipmapLinearFilter, Le.magFilter = e.LinearFilter, Le.anisotropy = 8, Le;
 }
-function pt() {
-	let t = ft();
+function lt() {
+	let t = ct();
 	return new e.MeshStandardMaterial({
 		name: "main-hall-blue-green-painted-beams",
 		map: t,
@@ -1094,7 +1173,7 @@ function pt() {
 		metalness: .01
 	});
 }
-function mt() {
+function ut() {
 	return new e.MeshStandardMaterial({
 		name: "main-hall-dark-teal-window",
 		color: 1191213,
@@ -1103,11 +1182,11 @@ function mt() {
 		roughness: .92
 	});
 }
-function ht() {
-	let e = $e("plaster-photogrammetry", "plaster-albedo", "plaster-normal", "plaster-roughness", .98, .18);
+function dt() {
+	let e = Je("plaster-photogrammetry", "plaster-albedo", "plaster-normal", "plaster-roughness", .98, .18);
 	if (e) return e;
-	let t = nt();
-	return o({
+	let t = Ze();
+	return s({
 		name: "ochre-wall",
 		params: {
 			color: 16777215,
@@ -1122,8 +1201,8 @@ function ht() {
 		roughness: "roughnessFactor=.84+.13*cgNoise3(cgP*2.0);"
 	});
 }
-function gt(e = !1) {
-	return $e(e ? "aged-wood" : "red-lacquer-wood", e ? "wood-albedo" : "wood-red-albedo", "wood-normal", "wood-roughness", .82, .16) || o({
+function ft(e = !1) {
+	return Je(e ? "aged-wood" : "red-lacquer-wood", e ? "wood-albedo" : "wood-red-albedo", "wood-normal", "wood-roughness", .82, .16) || s({
 		name: e ? "wood-dark" : "wood-red",
 		params: {
 			color: 16777215,
@@ -1136,8 +1215,8 @@ function gt(e = !1) {
 		roughness: "roughnessFactor = 0.46 + 0.14 * cgNoise2(cgP.xz * 4.0);"
 	});
 }
-function _t() {
-	return o({
+function pt() {
+	return s({
 		name: "gold",
 		params: {
 			color: 16777215,
@@ -1150,8 +1229,8 @@ function _t() {
 		roughness: "roughnessFactor = 0.30 + 0.18 * cgNoise2(cgP.xz * 5.0);"
 	});
 }
-function vt() {
-	return o({
+function mt() {
+	return s({
 		name: "buddha-aged-gilt",
 		params: {
 			color: 16777215,
@@ -1164,8 +1243,8 @@ function vt() {
 		roughness: "roughnessFactor = 0.62 + 0.18 * cgNoise2(cgP.xz * 7.0 + cgP.y * 2.0);"
 	});
 }
-function yt() {
-	return o({
+function ht() {
+	return s({
 		name: "bronze",
 		params: {
 			color: 16777215,
@@ -1176,8 +1255,8 @@ function yt() {
 		roughness: "roughnessFactor = 0.42 + 0.25 * cgNoise2(cgP.xz * 3.0);"
 	});
 }
-function bt() {
-	return $e("teal-painted-wood", "wood-teal-albedo", "wood-normal", "wood-roughness", .9, .12) || o({
+function gt() {
+	return Je("teal-painted-wood", "wood-teal-albedo", "wood-normal", "wood-roughness", .9, .12) || s({
 		name: "dougong",
 		params: {
 			color: 16777215,
@@ -1187,7 +1266,7 @@ function bt() {
 		color: "\n      float n = cgNoise2(cgP.xz * 5.0 + cgP.y * 2.0);\n      vec3 teal = mix(vec3(0.035,0.095,0.085), vec3(0.09,0.17,0.145), n);\n      float gold = smoothstep(0.75, 0.95, cgNoise2(cgP.xz * 9.0));\n      vec3 c = mix(teal, vec3(0.55,0.40,0.16), gold * 0.55);\n      diffuseColor.rgb = c;\n    "
 	});
 }
-function xt() {
+function _t() {
 	return new e.MeshStandardMaterial({
 		color: new e.Color("#2a1a0c"),
 		emissive: new e.Color("#8a4a1e"),
@@ -1195,7 +1274,7 @@ function xt() {
 		roughness: .9
 	});
 }
-function St() {
+function vt() {
 	return new e.MeshStandardMaterial({
 		color: new e.Color("#7e1e18"),
 		emissive: new e.Color("#ff5a2a"),
@@ -1203,9 +1282,9 @@ function St() {
 		roughness: .7
 	});
 }
-function Ct() {
-	let e = at(.2);
-	return e ? (e.name = "limestone-photogrammetry", e.color.set(11843493), e.vertexColors = !0, e) : o({
+function yt() {
+	let e = tt(.2);
+	return e ? (e.name = "limestone-photogrammetry", e.color.set(11843493), e.vertexColors = !0, e) : s({
 		name: "limestone-crag",
 		params: {
 			color: 16777215,
@@ -1218,25 +1297,25 @@ function Ct() {
 }
 //#endregion
 //#region src/world/hillside.ts
-var wt = O.platform.y, Tt = (t, n, r) => new e.Vector3(t, n, r);
-function Et(t, n, r = .16, i = .14) {
+var bt = j.platform.y, xt = (t, n, r) => new e.Vector3(t, n, r);
+function St(t, n, r = .16, i = .14) {
 	let a = n.clone().sub(t), o = new e.BoxGeometry(r, i, a.length());
-	return o.applyQuaternion(new e.Quaternion().setFromUnitVectors(Tt(0, 0, 1), a.clone().normalize())), o.translate((t.x + n.x) / 2, (t.y + n.y) / 2, (t.z + n.z) / 2), o;
+	return o.applyQuaternion(new e.Quaternion().setFromUnitVectors(xt(0, 0, 1), a.clone().normalize())), o.translate((t.x + n.x) / 2, (t.y + n.y) / 2, (t.z + n.z) / 2), o;
 }
-var Dt = class {
+var Ct = class {
 	group = new e.Group();
 	constructor() {
 		this.group.name = "hillside-pilgrimage-trail";
-		let t = R(.3), n = gt(!0), r = [], i = [], a = [], o = [], s = [], c = (e, t) => Math.max(A(e, t) + ne, be(e, t) + .055);
-		for (let e of w) {
-			let t = ie(e), n = r.length / 3;
+		let t = et(.3), n = ft(!0), r = [], i = [], a = [], o = [], s = [], c = (e, t) => Math.max(L(e, t) + te, he(e, t) + .055);
+		for (let e of E) {
+			let t = re(e), n = r.length / 3;
 			for (let [e, o] of t.entries()) {
 				for (let e of [
 					-1,
 					0,
 					1
 				]) {
-					let t = o.x + o.nx * T * e, n = o.z + o.nz * T * e, a = c(t, n);
+					let t = o.x + o.nx * D * e, n = o.z + o.nz * D * e, a = c(t, n);
 					r.push(t, a, n), i.push(o.along / 2.2, (e + 1) * 1.1);
 				}
 				if (e < t.length - 1) {
@@ -1245,10 +1324,10 @@ var Dt = class {
 				}
 			}
 		}
-		for (let t = 0; t < w.length; t++) for (let n of oe(t)) {
+		for (let t = 0; t < E.length; t++) for (let n of ae(t)) {
 			let t = -Infinity;
 			for (let [r, i] of n.points.entries()) {
-				let a = Tt(i.x, wt + i.y, i.z);
+				let a = xt(i.x, bt + i.y, i.z);
 				if (r === 0 || r === n.points.length - 1 || i.along - t >= 2.25) {
 					let n = new e.BoxGeometry(.2, 1.76, .2);
 					n.translate(a.x, a.y + .7, a.z), o.push(n);
@@ -1256,9 +1335,9 @@ var Dt = class {
 					r.translate(a.x, a.y - .05, a.z), s.push(r), t = i.along;
 				}
 				if (r > 0) {
-					let e = n.points[r - 1], t = Tt(e.x, wt + e.y, e.z);
-					s.push(Et(t.clone().add(Tt(0, -.055, 0)), a.clone().add(Tt(0, -.055, 0)), .31, .18));
-					for (let e of [1.03, 1.45]) o.push(Et(t.clone().add(Tt(0, e, 0)), a.clone().add(Tt(0, e, 0))));
+					let e = n.points[r - 1], t = xt(e.x, bt + e.y, e.z);
+					s.push(St(t.clone().add(xt(0, -.055, 0)), a.clone().add(xt(0, -.055, 0)), .31, .18));
+					for (let e of [1.03, 1.45]) o.push(St(t.clone().add(xt(0, e, 0)), a.clone().add(xt(0, e, 0))));
 				}
 			}
 		}
@@ -1266,8 +1345,8 @@ var Dt = class {
 		l.setAttribute("position", new e.Float32BufferAttribute(r, 3)), l.setAttribute("uv", new e.Float32BufferAttribute(i, 2)), l.setIndex(a), l.computeVertexNormals();
 		let u = new e.Mesh(l, t);
 		u.name = "graded-mountain-stone-path", u.receiveShadow = !0, this.group.add(u);
-		for (let [r, i] of D.entries()) {
-			let a = wt + i.y, o = new e.Mesh(new e.BoxGeometry(i.hx * 2, .18, i.hz * 2), t);
+		for (let [r, i] of ne.entries()) {
+			let a = bt + i.y, o = new e.Mesh(new e.BoxGeometry(i.hx * 2, .18, i.hz * 2), t);
 			o.position.set(i.x, a - .09, i.z), o.castShadow = !0, o.receiveShadow = !0, o.name = `temple-overlook-terrace-${r + 1}`, this.group.add(o);
 			let s = [], c = [], l = (t, n, r, i) => {
 				let o = new e.BoxGeometry(r, .72, i);
@@ -1287,9 +1366,9 @@ var Dt = class {
 				a - n > .2 && l((n + a) / 2, e, a - n, .34), r - o > .2 && l((o + r) / 2, e, r - o, .34);
 			};
 			i.entrySide === "west" ? u(i.x - i.hx, i.entryZ) : l(i.x - i.hx, i.z, .34, i.hz * 2), i.entrySide === "east" ? u(i.x + i.hx, i.entryZ) : l(i.x + i.hx, i.z, .34, i.hz * 2), i.entrySide === "south" ? d(i.z - i.hz, i.entryX) : l(i.x, i.z - i.hz, i.hx * 2, .34), i.entrySide === "north" ? d(i.z + i.hz, i.entryX) : l(i.x, i.z + i.hz, i.hx * 2, .34);
-			let f = new e.Mesh(P(s), t);
+			let f = new e.Mesh(H(s), t);
 			f.castShadow = !0, f.receiveShadow = !0, f.name = `overlook-stone-parapet-${r + 1}`, this.group.add(f);
-			let p = new e.Mesh(P(c), n);
+			let p = new e.Mesh(H(c), n);
 			p.castShadow = !0, p.name = `overlook-open-rail-${r + 1}`, this.group.add(p);
 			let m = i.z - .45, h = [], g = [], _ = 2.9, v = new e.CylinderGeometry(3.35, 3.55, .24, 8);
 			v.translate(i.x, a + .12, m), h.push(v);
@@ -1298,18 +1377,18 @@ var Dt = class {
 				let n = t / 8 * Math.PI * 2 + Math.PI / 8, r = i.x + Math.cos(n) * _, o = m + Math.sin(n) * _, s = new e.CylinderGeometry(.29, .34, .24, 12);
 				s.translate(r, a + .34, o), h.push(s);
 				let c = new e.CylinderGeometry(.17, .2, 3.05, 12);
-				c.translate(r, a + 1.98, o), g.push(c), y.push(Tt(r, a + 3.48, o));
+				c.translate(r, a + 1.98, o), g.push(c), y.push(xt(r, a + 3.48, o));
 			}
-			for (let e = 0; e < 8; e++) g.push(Et(y[e], y[(e + 1) % 8], .24, .28));
+			for (let e = 0; e < 8; e++) g.push(St(y[e], y[(e + 1) % 8], .24, .28));
 			let b = new e.CircleGeometry(3.48, 8);
 			b.rotateZ(Math.PI / 8), b.rotateX(Math.PI / 2), b.translate(i.x, a + 3.55, m), g.push(b);
-			let x = Tt(i.x, a + 3.49, m);
-			for (let e of y) g.push(Et(x, e, .11, .12));
-			let S = new e.Mesh(P(h), t);
+			let x = xt(i.x, a + 3.49, m);
+			for (let e of y) g.push(St(x, e, .11, .12));
+			let S = new e.Mesh(H(h), t);
 			S.name = `ridge-pavilion-stone-${r + 1}`, S.castShadow = !0, S.receiveShadow = !0, this.group.add(S);
-			let C = new e.Mesh(P(g), n);
+			let C = new e.Mesh(H(g), n);
 			C.name = `ridge-pavilion-timber-${r + 1}`, C.castShadow = !0, C.receiveShadow = !0, this.group.add(C);
-			let w = st(), T = new e.Mesh(new e.ConeGeometry(3.95, 1.35, 8, 2), w);
+			let w = rt(), T = new e.Mesh(new e.ConeGeometry(3.95, 1.35, 8, 2), w);
 			T.position.set(i.x, a + 4.15, m), T.rotation.y = Math.PI / 8, T.name = `ridge-pavilion-roof-${r + 1}`, T.castShadow = !0, T.receiveShadow = !0, this.group.add(T);
 			let E = new e.Mesh(new e.CylinderGeometry(.08, .13, .75, 10), n);
 			E.position.set(i.x, a + 5.15, m), E.name = `ridge-pavilion-finial-${r + 1}`, E.castShadow = !0, this.group.add(E);
@@ -1323,17 +1402,17 @@ var Dt = class {
 			s,
 			t
 		]]) {
-			let t = new e.Mesh(P(i), a);
+			let t = new e.Mesh(H(i), a);
 			t.name = r, t.castShadow = !0, t.receiveShadow = !0, this.group.add(t);
 		}
 	}
-}, Ot = null, kt = null, At = null, jt = null;
-function Mt() {
-	return jt || (jt = Ze().clone(), jt.name = "pavilion-warm-weathered-stone-slabs", jt.color.set(15129801), jt.roughness = .94, jt.normalScale.set(.35, .35), jt);
+}, wt = null, Tt = null;
+function Et() {
+	return Tt || (Tt = Ke().clone(), Tt.name = "pavilion-warm-weathered-stone-slabs", Tt.color.set(15129801), Tt.roughness = .94, Tt.normalScale.set(.35, .35), Tt);
 }
-function Nt() {
-	if (Ot) return Ot;
-	let t = gt(!0), n = document.createElement("canvas");
+function Dt() {
+	if (wt) return wt;
+	let t = ft(!0), n = document.createElement("canvas");
 	n.width = n.height = 512;
 	let r = n.getContext("2d");
 	r.fillStyle = "#695541", r.fillRect(0, 0, 512, 512);
@@ -1342,64 +1421,138 @@ function Nt() {
 		for (let t of [12, 499]) r.fillStyle = "#3c3429", r.beginPath(), r.arc(t, e * 128 + 16, 2.2, 0, Math.PI * 2), r.fill();
 	}
 	let i = new e.CanvasTexture(n);
-	return i.name = "lingyin-weathered-deck-planks", i.colorSpace = e.SRGBColorSpace, i.wrapS = i.wrapT = e.RepeatWrapping, i.anisotropy = 16, Ot = new e.MeshStandardMaterial({
+	return i.name = "lingyin-weathered-deck-planks", i.colorSpace = e.SRGBColorSpace, i.wrapS = i.wrapT = e.RepeatWrapping, i.anisotropy = 16, wt = new e.MeshStandardMaterial({
 		name: "lingyin-reference-wooden-deck",
 		map: i,
 		bumpMap: i,
 		bumpScale: .024,
 		roughness: .88,
 		metalness: 0
-	}), t.dispose(), Ot;
+	}), wt.color.setScalar(1.1), t.dispose(), wt;
+}
+//#endregion
+//#region src/world/river_water.ts
+var Ot = null, kt = null, At = null, jt = null, Mt = { value: 0 };
+function Nt(e, t) {
+	let n = new Float32Array(e * e);
+	for (let e = 0; e < n.length; e++) n[e] = t.value();
+	return (t, r) => {
+		let i = t * e, a = r * e, o = Math.floor(i), s = Math.floor(a), c = i - o, l = a - s, u = c * c * (3 - 2 * c), d = l * l * (3 - 2 * l), f = n[(s % e + e) % e * e + (o % e + e) % e], p = n[(s % e + e) % e * e + ((o + 1) % e + e) % e], m = n[((s + 1) % e + e) % e * e + (o % e + e) % e], h = n[((s + 1) % e + e) % e * e + ((o + 1) % e + e) % e];
+		return (f * (1 - u) + p * u) * (1 - d) + (m * (1 - u) + h * u) * d;
+	};
 }
 function Pt() {
 	if (kt) return kt;
-	let t = document.createElement("canvas");
-	t.width = t.height = 256;
-	let n = t.getContext("2d"), r = n.createImageData(256, 256);
+	let t = new _("lingyin-river-ripples"), n = Nt(8, t), r = Nt(16, t), i = Nt(32, t), a = new Float32Array(256 * 256);
 	for (let e = 0; e < 256; e++) for (let t = 0; t < 256; t++) {
-		let n = t / 256 * Math.PI * 2, i = e / 256 * Math.PI * 2, a = Math.cos(n * 4 + Math.sin(i * 2)) * .22 + Math.cos(n * 9 - i * 3) * .08, o = Math.cos(i * 6 + Math.sin(n * 3)) * .18 - Math.cos(n * 9 - i * 3) * .06, s = (e * 256 + t) * 4, c = 1 / Math.hypot(a, o, 1);
-		r.data[s] = (a * c * .5 + .5) * 255, r.data[s + 1] = (o * c * .5 + .5) * 255, r.data[s + 2] = (c * .5 + .5) * 255, r.data[s + 3] = 255;
+		let o = t / 256, s = e / 256;
+		a[e * 256 + t] = .5 + .28 * (n(o, s) - .5) + .16 * (r(o, s) - .5) + .08 * (i(o, s) - .5) + .035 * Math.sin((o * 9 + s * 3) * Math.PI * 2) + .02 * Math.sin((o * 21 - s * 13) * Math.PI * 2);
 	}
-	n.putImageData(r, 0, 0);
-	let i = new e.CanvasTexture(t);
-	return i.name = "lingyin-fine-stream-ripples", i.wrapS = i.wrapT = e.RepeatWrapping, i.repeat.set(2, 7), kt = new e.MeshStandardMaterial({
-		name: "lingyin-reference-jade-stream",
-		color: 3767416,
-		normalMap: i,
-		normalScale: new e.Vector2(.33, .33),
-		roughness: .26,
-		metalness: .12,
-		transparent: !0,
-		opacity: .83,
-		depthWrite: !1,
-		side: e.DoubleSide
-	}), kt;
+	let o = document.createElement("canvas");
+	o.width = o.height = 256;
+	let s = o.getContext("2d"), c = s.createImageData(256, 256), l = (e, t) => a[(t % 256 + 256) % 256 * 256 + (e % 256 + 256) % 256];
+	for (let e = 0; e < 256; e++) for (let t = 0; t < 256; t++) {
+		let n = (l(t - 1, e) - l(t + 1, e)) * 5.2, r = (l(t, e - 1) - l(t, e + 1)) * 5.2, i = Math.hypot(n, r, 1), a = (e * 256 + t) * 4;
+		c.data[a] = Math.round((n / i * .5 + .5) * 255), c.data[a + 1] = Math.round((r / i * .5 + .5) * 255), c.data[a + 2] = Math.round((1 / i * .5 + .5) * 255), c.data[a + 3] = 255;
+	}
+	return s.putImageData(c, 0, 0), kt = new e.CanvasTexture(o), kt.name = "lingyin-river-ripple-normal", kt.wrapS = kt.wrapT = e.RepeatWrapping, kt.colorSpace = e.NoColorSpace, kt.minFilter = e.LinearMipmapLinearFilter, kt.anisotropy = 4, kt;
 }
 function Ft() {
 	if (At) return At;
-	let t = document.createElement("canvas");
-	t.width = t.height = 256;
-	let n = t.getContext("2d"), r = n.createImageData(256, 256);
-	for (let e = 0; e < 256; e++) for (let t = 0; t < 256; t++) {
-		let n = t / 255, i = e / 256, a = Math.min(1, n * 9, (1 - n) * 9), o = .62 + .18 * Math.sin(n * 180 + Math.sin(i * Math.PI * 6) * .7) + .12 * Math.sin(n * 59 - i * Math.PI * 8), s = (e * 256 + t) * 4;
-		r.data[s] = 209, r.data[s + 1] = 230, r.data[s + 2] = 230, r.data[s + 3] = Math.max(0, a * o) * 230;
+	let t = new _("lingyin-river-foam"), n = document.createElement("canvas");
+	n.width = n.height = 256;
+	let r = n.getContext("2d");
+	r.fillStyle = "#000", r.fillRect(0, 0, 256, 256);
+	for (let e = 0; e < 34; e++) {
+		let e = t.range(0, 256), n = t.range(0, 256), i = t.range(8, 58), a = t.range(.6, 1.8);
+		r.strokeStyle = `rgba(255,255,255,${t.range(.06, .28)})`, r.lineWidth = a;
+		for (let a of [
+			-256,
+			0,
+			256
+		]) r.beginPath(), r.moveTo(e, n + a), r.lineTo(e + t.range(-2, 2), n + a + i), r.stroke();
 	}
-	n.putImageData(r, 0, 0);
-	let i = new e.CanvasTexture(t);
-	return i.colorSpace = e.SRGBColorSpace, i.wrapT = e.RepeatWrapping, At = new e.MeshBasicMaterial({
-		name: "lingyin-waterfall-white-streams",
-		map: i,
+	for (let e = 0; e < 100; e++) {
+		let e = t.range(0, 256), n = t.range(0, 256), i = t.range(.4, 2.2);
+		r.fillStyle = `rgba(255,255,255,${t.range(.08, .38)})`, r.beginPath(), r.arc(e, n, i, 0, Math.PI * 2), r.fill();
+	}
+	return At = new e.CanvasTexture(n), At.name = "lingyin-river-foam-streaks", At.wrapS = At.wrapT = e.RepeatWrapping, At.colorSpace = e.NoColorSpace, At.minFilter = e.LinearMipmapLinearFilter, At.anisotropy = 4, At;
+}
+function It() {
+	if (jt) return jt;
+	let t = new _("lingyin-river-soft-flow"), n = document.createElement("canvas");
+	n.width = n.height = 256;
+	let r = n.getContext("2d");
+	r.fillStyle = "#000", r.fillRect(0, 0, 256, 256), r.filter = "blur(2px)";
+	for (let e = 0; e < 120; e++) {
+		let e = t.range(0, 256), n = t.range(0, 256), i = t.range(8, 38), a = t.range(1.5, 5);
+		r.strokeStyle = `rgba(255,255,255,${t.range(.1, .35)})`, r.lineWidth = a;
+		for (let a of [
+			-256,
+			0,
+			256
+		]) r.beginPath(), r.moveTo(e, n + a), r.quadraticCurveTo(e + t.range(-3, 3), n + a + i * .5, e + t.range(-2, 2), n + a + i), r.stroke();
+	}
+	return r.filter = "none", jt = new e.CanvasTexture(n), jt.name = "lingyin-river-soft-flow", jt.wrapS = jt.wrapT = e.RepeatWrapping, jt.colorSpace = e.NoColorSpace, jt.minFilter = e.LinearMipmapLinearFilter, jt.anisotropy = 4, jt;
+}
+function Lt() {
+	if (Ot) return Ot;
+	let t = Pt(), n = Ft(), r = It();
+	return Ot = new e.MeshStandardMaterial({
+		name: "lingyin-flowing-river",
+		color: 16777215,
+		roughness: .075,
+		metalness: 0,
 		transparent: !0,
 		depthWrite: !1,
-		side: e.DoubleSide
-	}), At;
+		side: e.DoubleSide,
+		envMapIntensity: 1.2
+	}), Ot.onBeforeCompile = (i) => {
+		i.uniforms.uWaterTime = Mt, i.uniforms.uRipple = { value: t }, i.uniforms.uFoam = { value: n }, i.uniforms.uFlow = { value: r }, i.uniforms.uSunDir = { value: new e.Vector3(-.55, .76, .42).normalize() }, i.vertexShader = i.vertexShader.replace("#include <common>", "#include <common>\nattribute float aDepth;\nattribute float aShore;\nattribute float aFlow;\nattribute float aRapid;\nvarying float vDepthW;\nvarying float vShoreW;\nvarying float vFlowW;\nvarying float vRapidW;\nvarying vec3 vWorldW;\nvarying vec2 vWaterUv;"), i.vertexShader = i.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\nvDepthW = aDepth;\nvShoreW = aShore;\nvFlowW = aFlow;\nvRapidW = aRapid;\nvWorldW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWaterUv = uv;"), i.fragmentShader = i.fragmentShader.replace("#include <common>", "#include <common>\nuniform float uWaterTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform sampler2D uFlow;\nuniform vec3 uSunDir;\nvarying float vDepthW;\nvarying float vShoreW;\nvarying float vFlowW;\nvarying float vRapidW;\nvarying vec3 vWorldW;\nvarying vec2 vWaterUv;\nfloat gWaterFoam;"), i.fragmentShader = i.fragmentShader.replace("#include <color_fragment>", "#include <color_fragment>\nfloat dep = clamp(vDepthW / 1.35, 0.0, 1.0);\nvec3 shallow = vec3(.036, .125, .105);\nvec3 deep = vec3(.004, .028, .030);\nvec3 base = mix(shallow, deep, dep);\nfloat shoreBand = 1.0 - smoothstep(0.0, .38, vShoreW);\nvec2 foamUv = vWaterUv * vec2(2.1, 1.35) + vec2(.0, -uWaterTime * (.42 + vFlowW * .30));\nfloat f1 = texture2D(uFoam, foamUv).r;\nfloat f2 = texture2D(uFoam, foamUv * 1.65 + vec2(.27, -uWaterTime * .27)).r;\nfloat rapid = smoothstep(.12, .72, vRapidW);\nfloat edgeFoam = smoothstep(.55, .16, vShoreW) * smoothstep(.22, .50, f1 + .16);\nfloat bankLine = smoothstep(.20, .035, vShoreW) * smoothstep(.18, .42, f1 + .12);\nfloat edgeLine = (1.0 - smoothstep(.04, .26, vShoreW)) * (.35 + .65 * smoothstep(.14, .48, f1));\nfloat centerFoam = smoothstep(.70, .88, f1 * .50 + f2 * .30) * .22;\nfloat longFoam = texture2D(uFlow, vec2(vWaterUv.x * 1.45, vWaterUv.y * .56) + vec2(0., -uWaterTime * (.24 + vFlowW * .20))).r;\nfloat flowBreak = smoothstep(.18, .58, texture2D(uFoam, vec2(vWaterUv.x * 2.7, vWaterUv.y * .80 - uWaterTime * .30)).r + .18);\nfloat flowLine = smoothstep(.28, .55, longFoam) * .26 * flowBreak * smoothstep(.06, .55, vShoreW);\ngWaterFoam = max(max(centerFoam, edgeFoam * .60), max(max(bankLine * .66, edgeLine * .95), max(flowLine, rapid * smoothstep(.26, .58, f1) * .70)));\nbase = mix(base, vec3(.70, .76, .69), gWaterFoam * .82);\ndiffuseColor.rgb = base;\ndiffuseColor.a = mix(.58, .87, dep) + gWaterFoam * .10;"), i.fragmentShader = i.fragmentShader.replace("#include <normal_fragment_maps>", "vec2 flowUv = vec2(0.0, -uWaterTime * (.10 + vFlowW * .12));\nvec2 nUv1 = vWaterUv * vec2(.95, 2.25) + flowUv;\nvec2 nUv2 = vWaterUv * vec2(1.85, 3.70) + flowUv * 1.9 + vec2(.31, .17);\nvec3 n0 = texture2D(uRipple, vWaterUv * vec2(.33, .55) + flowUv * .35).xyz * 2.0 - 1.0;\nvec3 n1 = texture2D(uRipple, nUv1).xyz * 2.0 - 1.0;\nvec3 n2 = texture2D(uRipple, nUv2).xyz * 2.0 - 1.0;\nvec3 nT = normalize(vec3(n0.xy * .30 + n1.xy * .32 + n2.xy * .14, 1.0));\nvec3 dpdx = dFdx(vWorldW);\nvec3 dpdy = dFdy(vWorldW);\nvec3 N = normalize(cross(dpdx, dpdy));\nif (N.y < 0.0) N = -N;\nvec3 T = normalize(dpdx - N * dot(dpdx, N));\nvec3 B = normalize(cross(N, T));\nvec3 nW = normalize(T * nT.x + B * nT.y + N * nT.z);\nnormal = normalize((viewMatrix * vec4(nW, 0.0)).xyz);"), i.fragmentShader = i.fragmentShader.replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = mix(.15, .32, clamp(gWaterFoam + (1.0 - vShoreW) * .22, 0.0, 1.0));"), i.fragmentShader = i.fragmentShader.replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\nvec3 Vv = normalize(vViewPosition);\nfloat fresnel = pow(1.0 - max(dot(normal, Vv), 0.0), 2.4);\nvec3 sky = mix(vec3(.20, .27, .26), vec3(.62, .69, .67), fresnel);\ntotalEmissiveRadiance += sky * fresnel * .66;\nvec3 sunV = normalize((viewMatrix * vec4(uSunDir, 0.0)).xyz);\nvec3 H = normalize(sunV + Vv);\nfloat spec = pow(max(dot(normal, H), 0.0), 110.0);\nspec *= .35 + .65 * texture2D(uFoam, vWaterUv * vec2(4.0, 2.4) + vec2(0., -uWaterTime * .8)).r;\ntotalEmissiveRadiance += vec3(1.0, .84, .58) * spec * .22;\ntotalEmissiveRadiance += vec3(.72, .79, .72) * gWaterFoam * .32;");
+	}, Ot.customProgramCacheKey = () => "lingyin-flowing-river-v1", Ot.needsUpdate = !0, Ot;
 }
-function It(e) {
-	kt?.normalMap && (kt.normalMap.offset.y = -e * .018), At?.map && (At.map.offset.y = e * .24);
+function Rt(e) {
+	let t = Math.abs(e - 28), n = Math.abs(e + 50.45);
+	return Math.max(t < 5 ? (1 - t / 5) ** 2 * .85 : 0, n < 4 ? (1 - n / 4) ** 2 * .95 : 0);
+}
+function zt() {
+	let t = le.filter(([e, t]) => t > -62 && t < 64 && e > 16), n = [], r = [], i = [], a = [], o = [], s = [], c = [], l = 0;
+	for (let e = 0; e < t.length; e++) {
+		let [u, d] = t[e], f = t[Math.max(0, e - 1)], m = t[Math.min(t.length - 1, e + 1)], h = m[0] - f[0], g = m[1] - f[1], _ = Math.hypot(h, g) || 1, v = -g / _, y = h / _;
+		e > 0 && (l += Math.hypot(u - t[e - 1][0], d - t[e - 1][1]));
+		let b = M(u, d).t, x = N(b) * .55, S = P(b) + .015, C = M(f[0], f[1]).t, w = M(m[0], m[1]).t, T = Math.max(0, P(C) - P(w)), E = Math.max(.5, Math.hypot(m[0] - f[0], m[1] - f[1])), D = Math.max(p(T / E * 14, 0, 1), Rt(d));
+		for (let e = 0; e < 5; e++) {
+			let t = e / 4, c = u + v * (t - .5) * x * 2, f = d + y * (t - .5) * x * 2, m = p(S - L(c, f), 0, 3);
+			n.push(c, S, f), r.push(t, l / 4.2), i.push(m), a.push(p(1 - Math.abs(t - .5) * 2, 0, 1)), o.push(.55 + b * .55), s.push(D);
+		}
+		if (e < t.length - 1) for (let t = 0; t < 4; t++) {
+			let n = e * 5 + t;
+			c.push(n, n + 5, n + 1, n + 1, n + 5, n + 5 + 1);
+		}
+	}
+	let u = new e.BufferGeometry();
+	u.setAttribute("position", new e.Float32BufferAttribute(n, 3)), u.setAttribute("uv", new e.Float32BufferAttribute(r, 2)), u.setAttribute("aDepth", new e.Float32BufferAttribute(i, 1)), u.setAttribute("aShore", new e.Float32BufferAttribute(a, 1)), u.setAttribute("aFlow", new e.Float32BufferAttribute(o, 1)), u.setAttribute("aRapid", new e.Float32BufferAttribute(s, 1)), u.setIndex(c), u.computeVertexNormals();
+	let d = new e.CircleGeometry(15, 72);
+	d.rotateX(-Math.PI / 2);
+	let f = d.getAttribute("position"), m = [], h = [], g = [], _ = [];
+	for (let e = 0; e < f.count; e++) {
+		let t = f.getX(e) + 18, n = f.getZ(e) + 66;
+		f.setX(e, t), f.setZ(e, n), f.setY(e, I);
+		let r = p(I - L(t, n), 0, 3);
+		m.push(r), h.push(p(1 - Math.hypot(t - 18, n - 66) / 15, 0, 1)), g.push(.18), _.push(0);
+	}
+	d.setAttribute("aDepth", new e.Float32BufferAttribute(m, 1)), d.setAttribute("aShore", new e.Float32BufferAttribute(h, 1)), d.setAttribute("aFlow", new e.Float32BufferAttribute(g, 1)), d.setAttribute("aRapid", new e.Float32BufferAttribute(_, 1));
+	let v = H([u, d]);
+	v.computeVertexNormals(), v.computeBoundingSphere();
+	let y = new e.Mesh(v, Lt());
+	return y.name = "phase2-flowing-river", y.renderOrder = 10, y.receiveShadow = !0, y;
+}
+function Bt(e) {
+	Mt.value = e;
 }
 //#endregion
 //#region src/world/boardwalk_layout.ts
-function Lt(e, t) {
+function Vt(e, t) {
 	let n = e.slice(1).map((t, n) => {
 		let r = e[n], i = Math.hypot(t.x - r.x, t.z - r.z);
 		return {
@@ -1477,7 +1630,7 @@ function Lt(e, t) {
 }
 //#endregion
 //#region src/world/pavilion_terrace.ts
-function Rt(e, t) {
+function Ht(e, t) {
 	let n = Math.hypot(e.x - t.x, e.z - t.z), r = {
 		x: (e.x - t.x) / n,
 		z: (e.z - t.z) / n
@@ -1534,8 +1687,144 @@ function Rt(e, t) {
 	};
 }
 //#endregion
+//#region src/world/boardwalk_detail.ts
+function Ut(t, n, r = 1) {
+	let i = new e.Color(n), a = t.getAttribute("position").count, o = new Float32Array(a * 3);
+	for (let e = 0; e < a; e++) o[e * 3] = 1 + (i.r - 1) * r, o[e * 3 + 1] = 1 + (i.g - 1) * r, o[e * 3 + 2] = 1 + (i.b - 1) * r;
+	return t.setAttribute("color", new e.BufferAttribute(o, 3)), t;
+}
+var Wt = null;
+function Gt() {
+	return Wt || (Wt = new e.MeshStandardMaterial({
+		name: "boardwalk-aged-iron",
+		color: 3617323,
+		roughness: .58,
+		metalness: .45
+	}), Wt);
+}
+var Kt = null;
+function qt() {
+	if (Kt) return Kt;
+	let t = Xe();
+	return Kt = new e.MeshStandardMaterial({
+		name: "boardwalk-amber-paper",
+		color: 15976076,
+		map: t,
+		emissive: 16751421,
+		emissiveMap: t,
+		emissiveIntensity: .62,
+		roughness: .84,
+		metalness: 0
+	}), Kt;
+}
+var Jt = null;
+function Yt() {
+	return Jt || (Jt = new e.MeshStandardMaterial({
+		name: "boardwalk-faded-cinnabar",
+		color: 9318693,
+		roughness: .82,
+		metalness: 0,
+		side: e.DoubleSide
+	}), Jt);
+}
+function Xt(t, n, r, i, a = 1, o = !1) {
+	let s = a, c = .155 * s, l = .42 * s, u = r, d = r + l, f = .026 * s;
+	for (let e of [-1, 1]) for (let r of [-1, 1]) t.frame.push(B(f, l, f, n + e * c, u + l / 2, i + r * c));
+	for (let e of [-1, 1]) t.frame.push(B(c * 2 + f, f, f, n, u, i + e * c)), t.frame.push(B(c * 2 + f, f, f, n, d, i + e * c));
+	for (let e of [-1, 1]) t.frame.push(B(f, f, c * 2 + f, n + e * c, u, i)), t.frame.push(B(f, f, c * 2 + f, n + e * c, d, i));
+	t.glass.push(B(c * 1.72, l - .05 * s, c * 1.72, n, u + l / 2, i));
+	let p = new e.ConeGeometry(c * 1.55, .13 * s, 4, 1);
+	p.rotateY(Math.PI / 4), p.translate(n, d + .085 * s, i), t.frame.push(p), t.frame.push(B(c * 1.9, .025 * s, c * 1.9, n, d + .012 * s, i));
+	let m = new e.CylinderGeometry(.022 * s, .032 * s, .11 * s, 8);
+	if (m.translate(n, d + .2 * s, i), t.frame.push(m), t.frame.push(B(c * 1.9, .03 * s, c * 1.9, n, u - .018 * s, i)), !o) {
+		let r = new e.CylinderGeometry(.008 * s, .008 * s, .13 * s, 5);
+		r.translate(n, u - .095 * s, i), t.accent.push(r);
+		let a = new e.ConeGeometry(.035 * s, .2 * s, 6);
+		a.rotateX(Math.PI), a.translate(n, u - .22 * s, i), t.accent.push(a);
+	}
+	if (o) {
+		let r = new e.CylinderGeometry(.012 * s, .012 * s, .52 * s, 5);
+		r.translate(n, d + .47 * s, i), t.frame.push(r);
+	}
+}
+function Zt(t, n, r, i, a) {
+	let o = new e.PlaneGeometry(.11, .34);
+	o.translate(0, -.17, 0), o.rotateY(a), o.translate(n, r, i), t.accent.push(o);
+	let s = new e.BoxGeometry(.055, .05, .055);
+	s.translate(n, r + .01, i), t.accent.push(s);
+}
+var Qt = /* @__PURE__ */ new Map();
+function $t(t) {
+	let n = Qt.get(t);
+	if (n) return n;
+	let r = document.createElement("canvas");
+	r.width = 768, r.height = 288;
+	let i = r.getContext("2d"), a = i.createLinearGradient(0, 0, 0, 288);
+	a.addColorStop(0, "#2d2118"), a.addColorStop(.45, "#241a13"), a.addColorStop(1, "#170f0b"), i.fillStyle = a, i.fillRect(0, 0, 768, 288);
+	let o = new _(`plaque-${t}`);
+	for (let e = 0; e < 160; e++) {
+		i.strokeStyle = `rgba(${110 + o.int(0, 40)},${82 + o.int(0, 30)},${54 + o.int(0, 24)},${o.range(.03, .11)})`, i.lineWidth = o.range(.5, 2.2), i.beginPath();
+		let e = o.range(0, 288);
+		i.moveTo(0, e), i.bezierCurveTo(190, e + o.range(-4, 4), 560, e + o.range(-5, 5), 768, e + o.range(-3, 3)), i.stroke();
+	}
+	i.strokeStyle = "#100b08", i.lineWidth = 22, i.strokeRect(11, 11, 746, 266), i.strokeStyle = "#9a7438", i.lineWidth = 5, i.strokeRect(25, 25, 718, 238), i.strokeStyle = "#5c4526", i.lineWidth = 2, i.strokeRect(37, 37, 694, 214);
+	for (let [e, t] of [
+		[25, 25],
+		[743, 25],
+		[25, 263],
+		[743, 263]
+	]) i.fillStyle = "#8a6631", i.fillRect(e - 8, t - 8, 16, 16);
+	let s = [...t], c = s.length > 2 ? 122 : 150;
+	i.font = `bold ${c}px "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif`, i.textAlign = "center", i.textBaseline = "middle";
+	let l = Math.min(176, 620 / Math.max(1, s.length)), u = 384 - (s.length - 1) * l / 2;
+	for (let [e, t] of s.entries()) {
+		let n = u + e * l;
+		i.fillStyle = "rgba(0,0,0,.55)", i.fillText(t, n + 5, 156);
+		let r = i.createLinearGradient(n, 150 - c / 2, n, 150 + c / 2);
+		r.addColorStop(0, "#f0d392"), r.addColorStop(.5, "#c79d4c"), r.addColorStop(1, "#8f6728"), i.fillStyle = r, i.fillText(t, n, 150);
+	}
+	i.fillStyle = "#8d2c22", i.fillRect(646, 196, 46, 46), i.strokeStyle = "#2b0f0c", i.lineWidth = 3, i.strokeRect(650, 200, 38, 38), i.fillStyle = "#f2d6a2", i.font = "bold 25px \"Songti SC\", serif", i.fillText("觀", 669, 218), i.fillText("止", 669, 242);
+	let d = new e.CanvasTexture(r);
+	d.name = `carved-plaque-${t}`, d.colorSpace = e.SRGBColorSpace, d.anisotropy = 8;
+	let f = new e.MeshStandardMaterial({
+		name: `carved-plaque-${t}`,
+		map: d,
+		roughness: .74,
+		metalness: .08,
+		emissive: 2759178,
+		emissiveMap: d,
+		emissiveIntensity: .22
+	});
+	return Qt.set(t, f), f;
+}
+function en(t, n, r) {
+	let i = new e.Group();
+	i.name = `carved-plaque-${t}`;
+	let a = H([
+		B(n + .18, .12, .08, 0, r / 2 + .05, 0),
+		B(n + .18, .12, .08, 0, -r / 2 - .05, 0),
+		B(.12, r + .16, .08, -n / 2 - .03, 0, 0),
+		B(.12, r + .16, .08, n / 2 + .03, 0, 0),
+		B(n + .04, r + .04, .04, 0, 0, -.045)
+	]), o = new e.Mesh(a, ft(!0)), s = new e.Mesh(new e.PlaneGeometry(n, r), $t(t));
+	return s.position.z = .012, i.add(o, s), i;
+}
+function tn(t, n = "boardwalk-rocks") {
+	let r = new _(n), i = [];
+	return t.forEach((t, n) => {
+		let a = +(t.r > 1.7), o = new e.IcosahedronGeometry(t.r, a), s = o.getAttribute("position"), c = new e.Color().setHSL(.16 + r.range(-.02, .02), r.range(.05, .14), r.range(.36, .55)), l = new Float32Array(s.count * 3);
+		for (let i = 0; i < s.count; i++) {
+			let a = s.getX(i), o = s.getY(i), u = s.getZ(i), d = 1 + r.range(-.22, .22) + .12 * Math.sin(a * 3.1 + n) * Math.cos(u * 2.7);
+			s.setXYZ(i, a * d, o * d * (t.tall ?? .62), u * d);
+			let f = e.MathUtils.clamp(o / Math.max(.001, t.r) * .5 + .55, 0, 1);
+			l[i * 3] = c.r * (.62 + .38 * f), l[i * 3 + 1] = c.g * (.66 + .4 * f), l[i * 3 + 2] = c.b * (.58 + .3 * f);
+		}
+		o.setAttribute("color", new e.BufferAttribute(l, 3)), o.rotateY(t.ry ?? r.range(0, Math.PI * 2)), o.translate(t.x, t.y - t.r * .16, t.z), i.push(o);
+	}), U(H(i), 2.1);
+}
+//#endregion
 //#region src/world/masterplan_blockout.ts
-var z = O.platform.y, zt = [
+var G = j.platform.y, nn = [
 	[0, 1.8],
 	[.65, 1.38],
 	[1.7, .82],
@@ -1543,11 +1832,11 @@ var z = O.platform.y, zt = [
 	[3.55, .1],
 	[4, .28]
 ];
-function Bt(t, n, r, i) {
+function rn(t, n, r, i) {
 	let a = n.clone().sub(t), o = new e.BoxGeometry(r, i, a.length());
 	return o.applyQuaternion(new e.Quaternion().setFromUnitVectors(new e.Vector3(0, 0, 1), a.clone().normalize())), o.translate((t.x + n.x) / 2, (t.y + n.y) / 2, (t.z + n.z) / 2), o;
 }
-function Vt(t, n = .3) {
+function an(t, n = .3) {
 	let r = t.reduce((e, n, r) => {
 		let i = t[(r + 1) % t.length];
 		return e + n.x * i.z - i.x * n.z;
@@ -1560,10 +1849,10 @@ function Vt(t, n = .3) {
 		bevelEnabled: !1,
 		steps: 1
 	});
-	return a.rotateX(-Math.PI / 2), a.translate(0, z + t[0].y - n, 0), a;
+	return a.rotateX(-Math.PI / 2), a.translate(0, G + t[0].y - n, 0), a;
 }
-function Ht() {
-	let t = zt, n = [], r = [], i = [];
+function on() {
+	let t = nn, n = [], r = [], i = [];
 	for (let e = 0; e < 8; e++) {
 		let a = n.length / 3;
 		for (let [i, a] of t) for (let t = 0; t < 2; t++) {
@@ -1578,7 +1867,7 @@ function Ht() {
 	let a = new e.BufferGeometry();
 	return a.setAttribute("position", new e.Float32BufferAttribute(n, 3)), a.setAttribute("uv", new e.Float32BufferAttribute(r, 2)), a.setIndex(i), a.computeVertexNormals(), a;
 }
-var Ut = class {
+var sn = class {
 	group = new e.Group();
 	westBoardwalk = new e.Group();
 	eastRiver = new e.Group();
@@ -1589,47 +1878,50 @@ var Ut = class {
 		this.group.name = "lingyin-masterplan-blockout", this.westBoardwalk.name = "phase1-west-boardwalk-v3", this.eastRiver.name = "phase1-east-river", this.eastCrossing.name = "phase1-east-crossing", this.group.add(this.westBoardwalk, this.eastRiver, this.eastCrossing), this.buildWestBoardwalk(), this.buildEastRiver(), this.buildEastCrossing();
 	}
 	update(e) {
-		It(e);
+		Bt(e);
+	}
+	nearestWestRoute(t, n) {
+		let r = Infinity, i = G;
+		for (let a = 0; a < this.westRoute.length - 1; a++) {
+			let o = this.westRoute[a], s = this.westRoute[a + 1], c = s.x - o.x, l = s.z - o.z, u = e.MathUtils.clamp(((t - o.x) * c + (n - o.z) * l) / (c * c + l * l), 0, 1), d = Math.hypot(t - o.x - c * u, n - o.z - l * u);
+			d < r && (r = d, i = G + e.MathUtils.lerp(o.y, s.y, u));
+		}
+		return {
+			distance: r,
+			top: i
+		};
+	}
+	gradedGroundAt(t, n) {
+		let { distance: r, top: i } = this.nearestWestRoute(t, n), a = L(t, n), o = Math.min(a, i - 1.1), s = 1 - h(3.6, 11, r), c = e.MathUtils.lerp(a, o, s), l = this.westTerrace;
+		if (l) {
+			let a = l.signedDistance(t, n), o = 1 - h(0, 10, a);
+			c = e.MathUtils.lerp(c, G + l.entry.y - .6, o), a > 0 && r < 3.6 && (c = Math.min(c, i - .7));
+		}
+		return c;
 	}
 	fitPreviewTerrain(e) {
 		this.gradeBoardwalkTerrain(e);
 	}
 	gradeBoardwalkTerrain(t) {
-		let n = (t, n) => {
-			let r = Infinity, i = z;
-			for (let a = 0; a < this.westRoute.length - 1; a++) {
-				let o = this.westRoute[a], s = this.westRoute[a + 1], c = s.x - o.x, l = s.z - o.z, u = e.MathUtils.clamp(((t - o.x) * c + (n - o.z) * l) / (c * c + l * l), 0, 1), d = Math.hypot(t - o.x - c * u, n - o.z - l * u);
-				d < r && (r = d, i = z + e.MathUtils.lerp(o.y, s.y, u));
-			}
-			return {
-				distance: r,
-				top: i
-			};
-		}, r = t.getObjectByName("terrain");
-		if (r instanceof e.Mesh) {
-			r.geometry = r.geometry.clone();
-			let t = r.geometry.getAttribute("position");
-			for (let r = 0; r < t.count; r++) {
-				let { distance: i, top: a } = n(t.getX(r), t.getZ(r)), o = t.getY(r), s = Math.min(o, a - 1.1), c = 1 - e.MathUtils.smoothstep(i, 3.6, 11), l = e.MathUtils.lerp(o, s, c), u = this.westTerrace;
-				if (u) {
-					let n = u.signedDistance(t.getX(r), t.getZ(r)), o = 1 - e.MathUtils.smoothstep(n, 0, 10);
-					l = e.MathUtils.lerp(l, z + u.entry.y - .6, o), n > 0 && i < 3.6 && (l = Math.min(l, a - .7));
-				}
-				t.setY(r, l);
-			}
-			t.needsUpdate = !0, r.geometry.computeVertexNormals(), r.geometry.computeBoundingSphere();
+		let n = t.getObjectByName("terrain");
+		if (n instanceof e.Mesh) {
+			n.geometry = n.geometry.clone();
+			let e = n.geometry.getAttribute("position");
+			for (let t = 0; t < e.count; t++) e.setY(t, this.gradedGroundAt(e.getX(t), e.getZ(t)));
+			e.needsUpdate = !0, n.geometry.computeVertexNormals(), n.geometry.computeBoundingSphere();
 		}
+		let r = (e, t) => this.nearestWestRoute(e, t);
 		t.updateMatrixWorld(!0);
 		let i = new e.Matrix4().copy(t.matrixWorld).invert(), a = new e.Matrix4(), o = new e.Vector3(), s = /* @__PURE__ */ new Set(), c = t.getObjectsByProperty("name", "vegetation"), l = t.getObjectByName("lingyin-gate-framing-trees");
 		l && c.push(l);
-		for (let r of c) r.traverse((c) => {
+		for (let n of c) n.traverse((c) => {
 			if (!(c instanceof e.InstancedMesh) || s.has(c)) return;
 			s.add(c);
 			let l = new e.Matrix4().multiplyMatrices(i, c.matrixWorld);
 			for (let i = 0; i < c.count; i++) {
-				if (c.getMatrixAt(i, a), o.setFromMatrixPosition(a).applyMatrix4(l), n(o.x, o.z).distance > 4.5 && (!this.westTerrace || this.westTerrace.signedDistance(o.x, o.z) > 3)) {
-					if (r.parent === t && this.westTerrace) {
-						let t = this.westTerrace, n = t.signedDistance(o.x, o.z), r = 1 - e.MathUtils.smoothstep(n, 0, 10), s = (z + t.entry.y - .6 - A(o.x, o.z)) * r;
+				if (c.getMatrixAt(i, a), o.setFromMatrixPosition(a).applyMatrix4(l), r(o.x, o.z).distance > 4.5 && (!this.westTerrace || this.westTerrace.signedDistance(o.x, o.z) > 3)) {
+					if (n.parent === t && this.westTerrace) {
+						let t = this.westTerrace, n = t.signedDistance(o.x, o.z), r = 1 - e.MathUtils.smoothstep(n, 0, 10), s = (G + t.entry.y - .6 - L(o.x, o.z)) * r;
 						a.elements[13] += s, c.setMatrixAt(i, a);
 					}
 					continue;
@@ -1640,17 +1932,15 @@ var Ut = class {
 		});
 	}
 	buildWestBoardwalk() {
-		let t = Nt(), n = R(.2), r = gt(!0);
+		let t = Dt(), n = et(.2), r = ft(!0);
 		r.color.set("#c2a27f");
-		let i = st();
+		let i = rt();
 		i.name = "pavilion-weathered-grey-roof", i.color.set(9871002), i.roughness = .92, i.metalness = 0;
-		let a = new e.MeshStandardMaterial({
-			name: "boardwalk-warm-lantern-glass",
-			color: 16761972,
-			emissive: 16753722,
-			emissiveIntensity: 2.8,
-			roughness: .66
-		}), o = [], s = [], c = [], l = [], u = [], d = [
+		let a = [], o = [], s = [], c = {
+			frame: [],
+			glass: [],
+			accent: []
+		}, l = [
 			{
 				x: -31.2,
 				z: -18,
@@ -1707,139 +1997,234 @@ var Ut = class {
 				y: 13
 			}
 		];
-		this.westRoute = d, this.westBoardwalk.userData.route = d;
-		let f = Lt(d, new Set([
+		this.westRoute = l, this.westBoardwalk.userData.route = l;
+		let u = Vt(l, new Set([
 			0,
 			3,
 			5,
 			7,
 			9
 		]));
-		this.westBoardwalk.userData.railLayout = f;
-		let p = Rt(d[d.length - 1], d[d.length - 2]);
-		this.westTerrace = p, this.westBoardwalk.userData.terraceLayout = {
-			...p,
+		this.westBoardwalk.userData.railLayout = u;
+		let d = Ht(l[l.length - 1], l[l.length - 2]);
+		this.westTerrace = d, this.westBoardwalk.userData.terraceLayout = {
+			...d,
 			signedDistance: void 0
 		};
-		for (let { a: t, b: n, stair: r } of f.spans) {
-			let i = n.x - t.x, a = n.z - t.z, s = Math.hypot(i, a) || 1, c = Math.atan2(i, a);
+		let f = (t) => {
+			let n = t.value();
+			return new e.Color(.92 + n * .2, .9 + n * .19, .85 + n * .17);
+		}, p = new _("boardwalk-planks");
+		for (let { a: t, b: n, stair: r } of u.spans) {
+			let i = n.x - t.x, s = n.z - t.z, c = Math.hypot(i, s) || 1, l = Math.atan2(i, s), u = -s / c, d = i / c;
 			if (r) {
-				let r = Math.max(5, Math.ceil(s / .48), Math.ceil(Math.abs(n.y - t.y) / .18));
-				for (let i = 0; i < r; i++) {
-					let a = (i + .5) / r, l = e.MathUtils.lerp(t.y, n.y, (i + 1) / r);
-					o.push(M(4.25, .24, s / r, e.MathUtils.lerp(t.x, n.x, a), z + l - .12, e.MathUtils.lerp(t.z, n.z, a), c));
+				let r = Math.max(5, Math.ceil(c / .48), Math.ceil(Math.abs(n.y - t.y) / .18)), i = c / r;
+				for (let o = 0; o < r; o++) {
+					let s = (o + .5) / r, c = e.MathUtils.lerp(t.y, n.y, (o + 1) / r), u = e.MathUtils.lerp(t.x, n.x, s), d = e.MathUtils.lerp(t.z, n.z, s);
+					a.push(Ut(B(4.25, .22, i, u, G + c - .11, d, l), new e.Color(.62, .6, .57)));
+					for (let e = 0; e < 2; e++) {
+						let t = (e - .5) * (i * .5);
+						a.push(Ut(B(4.22, .055, i * .48, u + Math.sin(l) * t, G + c - .028, d + Math.cos(l) * t, l), f(p)));
+					}
+					let m = o / r;
+					a.push(Ut(B(4.26, .04, .055, e.MathUtils.lerp(t.x, n.x, m), G + c - .02, e.MathUtils.lerp(t.z, n.z, m), l), new e.Color(1.12, 1.08, 1)));
+				}
+				for (let r of [-1, 1]) {
+					let i = t.x + u * r * 2.08, a = t.z + d * r * 2.08, s = n.x + u * r * 2.08, c = n.z + d * r * 2.08;
+					o.push(rn(new e.Vector3(i, G + t.y - .34, a), new e.Vector3(s, G + n.y - .34, c), .16, .3));
 				}
 			} else {
-				let r = new e.Vector3(t.x, z + t.y - .15, t.z), i = new e.Vector3(n.x, z + t.y - .15, n.z);
-				o.push(Bt(r, i, 4.25, .3));
+				let r = new e.Vector3(t.x, G + t.y - .14, t.z), i = new e.Vector3(n.x, G + t.y - .14, n.z);
+				a.push(Ut(rn(r, i, 4.26, .28), new e.Color(.46, .44, .4)));
+				let s = Math.max(1, Math.floor(c / .305));
+				for (let r = 0; r < s; r++) {
+					let i = (r + .5) / s, o = e.MathUtils.lerp(t.x, n.x, i), u = e.MathUtils.lerp(t.z, n.z, i), d = 4.18 + p.range(-.05, .05), m = c / s - .035;
+					a.push(Ut(B(d, .055, m, o, G + t.y - .027, u, l), f(p)));
+				}
+				for (let r of [-1, 1]) o.push(rn(new e.Vector3(t.x + u * r * 2.1, G + t.y - .22, t.z + d * r * 2.1), new e.Vector3(n.x + u * r * 2.1, G + n.y - .22, n.z + d * r * 2.1), .1, .34));
 			}
 		}
-		for (let e of f.landings) {
-			let t = Vt(e);
-			t && o.push(t);
+		for (let t of u.landings) {
+			let n = an(t);
+			n && a.push(Ut(n, new e.Color(1.02, 1, .97)));
 		}
-		let m = /* @__PURE__ */ new Set(), h = [], g = (e, t) => {
-			let { x: n, z: r } = e, i = z + e.y, a = [
+		let m = l[l.length - 1], h = l[l.length - 2], g = Math.atan2(m.x - h.x, m.z - h.z);
+		a.push(Ut(B(4.25, .08, .2, m.x, G + m.y - .04, m.z, g), new e.Color(.72, .7, .67)));
+		let v = /* @__PURE__ */ new Set(), y = [], b = 0, x = (e, t) => {
+			let { x: n, z: r } = e, i = G + e.y, a = [
 				n,
 				e.y,
 				r
 			].map((e) => e.toFixed(4)).join(",");
-			if (m.has(a) || h.some((t) => Math.hypot(t.x - n, t.z - r) < .34 && Math.abs(t.y - e.y) < .1)) return;
-			m.add(a), h.push(e);
-			let o = Math.min(A(n, r), i - 1.1), c = Math.max(1.25, i - o);
-			if (s.push(M(.22, c, .22, n, o + c / 2, r)), s.push(M(.2, 1.22, .2, n, i + .61, r)), t) {
-				u.push(M(.4, .55, .4, n, i + 1.46, r)), l.push(M(.52, .09, .52, n, i + 1.78, r)), l.push(M(.46, .08, .46, n, i + 1.16, r));
-				for (let e of [-.21, .21]) for (let t of [-.21, .21]) l.push(M(.045, .6, .045, n + e, i + 1.47, r + t));
+			if (v.has(a) || y.some((t) => Math.hypot(t.x - n, t.z - r) < .34 && Math.abs(t.y - e.y) < .1)) return;
+			v.add(a), y.push(e);
+			let s = Math.min(L(n, r), i - 1.1), l = Math.max(1.25, i - s);
+			o.push(B(.24, l, .24, n, s + l / 2, r)), o.push(B(.17, 1.18, .17, n, i + .59, r)), o.push(B(.25, .06, .25, n, i + .025, r)), o.push(B(.26, .07, .26, n, i + 1.19, r)), t && (Xt(c, n, i + 1.235, r, .92), b++ % 7 == 3 && Zt(c, n + .11, i + 1, r + .11, b * .9 % 6.28));
+		}, S = [];
+		for (let t of [...u.rails, ...d.rails]) {
+			let { a: n, b: r } = t, i = new e.Vector3(n.x, G + n.y + 1.02, n.z), a = new e.Vector3(r.x, G + r.y + 1.02, r.z);
+			o.push(rn(i, a, .13, .16)), o.push(rn(i.clone().add(new e.Vector3(0, .045, 0)), a.clone().add(new e.Vector3(0, .045, 0)), .19, .045)), o.push(rn(i.clone().add(new e.Vector3(0, -.46, 0)), a.clone().add(new e.Vector3(0, -.46, 0)), .1, .115));
+			let s = Math.hypot(r.x - n.x, r.z - n.z), c = Math.max(1, Math.round(s / .34));
+			for (let t = 1; t < c; t++) {
+				let i = t / c, a = e.MathUtils.lerp(n.x, r.x, i), s = e.MathUtils.lerp(n.z, r.z, i), l = e.MathUtils.lerp(n.y, r.y, i);
+				o.push(B(.052, .43, .052, a, G + l + .79, s));
 			}
-		}, _ = [];
-		for (let t of [...f.rails, ...p.rails]) {
-			let { a: n, b: r } = t, i = new e.Vector3(n.x, z + n.y + 1.02, n.z), a = new e.Vector3(r.x, z + r.y + 1.02, r.z);
-			s.push(Bt(i, a, .14, .15)), s.push(Bt(i.clone().add(new e.Vector3(0, -.46, 0)), a.clone().add(new e.Vector3(0, -.46, 0)), .11, .12));
-			let o = Math.hypot(r.x - n.x, r.z - n.z), c = Math.max(1, Math.ceil(o / 4.2));
-			for (let t = 0; t <= c; t++) {
-				let i = t / c, a = {
+			let l = Math.max(1, Math.ceil(s / 4.2));
+			for (let t = 0; t <= l; t++) {
+				let i = t / l, a = {
 					x: e.MathUtils.lerp(n.x, r.x, i),
 					y: e.MathUtils.lerp(n.y, r.y, i),
 					z: e.MathUtils.lerp(n.z, r.z, i)
-				}, o = (t === 0 || t === c) && _.every((e) => Math.hypot(e.x - a.x, e.z - a.z) > 2.8);
-				g(a, o), o && _.push(a);
+				}, o = (t === 0 || t === l) && S.every((e) => Math.hypot(e.x - a.x, e.z - a.z) > 2.8);
+				x(a, o), o && S.push(a);
 			}
 		}
-		this.westBoardwalk.userData.postPoints = h, this.westBoardwalk.userData.litPostPoints = _, c.push(Vt(p.outline.map((e) => ({
+		this.westBoardwalk.userData.postPoints = y, this.westBoardwalk.userData.litPostPoints = S, s.push(an(d.outline.map((e) => ({
 			...e,
 			y: e.y - .05
 		})), .65));
-		for (let t of p.rails) {
-			let n = new e.Vector3(t.a.x, z + t.a.y + .11, t.a.z), r = new e.Vector3(t.b.x, z + t.b.y + .11, t.b.z);
-			c.push(Bt(n, r, .32, .22));
+		for (let t of d.rails) {
+			let n = new e.Vector3(t.a.x, G + t.a.y + .11, t.a.z), r = new e.Vector3(t.b.x, G + t.b.y + .11, t.b.z);
+			s.push(rn(n, r, .32, .22));
 		}
-		for (let e of p.guard) c.push(M(.48, .24, .48, e.x, z + e.y + .12, e.z));
-		let v = Vt(p.outline, .05), y = v.getAttribute("position"), b = v.getAttribute("uv");
-		for (let e = 0; e < y.count; e++) {
-			let t = y.getX(e) - p.entry.x, n = y.getZ(e) - p.entry.z;
-			b.setXY(e, (t * p.forward.x + n * p.forward.z) * 2.4 / 48, (t * p.normal.x + n * p.normal.z) * 2.4 / 32);
+		for (let e of d.guard) s.push(B(.48, .24, .48, e.x, G + e.y + .12, e.z));
+		let C = an(d.outline, .05), w = C.getAttribute("position"), T = C.getAttribute("uv");
+		for (let e = 0; e < w.count; e++) {
+			let t = w.getX(e) - d.entry.x, n = w.getZ(e) - d.entry.z;
+			T.setXY(e, (t * d.forward.x + n * d.forward.z) * 2.4 / 48, (t * d.normal.x + n * d.normal.z) * 2.4 / 32);
 		}
-		let x = new e.Mesh(v, Mt());
-		x.name = "phase1-pavilion-terrace-paving", x.receiveShadow = !0, this.westBoardwalk.add(x);
-		let { x: S, z: C } = p.pavilion, w = z + p.entry.y, T = [];
+		let E = new e.Mesh(C, Et());
+		E.name = "phase1-pavilion-terrace-paving", E.receiveShadow = !0, this.westBoardwalk.add(E);
+		let { x: D, z: O } = d.pavilion, k = G + d.entry.y, ee = r.clone();
+		ee.name = "pavilion-warm-oiled-timber", ee.color.set(11701349), ee.roughness = .78, ee.emissive.set(3810583), ee.emissiveIntensity = .38;
+		let te = rt();
+		te.name = "pavilion-silvered-tile-roof", te.color.set(14012609), te.roughness = .9, te.emissive.set(4934722), te.emissiveIntensity = .78;
+		let ne = new e.MeshStandardMaterial({
+			name: "pavilion-mortar-ridge",
+			color: 9409417,
+			roughness: .9,
+			metalness: 0,
+			emissive: 1382163,
+			emissiveIntensity: .35
+		}), A = [], re = [];
 		for (let t = 0; t < 8; t++) {
-			let n = t / 8 * Math.PI * 2 + Math.PI / 8, r = S + Math.cos(n) * 2.65, i = C + Math.sin(n) * 2.65;
-			c.push(N(.27, .31, .22, 10, r, w + .11, i)), T.push(N(.15, .18, 3.24, 10, r, w + 1.84, i));
+			let n = t / 8 * Math.PI * 2 + Math.PI / 8, r = D + Math.cos(n) * 2.65, i = O + Math.sin(n) * 2.65;
+			s.push(V(.27, .31, .22, 10, r, k + .11, i)), A.push(V(.135, .16, 3.24, 10, r, k + 1.84, i));
 			let a = (t + 1) / 8 * Math.PI * 2 + Math.PI / 8;
-			T.push(Bt(new e.Vector3(r, w + 3.4, i), new e.Vector3(S + Math.cos(a) * 2.65, w + 3.4, C + Math.sin(a) * 2.65), .19, .24));
-			for (let t = 1; t < zt.length; t++) {
-				let [r, i] = zt[t - 1], [a, o] = zt[t];
-				T.push(Bt(new e.Vector3(S + Math.cos(n) * r, w + 3.03 + i, C + Math.sin(n) * r), new e.Vector3(S + Math.cos(n) * a, w + 3.03 + o, C + Math.sin(n) * a), .11, .12));
+			A.push(rn(new e.Vector3(r, k + 3.4, i), new e.Vector3(D + Math.cos(a) * 2.65, k + 3.4, O + Math.sin(a) * 2.65), .19, .24));
+			for (let t = 1; t < nn.length; t++) {
+				let [r, i] = nn[t - 1], [a, o] = nn[t];
+				A.push(rn(new e.Vector3(D + Math.cos(n) * r, k + 3.03 + i, O + Math.sin(n) * r), new e.Vector3(D + Math.cos(n) * a, k + 3.03 + o, O + Math.sin(n) * a), .11, .12));
 			}
-			T.push(Bt(new e.Vector3(S + Math.cos(n) * 3.98, w + 3.37, C + Math.sin(n) * 3.98), new e.Vector3(S + Math.cos(a) * 3.98, w + 3.37, C + Math.sin(a) * 3.98), .13, .16));
+			A.push(rn(new e.Vector3(D + Math.cos(n) * 3.98, k + 3.37, O + Math.sin(n) * 3.98), new e.Vector3(D + Math.cos(a) * 3.98, k + 3.37, O + Math.sin(a) * 3.98), .13, .16));
 		}
-		let E = new e.Mesh(P(T), r);
-		E.name = "phase1-lower-pavilion-posts", E.castShadow = !0, E.renderOrder = 79;
-		let ee = new e.Mesh(Ht(), i);
-		ee.position.set(S, w + 3.15, C), c.push(N(.16, .22, .14, 8, S, w + 4.96, C)), c.push(N(.015, .09, .42, 8, S, w + 5.2, C)), ee.name = "phase1-lower-pavilion-roof", ee.castShadow = !0, ee.renderOrder = 80;
-		let te = new e.Mesh(F(P(o), 2.4), t);
-		te.name = "phase1-boardwalk-deck", te.castShadow = te.receiveShadow = !0, te.renderOrder = 80;
-		let ne = new e.Mesh(F(P(s), .9), r);
-		ne.name = "phase1-boardwalk-supports", ne.castShadow = ne.receiveShadow = !0, ne.renderOrder = 79;
-		let D = new e.Mesh(P(u), a);
-		D.name = "phase1-boardwalk-lanterns", D.castShadow = !1, D.renderOrder = 81, this.westBoardwalk.add(te, ne, D, E, ee);
-		let re = new e.Mesh(P(l), r);
-		re.name = "phase1-boardwalk-lantern-frames";
-		let ie = new e.Mesh(F(P(c), 1.4), n);
-		ie.name = "phase1-boardwalk-stone-footings", ie.castShadow = ie.receiveShadow = !0, this.westBoardwalk.add(re, ie);
+		for (let t = 0; t < 8; t++) for (let n of [-.2, .2]) {
+			let r = t / 8 * Math.PI * 2 + Math.PI / 8 + n;
+			A.push(rn(new e.Vector3(D + Math.cos(r) * 2.55, k + 3.12, O + Math.sin(r) * 2.55), new e.Vector3(D + Math.cos(r) * 3.82, k + 3.36, O + Math.sin(r) * 3.82), .075, .1));
+		}
+		for (let t = 0; t < 8; t++) {
+			let n = t / 8 * Math.PI * 2 + Math.PI / 8;
+			for (let t = 1; t < nn.length; t++) {
+				let [r, i] = nn[t - 1], [a, o] = nn[t];
+				re.push(rn(new e.Vector3(D + Math.cos(n) * r, k + 3.15 + i, O + Math.sin(n) * r), new e.Vector3(D + Math.cos(n) * a, k + 3.15 + o, O + Math.sin(n) * a), .105, .1));
+			}
+		}
+		let ie = new e.Vector3(-d.forward.x, 0, -d.forward.z).normalize(), ae = en("觀景台", 2, .74);
+		ae.position.set(D + ie.x * 2.18, k + 3.1, O + ie.z * 2.18), ae.rotation.y = Math.atan2(ie.x, ie.z), ae.traverse((t) => {
+			t instanceof e.Mesh && (t.castShadow = !0, t.receiveShadow = !0);
+		});
+		for (let t of [-.72, .72]) {
+			let n = new e.CylinderGeometry(.012, .012, .5, 5);
+			n.translate(D + ie.x * 2.18 + Math.cos(ae.rotation.y) * t, k + 3.52, O + ie.z * 2.18 - Math.sin(ae.rotation.y) * t), re.push(n);
+		}
+		for (let e of [
+			0,
+			2,
+			4,
+			6
+		]) {
+			let t = e / 8 * Math.PI * 2 + Math.PI / 8;
+			Xt(c, D + Math.cos(t) * 2.34, k + 2.46, O + Math.sin(t) * 2.34, .72, !0);
+		}
+		let oe = new e.RingGeometry(2.26, 2.62, 64);
+		oe.rotateX(-Math.PI / 2), oe.translate(D, k + .012, O), re.push(oe), this.westBoardwalk.add(ae);
+		let se = [];
+		for (let t = 0; t < 5; t++) {
+			let n = new e.CylinderGeometry(.018, .022, .18 + t % 3 * .06, 6);
+			n.translate(D + 1.55 + t * .16, k + 2.92, O + 2.55), se.push(n);
+		}
+		let j = B(1.08, .035, .035, D + 1.87, k + 3.18, O + 2.55);
+		se.push(j);
+		let ce = new e.Mesh(H(se), pt());
+		ce.name = "phase1-pavilion-brass-chimes", this.westBoardwalk.add(ce);
+		let le = l[0], ue = le.x - 3.1, M = le.z + .55, N = [];
+		for (let e of [-.82, .82]) N.push(B(.13, 2.55, .13, ue + e, G + 1.275, M)), N.push(B(.24, .07, .24, ue + e, G + 2.57, M));
+		N.push(B(2.12, .1, .16, ue, G + 2.46, M)), N.push(B(2.24, .07, .42, ue, G + 2.55, M));
+		for (let e of N) A.push(e);
+		let P = en("西山道", 1.55, .56);
+		P.position.set(ue, G + 2.02, M + .07), Xt(c, ue, G + 2.66, M, .58), this.westBoardwalk.add(P);
+		let F = new e.Mesh(H(A), ee);
+		F.name = "phase1-lower-pavilion-posts", F.castShadow = !0, F.renderOrder = 79;
+		let de = new e.Mesh(on(), te);
+		de.position.set(D, k + 3.15, O), s.push(V(.16, .22, .14, 8, D, k + 4.96, O)), s.push(V(.015, .09, .42, 8, D, k + 5.2, O)), de.name = "phase1-lower-pavilion-roof", de.castShadow = !0, de.renderOrder = 80, t.vertexColors = !0;
+		let I = new e.Mesh(U(H(a), 2), t);
+		I.name = "phase1-boardwalk-deck", I.castShadow = I.receiveShadow = !0, I.renderOrder = 80;
+		let fe = new e.Mesh(U(H(o), .9), r);
+		fe.name = "phase1-boardwalk-supports", fe.castShadow = fe.receiveShadow = !0, fe.renderOrder = 79;
+		let pe = new e.Mesh(H(c.glass), qt());
+		pe.name = "phase1-boardwalk-lanterns", pe.renderOrder = 81;
+		let me = new e.Mesh(H(c.frame), Gt());
+		me.name = "phase1-boardwalk-lantern-frames", me.castShadow = !0;
+		let he = new e.Mesh(H(c.accent), Yt());
+		he.name = "phase1-boardwalk-lantern-tassels";
+		let ge = new e.Mesh(U(H(s), 1.4), n);
+		ge.name = "phase1-boardwalk-stone-footings", ge.castShadow = ge.receiveShadow = !0;
+		let _e = new e.Mesh(H(re), ne);
+		_e.name = "phase1-pavilion-hip-ridges", _e.castShadow = !0, this.westBoardwalk.add(I, fe, pe, me, he, F, de, _e), this.westBoardwalk.add(ge);
+		let ye = new _("boardwalk-outcrops"), R = [];
+		for (let t = 0; t < l.length - 1; t++) {
+			let n = l[t], r = l[t + 1], i = r.x - n.x, a = r.z - n.z, o = Math.hypot(i, a) || 1, s = -a / o, c = i / o;
+			for (let t of [[.34, 1], [.68, -1]]) for (let i of [0, .14]) {
+				let a = e.MathUtils.lerp(n.x, r.x, t[0]) + s * t[1] * (6.2 + i * 7), o = e.MathUtils.lerp(n.z, r.z, t[0]) + c * t[1] * (6.2 + i * 7);
+				if (ve(a, o, 2) || this.westTerrace && this.westTerrace.signedDistance(a, o) < 3.2) continue;
+				let l = this.nearestWestRoute(a, o).distance;
+				l < 4.6 || l > 13 || ye.chance(.28) || R.push({
+					x: a,
+					z: o,
+					y: this.gradedGroundAt(a, o) + .05,
+					r: ye.range(.75, 1.9),
+					tall: ye.range(.5, .9),
+					ry: ye.range(0, 6.28)
+				});
+			}
+		}
+		if (R.length) {
+			let t = new e.Mesh(tn(R), yt());
+			t.name = "phase1-boardwalk-outcrops", t.castShadow = t.receiveShadow = !0, this.westBoardwalk.add(t);
+		}
 	}
 	buildEastRiver() {
-		let t = Pt(), n = R(.2), r = [], i = [], a = le.filter(([e, t]) => e > 25 && t > -62 && t < 70);
-		for (let t = 0; t < a.length - 1; t += 2) {
-			let [n, o] = a[t], [s, c] = a[Math.min(t + 2, a.length - 1)], l = de(n, o).t, u = pe(l) + .1, d = fe(l) * 1.15, f = new e.Vector3(n, u, o), p = new e.Vector3(s, pe(de(s, c).t) + .1, c);
-			r.push(Bt(f, p, d, .12));
-			let m = s - n, h = c - o, g = Math.hypot(m, h) || 1, _ = -h / g, v = m / g;
-			for (let t of [-1, 1]) i.push(Bt(f.clone().add(new e.Vector3(_ * t * (d * .58), .1, v * t * (d * .58))), p.clone().add(new e.Vector3(_ * t * (d * .58), .1, v * t * (d * .58))), .65, .5));
+		let t = zt(), n = et(.2), r = [], i = le.filter(([e, t]) => e > 25 && t > -62 && t < 70);
+		for (let t = 0; t < i.length - 1; t += 2) {
+			let [n, a] = i[t], [o, s] = i[Math.min(t + 2, i.length - 1)], c = M(n, a).t, l = P(c) + .1, u = N(c) * 1.15, d = new e.Vector3(n, l, a), f = new e.Vector3(o, P(M(o, s).t) + .1, s), p = o - n, m = s - a, h = Math.hypot(p, m) || 1, g = -m / h, _ = p / h;
+			for (let t of [-1, 1]) r.push(rn(d.clone().add(new e.Vector3(g * t * (u * .58), .1, _ * t * (u * .58))), f.clone().add(new e.Vector3(g * t * (u * .58), .1, _ * t * (u * .58))), .65, .5));
 		}
-		let o = new e.Mesh(P(r), t);
-		o.name = "phase1-river-ribbon", o.renderOrder = 10;
-		let s = new e.Mesh(F(P(i), 1.4), n);
-		s.name = "phase1-river-banks", s.castShadow = s.receiveShadow = !0;
-		let c = new e.Mesh(new e.CylinderGeometry(4.3, 4.7, .18, 24), t);
-		c.name = "phase1-waterfall-upper-pool", c.position.set(43.2, 6.36, -54.4), c.renderOrder = 11;
-		let l = new e.Mesh(new e.PlaneGeometry(5.8, 7.6), Ft());
-		l.name = "phase1-waterfall-face", l.position.set(42.25, 3, -49.9), l.rotation.set(0, Math.PI - .12, 0), l.renderOrder = 12;
-		let u = new e.Mesh(new e.CylinderGeometry(5.4, 5.8, .16, 24), t);
-		u.name = "phase1-waterfall-plunge-pool", u.position.set(40.9, -.72, -45.6), u.renderOrder = 11;
-		let d = new e.Mesh(new e.BoxGeometry(5.9, .28, .7), n);
-		d.name = "phase1-waterfall-stone-lip", d.position.set(42.65, 6.2, -50.45), d.rotation.y = -.12, this.eastRiver.add(o, s, c, l, u, d);
+		let a = new e.Mesh(U(H(r), 1.4), n);
+		a.name = "phase1-river-banks", a.castShadow = a.receiveShadow = !0;
+		let o = M(42.65, -50.45).t, s = new e.Mesh(new e.BoxGeometry(5.9, .32, .9), n);
+		s.name = "phase1-waterfall-stone-lip", s.position.set(42.65, P(o) + .08, -50.45), s.rotation.y = -.12, s.castShadow = s.receiveShadow = !0, this.eastRiver.add(t, a, s);
 	}
 	buildEastCrossing() {
-		let t = R(.2), n = st(), r = gt(!1), i = [];
+		let t = et(.2), n = rt(), r = ft(!1), i = [];
 		for (let t = 0; t < 3; t++) {
-			let n = A(44.35, 28), r = e.MathUtils.lerp(n, z + .32, (t + 1) / 3);
-			i.push(M(.72, .18, 4.75, 44.62 - t * .72, r - .09, 28));
+			let n = L(44.35, 28), r = e.MathUtils.lerp(n, G + .32, (t + 1) / 3);
+			i.push(B(.72, .18, 8.2, 44.62 - t * .72, r - .09, 28));
 		}
-		let a = new e.Mesh(F(P(i), 1.4), t);
+		let a = new e.Mesh(U(H(i), 1.4), t);
 		a.name = "phase1-east-bank-approach", a.castShadow = a.receiveShadow = !0;
 		let o = new e.Group();
 		o.name = "phase1-east-pavilion";
-		let s = 43.5, c = 46.5, l = A(s, c) + .1, u = new e.Mesh(new e.CylinderGeometry(3.5, 3.8, .42, 8), t);
+		let s = 43.5, c = 46.5, l = L(s, c) + .1, u = new e.Mesh(new e.CylinderGeometry(3.5, 3.8, .42, 8), t);
 		u.position.set(s, l + .21, c), o.add(u);
 		for (let t = 0; t < 8; t++) {
 			let n = t / 8 * Math.PI * 2 + Math.PI / 8, i = new e.Mesh(new e.CylinderGeometry(.13, .17, 3.2, 8), r);
@@ -1858,16 +2243,18 @@ var Ut = class {
 };
 //#endregion
 //#region src/world/game_landscape.ts
-function Wt(t) {
-	let n = new Ut();
+function cn(t) {
+	let n = new sn();
 	n.group.name = "lingyin-approved-landscape", n.gradeBoardwalkTerrain(t), t.add(n.group);
-	let r = t.getObjectByName("hillside-pilgrimage-trail");
-	r && (r.visible = !1);
-	let i = t.getObjectByName("water");
+	let r = new f();
+	r.group.name = "lingyin-distant-ridges", t.add(r.group);
+	let i = t.getObjectByName("hillside-pilgrimage-trail");
 	i && (i.visible = !1);
-	let a = n.westBoardwalk.userData.railLayout, o = n.westBoardwalk.userData.route, s = Rt(o.at(-1), o.at(-2)), c = [], l = [], u = (e, t, n, r = !1) => {
-		let i = e.map((e) => e.x), a = e.map((e) => e.z), o = (Math.min(...i) + Math.max(...i)) / 2, s = (Math.min(...a) + Math.max(...a)) / 2, l = e.reduce((t, n, r) => t + n.x * e[(r + 1) % e.length].z - n.z * e[(r + 1) % e.length].x, 0);
-		if (Math.abs(l) < 1e-7) return;
+	let a = t.getObjectByName("water");
+	a && (a.visible = !1);
+	let o = n.westBoardwalk.userData.railLayout, s = n.westBoardwalk.userData.route, c = Ht(s.at(-1), s.at(-2)), l = [], u = [], d = (e, t, n, r = !1) => {
+		let i = e.map((e) => e.x), a = e.map((e) => e.z), o = (Math.min(...i) + Math.max(...i)) / 2, s = (Math.min(...a) + Math.max(...a)) / 2, c = e.reduce((t, n, r) => t + n.x * e[(r + 1) % e.length].z - n.z * e[(r + 1) % e.length].x, 0);
+		if (Math.abs(c) < 1e-7) return;
 		let u = [[
 			0,
 			1,
@@ -1882,14 +2269,14 @@ function Wt(t) {
 		e.forEach((t, n) => {
 			let r = e[(n + 1) % e.length], i = r.x - t.x, a = r.z - t.z, o = Math.hypot(i, a);
 			if (o < 1e-7) return;
-			let s = l > 0 ? 1 : -1, c = s * a / o, d = -s * i / o;
+			let s = c > 0 ? 1 : -1, l = s * a / o, d = -s * i / o;
 			u.push([
-				c,
+				l,
 				0,
 				d,
-				c * t.x + d * t.z
+				l * t.x + d * t.z
 			]);
-		}), c.push({
+		}), l.push({
 			x: o,
 			z: s,
 			hx: (Math.max(...i) - Math.min(...i)) / 2,
@@ -1900,32 +2287,32 @@ function Wt(t) {
 			stepSurface: r,
 			walkable: !1
 		});
-	}, d = (e, t, n, r, i, a = !1) => {
-		let o = t.x - e.x, s = t.z - e.z, c = Math.hypot(o, s), l = -s / c * n / 2, d = o / c * n / 2;
-		u([
+	}, p = (e, t, n, r, i, a = !1) => {
+		let o = t.x - e.x, s = t.z - e.z, c = Math.hypot(o, s), l = -s / c * n / 2, u = o / c * n / 2;
+		d([
 			{
 				x: e.x + l,
-				z: e.z + d,
+				z: e.z + u,
 				y: 0
 			},
 			{
 				x: t.x + l,
-				z: t.z + d,
+				z: t.z + u,
 				y: 0
 			},
 			{
 				x: t.x - l,
-				z: t.z - d,
+				z: t.z - u,
 				y: 0
 			},
 			{
 				x: e.x - l,
-				z: e.z - d,
+				z: e.z - u,
 				y: 0
 			}
 		], r, i, a);
 	};
-	for (let t of a.spans) {
+	for (let t of o.spans) {
 		let n = Math.hypot(t.b.x - t.a.x, t.b.z - t.a.z), r = t.stair ? Math.max(5, Math.ceil(n / .48), Math.ceil(Math.abs(t.b.y - t.a.y) / .18)) : 1;
 		for (let n = 0; n < r; n++) {
 			let i = (n) => ({
@@ -1933,9 +2320,9 @@ function Wt(t) {
 				z: e.MathUtils.lerp(t.a.z, t.b.z, n),
 				y: 0
 			}), a = e.MathUtils.lerp(t.a.y, t.b.y, (n + 1) / r);
-			d(i(n / r), i((n + 1) / r), 4.25, a - (t.stair ? .24 : .3), a, t.stair);
+			p(i(n / r), i((n + 1) / r), 4.25, a - (t.stair ? .24 : .3), a, t.stair);
 		}
-		l.push({
+		u.push({
 			kind: "walk",
 			x: (t.a.x + t.b.x) / 2,
 			z: (t.a.z + t.b.z) / 2,
@@ -1943,9 +2330,9 @@ function Wt(t) {
 			hz: Math.abs(t.b.z - t.a.z) / 2 + 2.125
 		});
 	}
-	for (let e of a.landings) u(e, e[0].y - .3, e[0].y);
-	u(s.outline, s.entry.y - .7, s.entry.y);
-	let f = (e, t, n, r, i, a) => c.push({
+	for (let e of o.landings) d(e, e[0].y - .3, e[0].y);
+	d(c.outline, c.entry.y - .7, c.entry.y);
+	let m = (e, t, n, r, i, a) => l.push({
 		x: e,
 		z: t,
 		hx: n,
@@ -1954,14 +2341,14 @@ function Wt(t) {
 		h: a,
 		walkable: !1
 	});
-	for (let e of n.westBoardwalk.userData.postPoints) f(e.x, e.z, .11, .11, Math.min(A(e.x, e.z) - O.platform.y, e.y - 1.1), e.y + 1.22);
-	for (let e of n.westBoardwalk.userData.litPostPoints) f(e.x, e.z, .26, .26, e.y + 1.16, e.y + 1.825);
+	for (let e of n.westBoardwalk.userData.postPoints) m(e.x, e.z, .11, .11, Math.min(L(e.x, e.z) - j.platform.y, e.y - 1.1), e.y + 1.22);
+	for (let e of n.westBoardwalk.userData.litPostPoints) m(e.x, e.z, .26, .26, e.y + 1.16, e.y + 1.825);
 	for (let e = 0; e < 8; e++) {
 		let t = e * Math.PI / 4 + Math.PI / 8;
-		f(s.pavilion.x + Math.cos(t) * 2.65, s.pavilion.z + Math.sin(t) * 2.65, .18, .18, 13, 16.71);
+		m(c.pavilion.x + Math.cos(t) * 2.65, c.pavilion.z + Math.sin(t) * 2.65, .18, .18, 13, 16.71);
 	}
-	f(s.pavilion.x, s.pavilion.z, 3.55, 3.55, 16.4, 17.95);
-	let p = P([
+	m(c.pavilion.x, c.pavilion.z, 3.55, 3.55, 16.4, 17.95);
+	let h = H([
 		"phase1-boardwalk-deck",
 		"phase1-pavilion-terrace-paving",
 		"phase1-boardwalk-supports",
@@ -1970,22 +2357,22 @@ function Wt(t) {
 	].map((e) => n.group.getObjectByName(e).geometry.clone()));
 	return {
 		group: n.group,
-		solids: c,
-		rails: [...a.rails, ...s.rails],
-		radar: l,
-		walkGeometry: p,
-		nodes: o,
-		terrace: s,
+		solids: l,
+		rails: [...o.rails, ...c.rails],
+		radar: u,
+		walkGeometry: h,
+		nodes: s,
+		terrace: c,
 		update: (e) => n.update(e)
 	};
 }
 //#endregion
 //#region src/gate-kit/core/materials.ts
-var Gt = "\nfloat cgHash11(float p){ p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }\nfloat cgHash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\nvec3 cgHash33(vec3 p3){ p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yxz + 33.33); return fract((p3.xxy + p3.yxx) * p3.zyx); }\nfloat cgNoise2(vec2 p){\n  vec2 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float a = cgHash12(i), b = cgHash12(i + vec2(1,0)), c = cgHash12(i + vec2(0,1)), d = cgHash12(i + vec2(1,1));\n  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);\n}\nfloat cgNoise3(vec3 p){\n  vec3 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float n000 = cgHash12(i.xy + i.z * 19.19);\n  float n100 = cgHash12(i.xy + vec2(1,0) + i.z * 19.19);\n  float n010 = cgHash12(i.xy + vec2(0,1) + i.z * 19.19);\n  float n110 = cgHash12(i.xy + vec2(1,1) + i.z * 19.19);\n  float n001 = cgHash12(i.xy + (i.z + 1.0) * 19.19);\n  float n101 = cgHash12(i.xy + vec2(1,0) + (i.z + 1.0) * 19.19);\n  float n011 = cgHash12(i.xy + vec2(0,1) + (i.z + 1.0) * 19.19);\n  float n111 = cgHash12(i.xy + vec2(1,1) + (i.z + 1.0) * 19.19);\n  return mix(mix(mix(n000,n100,f.x), mix(n010,n110,f.x), f.y), mix(mix(n001,n101,f.x), mix(n011,n111,f.x), f.y), f.z);\n}\nfloat cgFbm2(vec2 p){ float s = 0.0, a = 0.5; for (int i=0;i<5;i++){ s += a * cgNoise2(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }\nfloat cgFbm3(vec3 p){ float s = 0.0, a = 0.5; for (int i=0;i<4;i++){ s += a * cgNoise3(p); p = p * 2.05 + 7.3; a *= 0.5; } return s; }\nfloat cgRidge2(vec2 p){ float s = 0.0, a = 0.55; for (int i=0;i<4;i++){ float n = 1.0 - abs(cgNoise2(p) * 2.0 - 1.0); s += a * n * n; p = p * 2.1 + 3.1; a *= 0.5; } return s; }\n// anti-aliased thin line: distance d in world units, width w, pixel footprint aa\nfloat cgLine(float d, float w, float aa){ return 1.0 - smoothstep(w, w + aa, abs(d)); }\n", Kt = "\nvarying vec3 vCgWorld;\nvarying vec3 vCgNormalW;\nvarying vec3 vCgObj;\nvarying float vCgSeed;\n", qt = "\n{\n  vec4 cgP = vec4(transformed, 1.0);\n  vec3 cgN = objectNormal;\n  float cgSeedV = 0.0;\n  #ifdef USE_INSTANCING\n    cgP = instanceMatrix * cgP;\n    cgN = mat3(instanceMatrix) * cgN;\n    cgSeedV = fract(sin(dot(instanceMatrix[3].xyz, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n  #endif\n  vCgWorld = (modelMatrix * cgP).xyz;\n  vCgNormalW = normalize(mat3(modelMatrix) * cgN);\n  vCgObj = transformed;\n  vCgSeed = cgSeedV;\n}\n";
-function Jt(t = {}) {
+var ln = "\nfloat cgHash11(float p){ p = fract(p * 0.1031); p *= p + 33.33; p *= p + p; return fract(p); }\nfloat cgHash12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\nvec3 cgHash33(vec3 p3){ p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973)); p3 += dot(p3, p3.yxz + 33.33); return fract((p3.xxy + p3.yxx) * p3.zyx); }\nfloat cgNoise2(vec2 p){\n  vec2 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float a = cgHash12(i), b = cgHash12(i + vec2(1,0)), c = cgHash12(i + vec2(0,1)), d = cgHash12(i + vec2(1,1));\n  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);\n}\nfloat cgNoise3(vec3 p){\n  vec3 i = floor(p), f = fract(p);\n  f = f * f * (3.0 - 2.0 * f);\n  float n000 = cgHash12(i.xy + i.z * 19.19);\n  float n100 = cgHash12(i.xy + vec2(1,0) + i.z * 19.19);\n  float n010 = cgHash12(i.xy + vec2(0,1) + i.z * 19.19);\n  float n110 = cgHash12(i.xy + vec2(1,1) + i.z * 19.19);\n  float n001 = cgHash12(i.xy + (i.z + 1.0) * 19.19);\n  float n101 = cgHash12(i.xy + vec2(1,0) + (i.z + 1.0) * 19.19);\n  float n011 = cgHash12(i.xy + vec2(0,1) + (i.z + 1.0) * 19.19);\n  float n111 = cgHash12(i.xy + vec2(1,1) + (i.z + 1.0) * 19.19);\n  return mix(mix(mix(n000,n100,f.x), mix(n010,n110,f.x), f.y), mix(mix(n001,n101,f.x), mix(n011,n111,f.x), f.y), f.z);\n}\nfloat cgFbm2(vec2 p){ float s = 0.0, a = 0.5; for (int i=0;i<5;i++){ s += a * cgNoise2(p); p = p * 2.03 + 11.7; a *= 0.5; } return s; }\nfloat cgFbm3(vec3 p){ float s = 0.0, a = 0.5; for (int i=0;i<4;i++){ s += a * cgNoise3(p); p = p * 2.05 + 7.3; a *= 0.5; } return s; }\nfloat cgRidge2(vec2 p){ float s = 0.0, a = 0.55; for (int i=0;i<4;i++){ float n = 1.0 - abs(cgNoise2(p) * 2.0 - 1.0); s += a * n * n; p = p * 2.1 + 3.1; a *= 0.5; } return s; }\n// anti-aliased thin line: distance d in world units, width w, pixel footprint aa\nfloat cgLine(float d, float w, float aa){ return 1.0 - smoothstep(w, w + aa, abs(d)); }\n", un = "\nvarying vec3 vCgWorld;\nvarying vec3 vCgNormalW;\nvarying vec3 vCgObj;\nvarying float vCgSeed;\n", dn = "\n{\n  vec4 cgP = vec4(transformed, 1.0);\n  vec3 cgN = objectNormal;\n  float cgSeedV = 0.0;\n  #ifdef USE_INSTANCING\n    cgP = instanceMatrix * cgP;\n    cgN = mat3(instanceMatrix) * cgN;\n    cgSeedV = fract(sin(dot(instanceMatrix[3].xyz, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n  #endif\n  vCgWorld = (modelMatrix * cgP).xyz;\n  vCgNormalW = normalize(mat3(modelMatrix) * cgN);\n  vCgObj = transformed;\n  vCgSeed = cgSeedV;\n}\n";
+function fn(t = {}) {
 	let n = new e.MeshStandardMaterial(t.params ?? {});
 	t.name && (n.name = t.name);
-	let r = t.uniforms ?? {}, i = "proc:" + Yt([
+	let r = t.uniforms ?? {}, i = "proc:" + pn([
 		t.head,
 		t.vertexHead,
 		t.vertexPre,
@@ -1999,15 +2386,15 @@ function Jt(t = {}) {
 	return n.customProgramCacheKey = () => i, n.onBeforeCompile = (e) => {
 		Object.assign(e.uniforms, r);
 		let n = e.vertexShader, i = e.fragmentShader;
-		n = n.replace("#include <common>", `#include <common>\n${Kt}\n${t.vertexHead ?? ""}`), t.vertexPre && (n = n.replace("#include <begin_vertex>", `#include <begin_vertex>\n{\n${t.vertexPre}\n}`)), n = n.replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${qt}`), i = i.replace("#include <common>", `#include <common>\n${Kt}\n${Gt}\n${t.head ?? ""}`), i = i.replace("void main() {", "void main() {\nvec3 cgP = vCgWorld; vec3 cgN = normalize(vCgNormalW); vec3 cgO = vCgObj; float cgSeed = vCgSeed; vec3 cgBump = vec3(0.0); float cgAO = 1.0;"), t.color && (i = i.replace("#include <color_fragment>", `#include <color_fragment>\n{\n${t.color}\n}`)), t.roughness && (i = i.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\n{\n${t.roughness}\n}`)), t.metalness && (i = i.replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>\n{\n${t.metalness}\n}`)), t.normal && (i = i.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n{\n${t.normal}\n}\nnormal = normalize(normal + (viewMatrix * vec4(cgBump, 0.0)).xyz);`)), t.emissive && (i = i.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n{\n${t.emissive}\n}`)), t.ao && (i = i.replace("#include <aomap_fragment>", `#include <aomap_fragment>\n{\n${t.ao}\n}\nreflectedLight.indirectDiffuse *= cgAO; reflectedLight.indirectSpecular *= mix(1.0, cgAO, 0.7);`)), e.vertexShader = n, e.fragmentShader = i;
+		n = n.replace("#include <common>", `#include <common>\n${un}\n${t.vertexHead ?? ""}`), t.vertexPre && (n = n.replace("#include <begin_vertex>", `#include <begin_vertex>\n{\n${t.vertexPre}\n}`)), n = n.replace("#include <worldpos_vertex>", `#include <worldpos_vertex>\n${dn}`), i = i.replace("#include <common>", `#include <common>\n${un}\n${ln}\n${t.head ?? ""}`), i = i.replace("void main() {", "void main() {\nvec3 cgP = vCgWorld; vec3 cgN = normalize(vCgNormalW); vec3 cgO = vCgObj; float cgSeed = vCgSeed; vec3 cgBump = vec3(0.0); float cgAO = 1.0;"), t.color && (i = i.replace("#include <color_fragment>", `#include <color_fragment>\n{\n${t.color}\n}`)), t.roughness && (i = i.replace("#include <roughnessmap_fragment>", `#include <roughnessmap_fragment>\n{\n${t.roughness}\n}`)), t.metalness && (i = i.replace("#include <metalnessmap_fragment>", `#include <metalnessmap_fragment>\n{\n${t.metalness}\n}`)), t.normal && (i = i.replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n{\n${t.normal}\n}\nnormal = normalize(normal + (viewMatrix * vec4(cgBump, 0.0)).xyz);`)), t.emissive && (i = i.replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\n{\n${t.emissive}\n}`)), t.ao && (i = i.replace("#include <aomap_fragment>", `#include <aomap_fragment>\n{\n${t.ao}\n}\nreflectedLight.indirectDiffuse *= cgAO; reflectedLight.indirectSpecular *= mix(1.0, cgAO, 0.7);`)), e.vertexShader = n, e.fragmentShader = i;
 	}, n;
 }
-function Yt(e) {
+function pn(e) {
 	let t = 2166136261;
 	for (let n = 0; n < e.length; n++) t ^= e.charCodeAt(n), t = Math.imul(t, 16777619);
 	return (t >>> 0).toString(36);
 }
-function Xt(t, n, r, i = !0) {
+function mn(t, n, r, i = !0) {
 	let a = document.createElement("canvas");
 	a.width = t, a.height = n;
 	let o = a.getContext("2d");
@@ -2018,15 +2405,15 @@ function Xt(t, n, r, i = !0) {
 }
 //#endregion
 //#region src/gate-kit/world/materials.ts
-var Zt = new e.DataTexture(new Uint8Array([
+var hn = new e.DataTexture(new Uint8Array([
 	255,
 	255,
 	255,
 	255
 ]), 1, 1);
-Zt.needsUpdate = !0;
-function Qt(e = 0) {
-	return et("wood", e > .5) || Jt({
+hn.needsUpdate = !0;
+function gn(e = 0) {
+	return Ye("wood", e > .5) || fn({
 		name: e ? "timber-dark" : "timber",
 		params: {
 			color: 16777215,
@@ -2041,8 +2428,8 @@ function Qt(e = 0) {
 		normal: "\n      float e = 0.025;\n      float h0 = cgFbm2(vec2(cgP.x * 18.0, cgP.y * 1.1));\n      float hx = cgFbm2(vec2((cgP.x + e) * 18.0, cgP.y * 1.1));\n      float hz = cgFbm2(vec2(cgP.x * 18.0, (cgP.y + e) * 1.1));\n      cgBump = vec3(h0 - hx, h0 - hz, 0.0) * 1.5;\n    "
 	});
 }
-function $t() {
-	return et("plaster") || Jt({
+function _n() {
+	return Ye("plaster") || fn({
 		name: "plaster",
 		params: {
 			color: 16777215,
@@ -2051,8 +2438,8 @@ function $t() {
 		color: "\n      float n = cgFbm2(vec2(cgP.x * 0.9 + cgP.z * 0.9, cgP.y * 0.7));\n      float fine = cgNoise2(vec2(cgP.x * 8.0 + cgP.z * 4.0, cgP.y * 6.0));\n      vec3 c = mix(vec3(0.18, 0.13, 0.052), vec3(0.30, 0.215, 0.09), n * 0.8 + fine * 0.2);\n      // vertical rain wash and hairline cracks\n      float streak = smoothstep(0.6, 0.9, cgNoise2(vec2(cgP.x * 4.0 + cgP.z * 2.0, cgP.y * 0.15)));\n      c *= 1.0 - streak * 0.28;\n      float crack = smoothstep(0.7, 0.9, cgRidge2(vec2((cgP.x + cgP.z) * 5.0, cgP.y * 0.25)));\n      c *= 1.0 - crack * 0.3;\n      c = mix(c, vec3(0.30, 0.245, 0.16), (1.0 - smoothstep(0.35, 1.4, cgP.y - 0.35)) * 0.5);\n      float algae = smoothstep(0.4, 0.85, cgFbm2(vec2(cgP.x * 1.8 + cgP.z, cgP.y * 1.1) + 6.0));\n      c = mix(c, vec3(0.12, 0.15, 0.065), algae * (1.0 - smoothstep(0.3, 1.2, cgP.y - 0.3)) * 0.55);\n      diffuseColor.rgb = c;\n    "
 	});
 }
-function en() {
-	return Jt({
+function vn() {
+	return fn({
 		name: "cover-tile",
 		params: {
 			color: 16777215,
@@ -2065,8 +2452,8 @@ function en() {
 		color: "\n      float n = cgNoise2(cgP.xz * 3.0 + cgP.y * 2.0);\n      vec3 c = mix(vec3(0.07,0.072,0.074), vec3(0.15,0.152,0.155), n);\n      float moss = smoothstep(0.55, 0.8, cgFbm2(vec2(cgP.x * 0.9, cgP.z * 0.9) + 3.0));\n      c = mix(c, vec3(0.18,0.23,0.08), moss * 0.65);\n      c *= 0.85 + 0.25 * smoothstep(0.2, 1.0, cgN.y);\n      diffuseColor.rgb = c;\n    "
 	});
 }
-function tn() {
-	return Jt({
+function yn() {
+	return fn({
 		name: "gold",
 		params: {
 			color: 16777215,
@@ -2078,7 +2465,7 @@ function tn() {
 }
 //#endregion
 //#region src/world/surface_finish.ts
-function nn(t, n, r) {
+function bn(t, n, r) {
 	let i = t.getAttribute("position"), a = t.getAttribute("normal"), o = t.getAttribute("color");
 	t.computeBoundingBox();
 	let s = r ?? t.boundingBox.min.y, c = new Uint8Array(i.count * 3);
@@ -2096,15 +2483,15 @@ function nn(t, n, r) {
 	return t.setAttribute("color", new e.Uint8BufferAttribute(c, 3, !0)), t.userData.surfaceFinish = n, t;
 }
 //#endregion
-//#region ../scripts/lingyin_columns.js
-var rn = [
+//#region src/shared/lingyin_columns.js
+var xn = [
 	[-7.7, -4.75],
 	[7.7, -4.75],
 	[-7.7, -2],
 	[7.7, -2],
 	[-5.5, .5],
 	[5.5, .5]
-], an = [
+], Sn = [
 	{
 		role: "bronze",
 		rt: .79,
@@ -2137,11 +2524,11 @@ var rn = [
 		y: 9.19,
 		segments: 32
 	}
-], on = {
+], Cn = {
 	x: 0,
 	z: -.55,
 	scale: .66
-}, sn = [
+}, wn = [
 	[.43, 0],
 	[.72, .14],
 	[.92, .48],
@@ -2150,7 +2537,7 @@ var rn = [
 	[.74, .77],
 	[.66, .52],
 	[.3, .47]
-], cn = [
+], Tn = [
 	{
 		name: "backscreen",
 		role: "darkWood",
@@ -2249,7 +2636,7 @@ var rn = [
 		support: !1
 	}))
 ];
-function ln(e) {
+function En(e) {
 	let t = [], n = e.w / 2, r = e.d / 2, i = Math.max(3, Math.round(e.w / 3.4)), a = Math.max(2, Math.round(e.d / 3.6)), o = e.eave - e.plinth - .35;
 	for (let a of [-1, 1]) for (let s = 0; s <= i; s++) {
 		let c = -n + 1 + (e.w - 2) * s / i;
@@ -2268,7 +2655,7 @@ function ln(e) {
 }
 //#endregion
 //#region src/world/temple.ts
-var un = class {
+var Dn = class {
 	group = new e.Group();
 	materials;
 	enrichedSmallHalls;
@@ -2305,39 +2692,39 @@ var un = class {
 	};
 	constructor(t = {}) {
 		this.enrichedSmallHalls = t.enrichedSmallHalls === !0, this.group.name = t.onlyMainHall ? "temple-main-hall-only" : "temple";
-		let n = O.platform.y;
+		let n = j.platform.y;
 		this.materials = {
-			stone: R(.2),
-			floor: rt(),
-			wall: ht(),
+			stone: et(.2),
+			floor: Qe(),
+			wall: dt(),
 			paper: new e.MeshStandardMaterial({
 				color: 12958628,
-				map: tt(),
-				bumpMap: tt(),
+				map: Xe(),
+				bumpMap: Xe(),
 				bumpScale: .009,
 				roughness: .96,
 				metalness: 0,
 				side: e.DoubleSide
 			}),
-			gatePlaster: $t(),
-			wood: gt(!1),
-			woodDark: Qt(1),
-			dougong: bt(),
-			roof: st(),
-			mainRoof: ct(),
-			gateRoof: st(),
-			gold: _t(),
-			bronze: yt(),
-			lattice: gt(!0),
-			lantern: St(),
-			window: xt(),
-			mainStone: ut(),
-			mainWall: lt(),
-			mainWood: dt(!1),
-			mainWoodDark: dt(!0),
-			mainDougong: pt(),
-			mainLattice: dt(!0),
-			mainWindow: mt(),
+			gatePlaster: _n(),
+			wood: ft(!1),
+			woodDark: gn(1),
+			dougong: gt(),
+			roof: rt(),
+			mainRoof: it(),
+			gateRoof: rt(),
+			gold: pt(),
+			bronze: ht(),
+			lattice: ft(!0),
+			lantern: vt(),
+			window: _t(),
+			mainStone: ot(),
+			mainWall: at(),
+			mainWood: st(!1),
+			mainWoodDark: st(!0),
+			mainDougong: lt(),
+			mainLattice: st(!0),
+			mainWindow: ut(),
 			dark: new e.MeshStandardMaterial({
 				color: 2896429,
 				roughness: .95,
@@ -2355,7 +2742,7 @@ var un = class {
 			openFront: !0,
 			plaque: "靈隱寺"
 		})), this.buildHall({
-			...S,
+			...w,
 			eave: t.studyHallEave ?? 8,
 			rise: 5,
 			double: !0,
@@ -2390,10 +2777,10 @@ var un = class {
 		a && t.rotateY(a), t.translate(n, r, i), this.roles[e].push(t);
 	}
 	buildPlatform(e) {
-		let t = O.platform;
-		this.add("stone", M(2.2, .5, 1, t.x0, e - .05, 0, 0)), this.add("stone", M(2.2, .5, 1, t.x1, e - .05, 0, 0)), this.add("stone", M(t.x1 - t.x0 + 2.2, .5, 1.2, (t.x0 + t.x1) / 2, e - .05, t.z1)), this.add("stone", M(t.x1 - t.x0 + 2.2, .5, 1.2, (t.x0 + t.x1) / 2, e - .05, t.z0));
-		for (let n = 0; n < 6; n++) this.add("stone", M(9 - n * .25, .19, .5, -2, e - .2 - n * .19, t.z1 + .6 + n * .48));
-		for (let n = 0; n < 5; n++) this.add("stone", M(.55, .2, 5.2, t.x1 + .4 + n * .5, e - .2 - n * .2, 28));
+		let t = j.platform;
+		this.add("stone", B(2.2, .5, 1, t.x0, e - .05, 0, 0)), this.add("stone", B(2.2, .5, 1, t.x1, e - .05, 0, 0)), this.add("stone", B(t.x1 - t.x0 + 2.2, .5, 1.2, (t.x0 + t.x1) / 2, e - .05, t.z1)), this.add("stone", B(t.x1 - t.x0 + 2.2, .5, 1.2, (t.x0 + t.x1) / 2, e - .05, t.z0));
+		for (let n = 0; n < 6; n++) this.add("stone", B(9 - n * .25, .19, .5, -2, e - .2 - n * .19, t.z1 + .6 + n * .48));
+		for (let n = 0; n < 5; n++) this.add("stone", B(.55, .2, 5.2, t.x1 + .4 + n * .5, e - .2 - n * .2, 28));
 	}
 	balustrade(e, t, n, r, i, a = !1) {
 		let o = Math.abs(t - e);
@@ -2401,9 +2788,9 @@ var un = class {
 		let s = Math.max(2, Math.round(o / 2.4));
 		for (let a = 0; a <= s; a++) {
 			let c = a / s, l = e + (t - e) * c, u = i === "x" ? l : n, d = i === "x" ? n : l;
-			if (this.add("stone", M(.24, .95, .24, u, r + .475, d)), this.add("stone", M(.34, .12, .34, u, r + .98, d)), a < s) {
+			if (this.add("stone", B(.24, .95, .24, u, r + .475, d)), this.add("stone", B(.34, .12, .34, u, r + .98, d)), a < s) {
 				let c = (a + .5) / s, l = e + (t - e) * c, u = i === "x" ? l : n, d = i === "x" ? n : l, f = i === "x" ? o / s : .14, p = i === "x" ? .14 : o / s;
-				this.add("stone", M(f, .16, p, u, r + .74, d));
+				this.add("stone", B(f, .16, p, u, r + .74, d));
 			}
 		}
 	}
@@ -2443,27 +2830,27 @@ var un = class {
 			window: "mainWindow",
 			roof: "mainRoof"
 		}, l = (e) => s && t.name === "main" ? c[e] ?? e : e, u = (e, t) => o[l(e)].push(t);
-		u("stone", M(t.w + 2.4, t.plinth + .25, t.d + 2.4, 0, (t.plinth + .25) / 2, 0)), u("stone", M(t.w + 2.9, .16, t.d + 2.9, 0, .1, 0));
-		for (let e = 0; e < 5; e++) u("stone", M(5, .16, .42, 0, .16 + e * .16, a + 1.35 + (4 - e) * .4 + (t.plinth - .8) * .25)), t.name === "gate" && u("stone", M(5, .16, .42, 0, .16 + e * .16, -a - 1.35 - (4 - e) * .4));
+		u("stone", B(t.w + 2.4, t.plinth + .25, t.d + 2.4, 0, (t.plinth + .25) / 2, 0)), u("stone", B(t.w + 2.9, .16, t.d + 2.9, 0, .1, 0));
+		for (let e = 0; e < 5; e++) u("stone", B(5, .16, .42, 0, .16 + e * .16, a + 1.35 + (4 - e) * .4 + (t.plinth - .8) * .25)), t.name === "gate" && u("stone", B(5, .16, .42, 0, .16 + e * .16, -a - 1.35 - (4 - e) * .4));
 		let d = r - .35;
-		for (let e of ln(t)) this.column(o, e.x, .25, e.z, e.height, l);
-		let f = n ? 3.55 : d - .4, p = .3, m = .25 + f / 2, h = 1.35, g = (e, n, r, i) => u("stone", M(e + .04, .22, n + .085, r, t.plinth + .3, i));
+		for (let e of En(t)) this.column(o, e.x, .25, e.z, e.height, l);
+		let f = n ? 3.55 : d - .4, p = .3, m = .25 + f / 2, h = 1.35, g = (e, n, r, i) => u("stone", B(e + .04, .22, n + .085, r, t.plinth + .3, i));
 		if (t.openFront) {
 			let e = i - 2.05;
-			for (let t of [-1, 1]) u("wall", M(3.8, f, p, t * e, m, a - h)), g(3.8, p, t * e, a - h);
+			for (let t of [-1, 1]) u("wall", B(3.8, f, p, t * e, m, a - h)), g(3.8, p, t * e, a - h);
 		} else {
 			let e = t.name === "main" ? 5.4 : t.name === "rear" ? 4.6 : 3.4, n = (t.w - h * 2 - e) / 2;
-			u("wall", M(n, f, p, -(e / 2 + n / 2), m, a - h)), u("wall", M(n, f, p, e / 2 + n / 2, m, a - h)), g(n, p, -(e / 2 + n / 2), a - h), g(n, p, e / 2 + n / 2, a - h), t.name === "main" && t.studyFacade || u("wood", M(e + .3, .35, p + .1, 0, .25 + f, a - h));
+			u("wall", B(n, f, p, -(e / 2 + n / 2), m, a - h)), u("wall", B(n, f, p, e / 2 + n / 2, m, a - h)), g(n, p, -(e / 2 + n / 2), a - h), g(n, p, e / 2 + n / 2, a - h), t.name === "main" && t.studyFacade || u("wood", B(e + .3, .35, p + .1, 0, .25 + f, a - h));
 		}
 		if (t.openFront || t.name === "west") {
 			let e = t.name === "west" ? 3.4 : 4.6, n = (t.w - h * 2 - e) / 2;
-			for (let t of [-1, 1]) u("wall", M(n, f, p, t * (e / 2 + n / 2), m, -a + h));
+			for (let t of [-1, 1]) u("wall", B(n, f, p, t * (e / 2 + n / 2), m, -a + h));
 			for (let t of [-1, 1]) g(n, p, t * (e / 2 + n / 2), -a + h);
-			u("wood", M(e + .3, .35, .42, 0, .25 + f, -a + h));
-		} else u("wall", M(t.w - h * 2, f, p, 0, m, -a + h)), g(t.w - h * 2, p, 0, -a + h);
+			u("wood", B(e + .3, .35, .42, 0, .25 + f, -a + h));
+		} else u("wall", B(t.w - h * 2, f, p, 0, m, -a + h)), g(t.w - h * 2, p, 0, -a + h);
 		for (let e of [-1, 1]) {
-			u("wall", M(p, f, t.d - h * 2, e * (i - h), m, 0)), g(p, t.d - h * 2, e * (i - h), 0);
-			let n = Math.min(1.7, f * .5), r = Re(Math.min(3.4, t.d * .32), n, .22, .05, .02);
+			u("wall", B(p, f, t.d - h * 2, e * (i - h), m, 0)), g(p, t.d - h * 2, e * (i - h), 0);
+			let n = Math.min(1.7, f * .5), r = Me(Math.min(3.4, t.d * .32), n, .22, .05, .02);
 			r.bars.rotateY(e * Math.PI / 2), r.backing.rotateY(e * Math.PI / 2), r.bars.translate(e * (i - h + .18), m + .15, 0), r.backing.translate(e * (i - h + .1), m + .15, 0), u("lattice", r.bars), u("window", r.backing);
 		}
 		if (!t.openFront) {
@@ -2471,11 +2858,11 @@ var un = class {
 			for (let n of s) {
 				let s = -i + 1.1 + r * (n + .5), c = r - .35, l = Math.min(f - .55, 3.5);
 				if (n === o) {
-					u("gold", M(.16, l, .2, s - c / 2 - .1, .25 + l / 2, a - h + .2)), u("gold", M(.16, l, .2, s + c / 2 + .1, .25 + l / 2, a - h + .2)), t.name === "main" && t.studyFacade || u("gold", M(c + .2, .18, .2, s, .25 + l + .12, a - h + .2));
+					u("gold", B(.16, l, .2, s - c / 2 - .1, .25 + l / 2, a - h + .2)), u("gold", B(.16, l, .2, s + c / 2 + .1, .25 + l / 2, a - h + .2)), t.name === "main" && t.studyFacade || u("gold", B(c + .2, .18, .2, s, .25 + l + .12, a - h + .2));
 					continue;
 				}
-				let d = Re(c, l, .17, .055, a - h + .18);
-				d.bars.translate(s, 0, 0), d.backing.translate(s, 0, 0), u("lattice", d.bars), u("woodDark", d.backing), u("wood", M(c + .18, .16, .24, s, .25 + l + .1, a - h + .18)), u("wood", M(.16, l + .2, .24, s - c / 2 - .09, .25 + l / 2, a - h + .18)), u("wood", M(.16, l + .2, .24, s + c / 2 + .09, .25 + l / 2, a - h + .18)), u("woodDark", M(c, l * .34, .1, s, .25 + l * .17, a - h + .1));
+				let d = Me(c, l, .17, .055, a - h + .18);
+				d.bars.translate(s, 0, 0), d.backing.translate(s, 0, 0), u("lattice", d.bars), u("woodDark", d.backing), u("wood", B(c + .18, .16, .24, s, .25 + l + .1, a - h + .18)), u("wood", B(.16, l + .2, .24, s - c / 2 - .09, .25 + l / 2, a - h + .18)), u("wood", B(.16, l + .2, .24, s + c / 2 + .09, .25 + l / 2, a - h + .18)), u("woodDark", B(c, l * .34, .1, s, .25 + l * .17, a - h + .1));
 				for (let t = -2; t <= 2; t++) for (let n = 0; n < 2; n++) u("gold", new e.SphereGeometry(.035, 6, 4).translate(s + t * .62, 1 + n * .32, a - h + .06));
 			}
 		}
@@ -2483,14 +2870,14 @@ var un = class {
 			let e = .45, n = t.w / 2 + 1.2, r = t.d / 2 + 1.45;
 			for (let t = 0; t <= 14; t++) {
 				let i = -n + 2 * n * t / 14;
-				Math.abs(i) < 3.6 || (u("stone", M(.24, .9, .24, i, e + .45, r)), u("stone", M(.26, .1, .26, i, e + .92, r)));
+				Math.abs(i) < 3.6 || (u("stone", B(.24, .9, .24, i, e + .45, r)), u("stone", B(.26, .1, .26, i, e + .92, r)));
 			}
 			for (let t = 0; t <= 10; t++) {
 				let i = -r + 2 * r * t / 10;
-				for (let t of [-1, 1]) u("stone", M(.24, .9, .24, t * n, e + .45, i)), u("stone", M(.26, .1, .26, t * n, e + .92, i));
+				for (let t of [-1, 1]) u("stone", B(.24, .9, .24, t * n, e + .45, i)), u("stone", B(.26, .1, .26, t * n, e + .92, i));
 			}
-			for (let t of [-1, 1]) u("stone", M(.16, .16, 2 * r, t * n, e + .8, 0));
-			for (let t of [-1, 1]) u("stone", M(n - 3.6, .16, .16, t * (n + 3.6) / 2, e + .8, r));
+			for (let t of [-1, 1]) u("stone", B(.16, .16, 2 * r, t * n, e + .8, 0));
+			for (let t of [-1, 1]) u("stone", B(n - 3.6, .16, .16, t * (n + 3.6) / 2, e + .8, r));
 		}
 		if (s = !1, !(this.enrichedSmallHalls && [
 			"west",
@@ -2500,12 +2887,12 @@ var un = class {
 			let o = t.w - h * 2 - .55, s = t.d - h * 2 - .55, c = t.plinth + .25, l = 1.35, d = Math.floor(o / l), f = Math.floor(s / l);
 			for (let e = 0; e < f; e++) for (let t = 0; t < d; t++) {
 				let n = -o / 2 + (t + .5) * o / d, r = -s / 2 + (e + .5) * s / f, i = (t * 11 + e * 7) % 7 * .002;
-				u("floor", it(M(o / d - .018, .045, s / f - .018, n, c + .005 + i, r), .82 + (t * 13 + e * 7) % 11 * .022));
+				u("floor", $e(B(o / d - .018, .045, s / f - .018, n, c + .005 + i, r), .82 + (t * 13 + e * 7) % 11 * .022));
 			}
 			for (let e of [-1, 1]) {
-				u("woodDark", M(.11, .44, s, e * o / 2, c + .22, 0)), u("bronze", M(.025, .035, s, e * o / 2, c + .45, 0));
+				u("woodDark", B(.11, .44, s, e * o / 2, c + .22, 0)), u("bronze", B(.025, .035, s, e * o / 2, c + .45, 0));
 				for (let t of [-s * .24, s * .24]) {
-					let n = Re(Math.min(2.5, s * .32), 2.1, .26, .055, 0);
+					let n = Me(Math.min(2.5, s * .32), 2.1, .26, .055, 0);
 					n.bars.rotateY(Math.PI / 2), n.backing.rotateY(Math.PI / 2), n.bars.translate(e * (i - h - .23), c + .77, t), n.backing.translate(e * (i - h - .27), c + .77, t), u("lattice", n.bars), u("paper", n.backing);
 				}
 			}
@@ -2513,35 +2900,35 @@ var un = class {
 				let n = t.name === "main" ? 5.4 : t.name === "rear" || t.name === "gate" ? 4.6 : 3.4, r = (o - n) / 2;
 				for (let t of [-1, 1]) {
 					let i = t * (n / 2 + r / 2);
-					u("woodDark", M(r, .44, .11, i, c + .22, e)), u("bronze", M(r, .035, .025, i, c + .45, e));
+					u("woodDark", B(r, .44, .11, i, c + .22, e)), u("bronze", B(r, .035, .025, i, c + .45, e));
 				}
-			} else u("woodDark", M(o, .44, .11, 0, c + .22, e)), u("bronze", M(o, .035, .025, 0, c + .45, e));
+			} else u("woodDark", B(o, .44, .11, 0, c + .22, e)), u("bronze", B(o, .035, .025, 0, c + .45, e));
 			let p = Math.max(c + 2.9, r - .35);
 			for (let e = 0; !n && e < Math.max(2, Math.floor(s / 3.4)); e++) {
 				let t = -s / 2 + (e + .5) * s / Math.max(2, Math.floor(s / 3.4));
-				u("wood", M(o + .2, .2, .24, 0, p, t));
-				for (let e of [-o / 3, o / 3]) u("dougong", M(.4, .32, .4, e, p - .25, t));
+				u("wood", B(o + .2, .2, .24, 0, p, t));
+				for (let e of [-o / 3, o / 3]) u("dougong", B(.4, .32, .4, e, p - .25, t));
 			}
 			if (t.name !== "gate" && t.name !== "main" && t.name !== "west") {
 				let t = -a + 2.7, n = Math.min(5.5, o * .62);
-				u("woodDark", M(n, .16, 1.22, 0, c + .93, t)), u("bronze", M(n + .12, .07, 1.3, 0, c + 1.04, t)), u("woodDark", M(n - .35, .13, 1.05, 0, c + .26, t));
+				u("woodDark", B(n, .16, 1.22, 0, c + .93, t)), u("bronze", B(n + .12, .07, 1.3, 0, c + 1.04, t)), u("woodDark", B(n - .35, .13, 1.05, 0, c + .26, t));
 				for (let e of [-1, 1]) for (let r of [-1, 1]) {
 					let i = e * (n / 2 - .24), a = t + r * .42;
-					u("wood", M(.22, .78, .22, i, c + .45, a)), u("bronze", M(.24, .06, .24, i, c + .83, a));
+					u("wood", B(.22, .78, .22, i, c + .45, a)), u("bronze", B(.24, .06, .24, i, c + .83, a));
 				}
-				u("gold", M(n - .4, .055, .055, 0, c + .73, t + .59)), u("wood", M(n + .3, 2.7, .22, 0, c + 2.35, t - .72)), u("gold", N(.5, .58, .13, 20, 0, c + 1.2, t)), u("gold", N(.34, .51, .63, 20, 0, c + 1.58, t)), u("gold", new e.SphereGeometry(.29, 18, 14).translate(0, c + 2.03, t)), u("gold", new e.TorusGeometry(.44, .045, 8, 28).translate(0, c + 1.99, t - .24));
-				for (let r of [-1, 1]) u("bronze", N(.085, .11, .55, 10, r * Math.min(1.75, n * .32), c + 1.24, t + .1)), u("lantern", new e.SphereGeometry(.12, 10, 8).translate(r * Math.min(1.75, n * .32), c + 1.56, t + .1));
+				u("gold", B(n - .4, .055, .055, 0, c + .73, t + .59)), u("wood", B(n + .3, 2.7, .22, 0, c + 2.35, t - .72)), u("gold", V(.5, .58, .13, 20, 0, c + 1.2, t)), u("gold", V(.34, .51, .63, 20, 0, c + 1.58, t)), u("gold", new e.SphereGeometry(.29, 18, 14).translate(0, c + 2.03, t)), u("gold", new e.TorusGeometry(.44, .045, 8, 28).translate(0, c + 1.99, t - .24));
+				for (let r of [-1, 1]) u("bronze", V(.085, .11, .55, 10, r * Math.min(1.75, n * .32), c + 1.24, t + .1)), u("lantern", new e.SphereGeometry(.12, 10, 8).translate(r * Math.min(1.75, n * .32), c + 1.56, t + .1));
 				for (let e of [-1, 1]) {
 					let r = e * n * .34;
-					u("bronze", N(.14, .22, .28, 12, r, c + 1.2, t + .3));
-					for (let e = 0; e < 3; e++) u("woodDark", N(.012, .015, .55 + e * .08, 6, r + (e - 1) * .045, c + 1.56, t + .3));
+					u("bronze", V(.14, .22, .28, 12, r, c + 1.2, t + .3));
+					for (let e = 0; e < 3; e++) u("woodDark", V(.012, .015, .55 + e * .08, 6, r + (e - 1) * .045, c + 1.56, t + .3));
 				}
 			}
 		}
 		if (s = !0, !n) {
-			u("wood", M(t.w + .4, .42, .42, 0, r - .2, a - .9)), u("wood", M(t.w + .4, .42, .42, 0, r - .2, -a + .9));
-			for (let e of [-1, 1]) u("wood", M(.42, .42, t.d - 1.6, e * (i - .9), r - .2, 0));
-			u("wood", M(t.w + 1.4, .34, .7, 0, r + .05, a - .3)), u("wood", M(t.w + 1.4, .34, .7, 0, r + .05, -a + .3));
+			u("wood", B(t.w + .4, .42, .42, 0, r - .2, a - .9)), u("wood", B(t.w + .4, .42, .42, 0, r - .2, -a + .9));
+			for (let e of [-1, 1]) u("wood", B(.42, .42, t.d - 1.6, e * (i - .9), r - .2, 0));
+			u("wood", B(t.w + 1.4, .34, .7, 0, r + .05, a - .3)), u("wood", B(t.w + 1.4, .34, .7, 0, r + .05, -a + .3));
 			let n = this.dougongCluster(), o = Math.max(3, Math.round(t.w / 2.3));
 			for (let e = 0; e <= o; e++) {
 				let s = -i + .9 + (t.w - 1.8) * e / o;
@@ -2562,7 +2949,7 @@ var un = class {
 			for (let e = 0; e <= c; e++) {
 				let n = -i - .8 + (t.w + 1.6) * e / c;
 				for (let t of [-1, 1]) {
-					let i = M(.1, .12, 1.45, n, r + .02, t * (a + .45));
+					let i = B(.1, .12, 1.45, n, r + .02, t * (a + .45));
 					i.rotateX(.12 * t), u(e % 2 ? "wood" : "dougong", i);
 				}
 			}
@@ -2570,19 +2957,19 @@ var un = class {
 			for (let e = 0; e <= l; e++) {
 				let n = -a - .8 + (t.d + 1.6) * e / l;
 				for (let t of [-1, 1]) {
-					let a = M(1.45, .12, .1, t * (i + .45), r + .02, n);
+					let a = B(1.45, .12, .1, t * (i + .45), r + .02, n);
 					a.rotateZ(-.12 * t), u(e % 2 ? "wood" : "dougong", a);
 				}
 			}
 			let d = Math.max(2, Math.round(t.w / 6));
 			for (let n = 0; n <= d; n++) {
 				let o = -i + 1.4 + (t.w - 2.8) * n / d, s = r - 1.05, c = a + .15, l = new e.SphereGeometry(.17, 10, 8);
-				l.scale(1, 1.18, 1), l.translate(o, s, c), u("lantern", l), u("gold", N(.09, .09, .08, 8, o, s + .3, c)), u("gold", N(.09, .09, .08, 8, o, s - .3, c)), u("gold", N(.012, .012, .55, 4, o, s + .6, c));
+				l.scale(1, 1.18, 1), l.translate(o, s, c), u("lantern", l), u("gold", V(.09, .09, .08, 8, o, s + .3, c)), u("gold", V(.09, .09, .08, 8, o, s - .3, c)), u("gold", V(.012, .012, .55, 4, o, s + .6, c));
 			}
 		}
 		if (n) {
 			let e = 9.1, n = r + .16;
-			u("gateRoof", Fe({
+			u("gateRoof", ke({
 				w: e,
 				d: t.d,
 				eaveY: n,
@@ -2591,18 +2978,18 @@ var un = class {
 				overhang: 1.25,
 				nu: 34,
 				nv: 14
-			})), this.ridgeAndTips(o, e, t.d, n + 3.05, n), u("wood", M(8.9, .14, t.d + .35, 0, r - .1, 0));
+			})), this.ridgeAndTips(o, e, t.d, n + 3.05, n), u("wood", B(8.9, .14, t.d + .35, 0, r - .1, 0));
 			for (let e of [
 				-3.45,
 				-1.72,
 				0,
 				1.72,
 				3.45
-			]) u("woodDark", M(8.9, .2, .24, 0, r - .28, e));
-			for (let e of [-3.65, 3.65]) u("woodDark", M(.22, .2, t.d + .35, e, r - .28, 0));
-			u("woodDark", M(8.9, 2.1, .32, 0, r - 1.07, -a + 1.35));
+			]) u("woodDark", B(8.9, .2, .24, 0, r - .28, e));
+			for (let e of [-3.65, 3.65]) u("woodDark", B(.22, .2, t.d + .35, e, r - .28, 0));
+			u("woodDark", B(8.9, 2.1, .32, 0, r - 1.07, -a + 1.35));
 			for (let e of [-1, 1]) {
-				let n = Fe({
+				let n = ke({
 					w: 5.6,
 					d: t.d,
 					eaveY: 3.84,
@@ -2612,16 +2999,16 @@ var un = class {
 					nu: 24,
 					nv: 11
 				});
-				n.translate(e * 5.15, 0, 0), u("gateRoof", n), u("woodDark", M(6.1, .28, .42, e * 5.15, 3.62, a - .25)), u("woodDark", M(6.1, .28, .42, e * 5.15, 3.62, -a + .25));
+				n.translate(e * 5.15, 0, 0), u("gateRoof", n), u("woodDark", B(6.1, .28, .42, e * 5.15, 3.62, a - .25)), u("woodDark", B(6.1, .28, .42, e * 5.15, 3.62, -a + .25));
 			}
 			for (let e of [-1, 1]) {
-				for (let t of [-a + .82, a - .82]) u("woodDark", M(.62, r - .35, .7, e * 3.22, (r - .35) / 2 + .25, t));
-				u("dougong", M(1.22, .29, 1.55, e * 3.22, r - .25, a - .25));
+				for (let t of [-a + .82, a - .82]) u("woodDark", B(.62, r - .35, .7, e * 3.22, (r - .35) / 2 + .25, t));
+				u("dougong", B(1.22, .29, 1.55, e * 3.22, r - .25, a - .25));
 			}
-			u("woodDark", M(8.9, .7, .7, 0, r - .63, a - .35)), u("wood", M(9.5, .3, .62, 0, r + .02, a - .3)), u("wood", M(9.5, .3, .62, 0, r + .02, -a + .3)), u("bronze", M(8.75, .05, .75, 0, r - .27, a - .35));
+			u("woodDark", B(8.9, .7, .7, 0, r - .63, a - .35)), u("wood", B(9.5, .3, .62, 0, r + .02, a - .3)), u("wood", B(9.5, .3, .62, 0, r + .02, -a + .3)), u("bronze", B(8.75, .05, .75, 0, r - .27, a - .35));
 		} else if (t.double) {
 			let e = t.name === "main" ? "mainRoof" : "roof";
-			u(e, Ie({
+			u(e, Ae({
 				wOuter: t.w + 3.4,
 				dOuter: t.d + 3.4,
 				wInner: t.w - 1.2,
@@ -2633,15 +3020,15 @@ var un = class {
 				nv: 8
 			}));
 			let n = r + 3;
-			u("wall", M(t.w - 2.2, 3, t.d - 2.2, 0, r + 1.5, 0));
-			for (let e = 0; e <= 12; e++) u("wood", M(.1, .7, .1, -i + 1.2 + (t.w - 2.4) * e / 12, r + .55, a - 1.05));
-			u("wood", M(t.w - 2.4, .12, .14, 0, r + .9, a - 1.05));
+			u("wall", B(t.w - 2.2, 3, t.d - 2.2, 0, r + 1.5, 0));
+			for (let e = 0; e <= 12; e++) u("wood", B(.1, .7, .1, -i + 1.2 + (t.w - 2.4) * e / 12, r + .55, a - 1.05));
+			u("wood", B(t.w - 2.4, .12, .14, 0, r + .9, a - 1.05));
 			for (let e = 0; e < 5; e++) {
-				let n = -i + 1.6 + (t.w - 3.2) * (e + .5) / 5, o = Re((t.w - 3.2) / 5 - .25, 1.4, .24, .07, a - .95);
+				let n = -i + 1.6 + (t.w - 3.2) * (e + .5) / 5, o = Me((t.w - 3.2) / 5 - .25, 1.4, .24, .07, a - .95);
 				o.bars.translate(n, r + 1.55, 0), o.backing.translate(n, r + 1.55, 0), u("lattice", o.bars), u("window", o.backing);
-				for (let e = 0; e <= 4; e++) u("wood", M(.08, 1.4, .12, n - (t.w - 3.2) / 10 + e * ((t.w - 3.2) / 20), r + 1.55 + .7, a - .88));
+				for (let e = 0; e <= 4; e++) u("wood", B(.08, 1.4, .12, n - (t.w - 3.2) / 10 + e * ((t.w - 3.2) / 20), r + 1.55 + .7, a - .88));
 			}
-			u("wood", M(t.w + .6, .35, .5, 0, n, a - .7)), u("wood", M(t.w + .6, .35, .5, 0, n, -a + .7)), u(e, Fe({
+			u("wood", B(t.w + .6, .35, .5, 0, n, a - .7)), u("wood", B(t.w + .6, .35, .5, 0, n, -a + .7)), u(e, ke({
 				w: t.w - 1.4,
 				d: t.d - 1.4,
 				eaveY: n + .2,
@@ -2651,7 +3038,7 @@ var un = class {
 				nu: 38,
 				nv: 16
 			})), this.ridgeAndTips(o, t.w - 1.4, t.d - 1.4, n + .2 + t.rise + .4, n + .2, e);
-		} else u("roof", Fe({
+		} else u("roof", ke({
 			w: t.w,
 			d: t.d,
 			eaveY: r + .15,
@@ -2699,21 +3086,21 @@ var un = class {
 		}
 		for (let t of n ? [] : [-1, 1]) for (let n of [-1, 1]) {
 			let o = 1.15;
-			u("bronze", N(.14, .2, .5, 8, t * (i + o), r - .55, n * (a + o))), u("bronze", new e.SphereGeometry(.09, 8, 6).translate(t * (i + o), r - .85, n * (a + o)));
+			u("bronze", V(.14, .2, .5, 8, t * (i + o), r - .55, n * (a + o))), u("bronze", new e.SphereGeometry(.09, 8, 6).translate(t * (i + o), r - .85, n * (a + o)));
 		}
 		if (n) {
 			for (let e of [-1, 1]) {
 				let t = e * (i - 2.2), n = a - h + .23;
-				u("gatePlaster", M(2.42, 2.57, .045, t, 2.02, n - .08));
-				let r = Re(1.64, 1.67, .21, .065, n + .05);
+				u("gatePlaster", B(2.42, 2.57, .045, t, 2.02, n - .08));
+				let r = Me(1.64, 1.67, .21, .065, n + .05);
 				r.bars.translate(t, 1.25, 0), r.backing.translate(t, 1.25, 0), u("lattice", r.bars), u("woodDark", r.backing);
-				for (let e of [-1.23, 1.23]) u("woodDark", M(.13, 2.72, .16, t + e, 1.98, n + .025));
-				for (let e of [.63, 3.34]) u("woodDark", M(2.58, .13, .16, t, e, n + .025));
+				for (let e of [-1.23, 1.23]) u("woodDark", B(.13, 2.72, .16, t + e, 1.98, n + .025));
+				for (let e of [.63, 3.34]) u("woodDark", B(2.58, .13, .16, t, e, n + .025));
 			}
-			u("woodDark", M(8.9, .5, .22, 0, r - 1.06, a + .3));
+			u("woodDark", B(8.9, .5, .22, 0, r - 1.06, a + .3));
 		}
 		if (t.plaque) {
-			let n = t.name === "gate" || t.name === "main" ? Ye(t.name) : void 0, i = n ?? ze(t.plaque, 512, 150, {
+			let n = t.name === "gate" || t.name === "main" ? We(t.name) : void 0, i = n ?? Ne(t.plaque, 512, 150, {
 				bg: "#17130f",
 				fg: "#d9b46b",
 				border: "#7b5a2a"
@@ -2730,33 +3117,33 @@ var un = class {
 				emissive: new e.Color("#3a2a12"),
 				emissiveIntensity: .18
 			}), s = t.name === "main" && t.studyFacade, c = t.name === "gate" ? 1.18 : 1.45, l = s ? r + 2.03 : .25 + Math.min(f - .55, 3.5) + c, d = s ? a - .71 : a + (t.name === "gate" ? .62 : -.35), p = s ? 5.5 : 4.2, m = s ? 1.52 : 1.2, h = new e.Mesh(new e.PlaneGeometry(p, m), o);
-			if (h.position.set(t.x, O.platform.y + l, t.z + d), h.castShadow = !1, h.name = `plaque-${t.name}`, this.group.add(h), s) {
-				u("woodDark", M(p + .36, m + .3, .17, 0, l, d - .16));
-				for (let e of [-1, 1]) u("gold", M(p + .34, .055, .05, 0, l + e * (m / 2 + .11), d - .055)), u("gold", M(.055, m + .22, .05, e * (p / 2 + .12), l, d - .055));
-			} else u("gold", M(4.5, 1.45, .16, 0, l, a + (t.name === "gate" ? .48 : -.48)));
+			if (h.position.set(t.x, j.platform.y + l, t.z + d), h.castShadow = !1, h.name = `plaque-${t.name}`, this.group.add(h), s) {
+				u("woodDark", B(p + .36, m + .3, .17, 0, l, d - .16));
+				for (let e of [-1, 1]) u("gold", B(p + .34, .055, .05, 0, l + e * (m / 2 + .11), d - .055)), u("gold", B(.055, m + .22, .05, e * (p / 2 + .12), l, d - .055));
+			} else u("gold", B(4.5, 1.45, .16, 0, l, a + (t.name === "gate" ? .48 : -.48)));
 		}
 		let _ = t.rotY ?? 0, v = Math.cos(_), y = Math.sin(_);
-		for (let e of Object.keys(o)) for (let n of o[e]) _ && n.rotateY(_), n.translate(t.x, O.platform.y, t.z), this.roles[e].push(n);
+		for (let e of Object.keys(o)) for (let n of o[e]) _ && n.rotateY(_), n.translate(t.x, j.platform.y, t.z), this.roles[e].push(n);
 		let b = this.enrichedSmallHalls && [
 			"west",
 			"east",
 			"rear"
 		].includes(t.name ?? ""), x = new e.PointLight(b ? 16768432 : 16758647, t.name === "main" ? 6 : n ? 4.4 : b ? t.name === "rear" ? 14 : 10 : 2.8, t.name === "main" ? 18 : n ? 12 : b ? 13 : 10, 2);
-		x.name = `temple-${t.name}-existing-room-light`, x.position.set(t.x, O.platform.y + (n ? 4.1 : b ? r - .88 : Math.max(3.2, t.plinth + 2.3)), t.z), this.group.add(x), this.anchors.eaves.push(new e.Vector3(t.x + y * (a + 1), O.platform.y + r, t.z + v * (a + 1))), t.name === "main" && this.anchors.door.set(t.x, O.platform.y + 1.6, t.z + a + 1.5);
+		x.name = `temple-${t.name}-existing-room-light`, x.position.set(t.x, j.platform.y + (n ? 4.1 : b ? r - .88 : Math.max(3.2, t.plinth + 2.3)), t.z), this.group.add(x), this.anchors.eaves.push(new e.Vector3(t.x + y * (a + 1), j.platform.y + r, t.z + v * (a + 1))), t.name === "main" && this.anchors.door.set(t.x, j.platform.y + 1.6, t.z + a + 1.5);
 	}
 	column(e, t, n, r, i, a = (e) => e) {
-		e[a("stone")].push(N(.4, .46, .24, 10, t, n + .06, r)), e[a("wood")].push(N(.27, .33, i - .24, 12, t, n + .24 + (i - .24) / 2, r)), e.gold.push(N(.31, .31, .08, 12, t, n + i - .16, r)), e.bronze.push(N(.33, .33, .05, 12, t, n + .36, r));
+		e[a("stone")].push(V(.4, .46, .24, 10, t, n + .06, r)), e[a("wood")].push(V(.27, .33, i - .24, 12, t, n + .24 + (i - .24) / 2, r)), e.gold.push(V(.31, .31, .08, 12, t, n + i - .16, r)), e.bronze.push(V(.33, .33, .05, 12, t, n + .36, r));
 	}
 	dougongCluster() {
 		let e = [];
-		return e.push(M(.42, .36, .42, 0, .18, 0)), e.push(M(1.5, .2, .3, 0, .46, 0)), e.push(M(.3, .2, 1.1, 0, .46, .2)), e.push(M(.46, .22, .46, -.45, .67, 0)), e.push(M(.46, .22, .46, 0, .67, 0)), e.push(M(.46, .22, .46, .45, .67, 0)), e.push(M(.22, .2, .9, 0, .67, 0)), P(e);
+		return e.push(B(.42, .36, .42, 0, .18, 0)), e.push(B(1.5, .2, .3, 0, .46, 0)), e.push(B(.3, .2, 1.1, 0, .46, .2)), e.push(B(.46, .22, .46, -.45, .67, 0)), e.push(B(.46, .22, .46, 0, .67, 0)), e.push(B(.46, .22, .46, .45, .67, 0)), e.push(B(.22, .2, .9, 0, .67, 0)), H(e);
 	}
 	ridgeAndTips(t, n, r, i, a, o = "roof") {
 		let s = n * .52 / 2;
-		t[o].push(M(s * 2 + .6, .42, .42, 0, i + .18, 0));
+		t[o].push(B(s * 2 + .6, .42, .42, 0, i + .18, 0));
 		for (let e of [-1, 1]) {
-			t[o].push(M(.34, 1.15, .4, e * (s + .35), i + .55, 0));
-			let n = M(.28, .9, .34, e * (s + .55), i + 1.05, .1);
+			t[o].push(B(.34, 1.15, .4, e * (s + .35), i + .55, 0));
+			let n = B(.28, .9, .34, e * (s + .55), i + 1.05, .1);
 			n.rotateZ(-e * .35), t[o].push(n);
 		}
 		let c = n / 2 + 1.15, l = r / 2 + 1.15;
@@ -2768,47 +3155,47 @@ var un = class {
 		}
 		let u = n / 2 + 1.15, d = r / 2 + 1.15;
 		for (let n of [-1, 1]) for (let r of [-1, 1]) {
-			let i = N(.05, .2, 1.15, 6, 0, 0, 0);
+			let i = V(.05, .2, 1.15, 6, 0, 0, 0);
 			i.rotateZ(-n * .55), i.rotateX(r * .3), i.translate(n * u, a + .45, r * d), t[o].push(i), t.gold.push(new e.SphereGeometry(.11, 8, 6).translate(n * u, a + .95, r * d));
 		}
 	}
 	buildPagoda(t, n, r) {
-		this.addAt("stone", N(3.1, 3.4, .7, 8), t, r + .35, n);
+		this.addAt("stone", V(3.1, 3.4, .7, 8), t, r + .35, n);
 		let i = r + .7, a = 2.1;
 		for (let e = 0; e < 5; e++) {
 			let r = 2.25 - e * .1;
-			this.addAt("stone", N(a - .12, a, r, 8), t, i + r / 2, n), this.addAt("dark", M(.7, 1.25, .2, 0, 0, 0), t, i + .75, n + a - .02), this.addAt("stone", N(a + .85, a + .2, .36, 8), t, i + r + .18, n), this.addAt("stone", N(a + .1, a + .1, .16, 8), t, i + r + .42, n);
+			this.addAt("stone", V(a - .12, a, r, 8), t, i + r / 2, n), this.addAt("dark", B(.7, 1.25, .2, 0, 0, 0), t, i + .75, n + a - .02), this.addAt("stone", V(a + .85, a + .2, .36, 8), t, i + r + .18, n), this.addAt("stone", V(a + .1, a + .1, .16, 8), t, i + r + .42, n);
 			for (let e = 0; e < 8; e++) {
-				let o = e / 8 * Math.PI * 2 + Math.PI / 8, s = N(.03, .1, .55, 5, 0, 0, 0);
+				let o = e / 8 * Math.PI * 2 + Math.PI / 8, s = V(.03, .1, .55, 5, 0, 0, 0);
 				s.rotateZ(.7), s.rotateY(-o), s.translate(t + Math.cos(o) * (a + .85), i + r + .45, n + Math.sin(o) * (a + .85)), this.add("stone", s);
 			}
 			i += r + .5, a *= .87;
 		}
-		this.addAt("gold", N(.12, .3, 1.6, 8), t, i + .8, n);
+		this.addAt("gold", V(.12, .3, 1.6, 8), t, i + .8, n);
 		for (let r = 0; r < 4; r++) this.addAt("gold", new e.SphereGeometry(.22 - r * .03, 10, 8), t, i + .4 + r * .3, n);
 		this.addAt("gold", new e.SphereGeometry(.16, 8, 6), t, i + 1.7, n);
 	}
 	buildEnclosure(t) {
-		let n = O.platform, r = (n, r, i, a) => {
+		let n = j.platform, r = (n, r, i, a) => {
 			let o = i - n, s = a - r, c = Math.hypot(o, s), l = (n + i) / 2, u = (r + a) / 2, d = Math.atan2(o, s), f = Math.cos(d), p = -Math.sin(d), m = -.02, h = 1.11, g = 1.03, _ = 3.33;
-			this.add("stone", M(.86, h - m, c + .25, l, t + (m + h) / 2, u, d)), this.add("gatePlaster", M(.34, _ - g, c - .08, l, t + (g + _) / 2, u, d)), this.add("woodDark", M(.5, .18, c + .22, l, t + _ + .015, u, d));
+			this.add("stone", B(.86, h - m, c + .25, l, t + (m + h) / 2, u, d)), this.add("gatePlaster", B(.34, _ - g, c - .08, l, t + (g + _) / 2, u, d)), this.add("woodDark", B(.5, .18, c + .22, l, t + _ + .015, u, d));
 			for (let n of [-1, 1]) {
-				this.add("woodDark", M(.1, .16, c + .48, l + n * f * .88, t + _ + .06, u + n * p * .88, d));
+				this.add("woodDark", B(.1, .16, c + .48, l + n * f * .88, t + _ + .06, u + n * p * .88, d));
 				let r = new e.BoxGeometry(.95, .1, c + .5);
 				r.rotateZ(n * .34), r.rotateY(d), r.translate(l + f * n * .38, t + _ + .2, u + p * n * .38), this.add("dark", r);
 			}
-			this.add("dark", M(.18, .14, c + .52, l, t + _ + .36, u, d));
+			this.add("dark", B(.18, .14, c + .52, l, t + _ + .36, u, d));
 			let v = Math.max(2, Math.ceil(c / 6.4));
 			for (let e = 0; e <= v; e++) {
 				let i = e / v;
-				this.add("woodDark", M(.46, _ - g + .12, .46, n + o * i, t + (g + _) / 2, r + s * i, d));
+				this.add("woodDark", B(.46, _ - g + .12, .46, n + o * i, t + (g + _) / 2, r + s * i, d));
 			}
 		};
 		r(n.x0 + .5, n.z0 + 1, n.x0 + .5, 3.8), r(n.x0 + .5, 10.2, n.x0 + .5, n.z1 - 1);
-		for (let e of [3.8, 10.2]) this.add("stone", M(.75, 3.7, .75, n.x0 + .5, t + 1.85, e));
-		this.add("roof", M(1.25, .35, 7.1, n.x0 + .5, t + 4, 7)), this.add("wood", M(.22, .4, 2, n.x0 + .05, t + 3.45, 7));
+		for (let e of [3.8, 10.2]) this.add("stone", B(.75, 3.7, .75, n.x0 + .5, t + 1.85, e));
+		this.add("roof", B(1.25, .35, 7.1, n.x0 + .5, t + 4, 7)), this.add("wood", B(.22, .4, 2, n.x0 + .05, t + 3.45, 7));
 		let i = new e.Mesh(new e.PlaneGeometry(1.76, .34), new e.MeshStandardMaterial({
-			map: ze("西山道", 512, 128, {
+			map: Ne("西山道", 512, 128, {
 				bg: "#302923",
 				fg: "#d4b674",
 				border: "#8f7755"
@@ -2816,16 +3203,16 @@ var un = class {
 			roughness: .88,
 			side: e.DoubleSide
 		}));
-		i.rotation.y = Math.PI / 2, i.position.set(n.x0 + .2, t + 3.45, 7), this.group.add(i), this.add("stone", M(4.25, .95, 3.2, -34.25, t + .475, 7)), this.add("floor", it(M(4.3, .06, 3.25, -34.25, t + .98, 7), .92)), this.balustrade(4.1, 9.9, n.x0 + .5, t + .98, "z"), r(n.x0 + .5, n.z0 + 1, n.x1 - .5, n.z0 + 1), r(n.x1 - .5, n.z0 + 1, n.x1 - .5, 23), r(n.x1 - .5, 33, n.x1 - .5, n.z1 - 1), this.add("wood", M(.4, 3.2, 1, n.x1 - .5, t + 2, 23.4)), this.add("wood", M(.4, 3.2, 1, n.x1 - .5, t + 2, 32.6)), this.add("roof", M(1.9, .3, 10.4, n.x1 - .5, t + 3.75, 28));
+		i.rotation.y = Math.PI / 2, i.position.set(n.x0 + .2, t + 3.45, 7), this.group.add(i), this.add("stone", B(4.25, .95, 3.2, -34.25, t + .475, 7)), this.add("floor", $e(B(4.3, .06, 3.25, -34.25, t + .98, 7), .92)), this.balustrade(4.1, 9.9, n.x0 + .5, t + .98, "z"), r(n.x0 + .5, n.z0 + 1, n.x1 - .5, n.z0 + 1), r(n.x1 - .5, n.z0 + 1, n.x1 - .5, 23), r(n.x1 - .5, 33, n.x1 - .5, n.z1 - 1), this.add("wood", B(.4, 3.2, 1, n.x1 - .5, t + 2, 23.4)), this.add("wood", B(.4, 3.2, 1, n.x1 - .5, t + 2, 32.6)), this.add("roof", B(1.9, .3, 10.4, n.x1 - .5, t + 3.75, 28));
 		for (let r of [-1, 1]) {
 			let i = 28 + r * 4.58, a = n.x1 + 1.68;
-			this.add("wood", M(4.38, 2.72, .22, a, t + 1.71, i));
-			for (let e of [-1.98, 1.98]) this.add("bronze", M(.13, 2.8, .3, a + e, t + 1.71, i));
+			this.add("wood", B(4.38, 2.72, .22, a, t + 1.71, i));
+			for (let e of [-1.98, 1.98]) this.add("bronze", B(.13, 2.8, .3, a + e, t + 1.71, i));
 			for (let e of [
 				.64,
 				1.55,
 				2.48
-			]) this.add("bronze", M(4.25, .15, .3, a, t + e, i));
+			]) this.add("bronze", B(4.25, .15, .3, a, t + e, i));
 			for (let n of [
 				-1.4,
 				-.7,
@@ -2837,7 +3224,7 @@ var un = class {
 				1.85,
 				2.37
 			]) this.add("gold", new e.SphereGeometry(.055, 8, 6).translate(a + n, t + r, i - .14));
-			let o = N(.09, .09, .055, 8, a - 1.62, t + 1.55, i - .16);
+			let o = V(.09, .09, .055, 8, a - 1.62, t + 1.55, i - .16);
 			o.rotateX(Math.PI / 2), this.add("bronze", o);
 		}
 		let a = [
@@ -2847,26 +3234,26 @@ var un = class {
 			.52,
 			.34
 		];
-		for (let e = 0; e < a.length; e++) this.add("stone", M(2.55, .28, 4.6, 30.9 + e * 2.55, t + a[e] - .14, 28));
+		for (let e = 0; e < a.length; e++) this.add("stone", B(e === 4 ? 3.45 : 2.55, .28, 8.2, 30.9 + e * 2.55, t + a[e] - .14, 28));
 		for (let e = 0; e < 3; e++) {
 			let n = .11 + e * .11;
-			this.add("stone", M(.72, .18, 4.75, 28.38 + e * .72, t + n - .09, 28));
+			this.add("stone", B(.72, .18, 8.2, 28.38 + e * .72, t + n - .09, 28));
 		}
-		for (let e of [25.9, 30.1]) {
+		for (let e of [24.05, 31.95]) {
 			for (let n = 0; n < a.length; n++) {
 				let r = 30.9 + n * 2.55, i = t + a[n];
-				this.add("stone", M(2.58, .17, .22, r, i + .93, e));
+				this.add("stone", B(2.58, .17, .22, r, i + .93, e));
 			}
 			for (let n = 0; n <= 10; n++) {
 				let r = n / 10, i = Math.min(4, Math.floor(r * 5));
-				this.add("stone", M(.18, 1.02, .18, 29.2 + r * 14, t + a[i] + .48, e));
+				this.add("stone", B(.18, 1.02, .18, 29.2 + r * 14, t + a[i] + .48, e));
 			}
 		}
-		for (let e of [31.3, 40.9]) this.add("stone", M(.78, 2.2, 3.8, e, t - .78, 28));
+		for (let e of [31.3, 40.9]) this.add("stone", B(.78, 2.2, 7.2, e, t - .78, 28));
 	}
 	buildBuddha(t) {
-		let n = S.x, r = S.z + 1.15, i = t + 1.1;
-		this.add("bronze", N(1.58, 1.72, .18, 36).translate(n, i + .09, r)), this.add("bronze", N(1.43, 1.55, .38, 36).translate(n, i + .37, r)), this.add("gold", N(1.48, 1.52, .055, 36).translate(n, i + .19, r)), this.add("gold", N(1.34, 1.4, .07, 36).translate(n, i + .57, r)), this.add("bronze", N(1.17, 1.3, .15, 36).translate(n, i + .67, r));
+		let n = w.x, r = w.z + 1.15, i = t + 1.1;
+		this.add("bronze", V(1.58, 1.72, .18, 36).translate(n, i + .09, r)), this.add("bronze", V(1.43, 1.55, .38, 36).translate(n, i + .37, r)), this.add("gold", V(1.48, 1.52, .055, 36).translate(n, i + .19, r)), this.add("gold", V(1.34, 1.4, .07, 36).translate(n, i + .57, r)), this.add("bronze", V(1.17, 1.3, .15, 36).translate(n, i + .67, r));
 		for (let t = 0; t < 2; t++) for (let a = 0; a < 18; a++) {
 			let o = (a + t * .5) * Math.PI * 2 / 18, s = [], c = [], l = [];
 			for (let e = 0; e <= 7; e++) {
@@ -2888,13 +3275,13 @@ var un = class {
 			emissiveIntensity: .3,
 			roughness: 1
 		}), o = new e.Mesh(new e.BoxGeometry(8.5, 7, .2), a);
-		o.position.set(n, i + 2.8, S.z + .6), this.group.add(o);
+		o.position.set(n, i + 2.8, w.z + .6), this.group.add(o);
 	}
 	finalize() {
 		for (let t of Object.keys(this.roles)) {
 			let n = this.roles[t];
 			if (!n.length) continue;
-			let r = P(n), i = {
+			let r = H(n), i = {
 				stone: 1.4,
 				wall: 2,
 				gatePlaster: 1.8,
@@ -2908,7 +3295,7 @@ var un = class {
 				mainWoodDark: .7,
 				mainDougong: .7,
 				mainLattice: .75
-			}, a = i[t] ? F(r, i[t]) : r, o = {
+			}, a = i[t] ? U(r, i[t]) : r, o = {
 				stone: "stone",
 				mainStone: "stone",
 				wall: "plaster",
@@ -2921,7 +3308,7 @@ var un = class {
 				lattice: "wood",
 				mainLattice: "wood"
 			};
-			o[t] && (nn(a, o[t], o[t] === "plaster" ? void 0 : O.platform.y), this.materials[t].vertexColors = !0);
+			o[t] && (bn(a, o[t], o[t] === "plaster" ? void 0 : j.platform.y), this.materials[t].vertexColors = !0);
 			let s = new e.Mesh(a, this.materials[t]);
 			s.name = `temple-${t}`, s.castShadow = t === "stone" || t === "wall" || t === "gatePlaster" || t === "roof" || t === "mainRoof" || t === "wood" || t === "woodDark" || t === "dark" || t === "dougong" || t === "bronze" || t === "mainStone" || t === "mainWall" || t === "mainWood" || t === "mainWoodDark" || t === "mainDougong", s.receiveShadow = !0, this.group.add(s), n.length = 0;
 		}
@@ -2932,7 +3319,7 @@ var un = class {
 };
 //#endregion
 //#region src/world/distant_geometry.ts
-function dn(t, n = 28) {
+function On(t, n = 28) {
 	if (t.hasAttribute("skinIndex") || t.morphAttributes.position?.length) throw Error("Distant clustering is only for static, untextured decoration");
 	let r = t.getAttribute("position");
 	t.computeBoundingBox();
@@ -2969,15 +3356,15 @@ function dn(t, n = 28) {
 	let p = new e.BufferGeometry();
 	return p.setAttribute("position", new e.BufferAttribute(l, 3)), p.setIndex(d), p.computeVertexNormals(), p.computeBoundingSphere(), p.userData.distantOnly = !0, p;
 }
-function fn(t) {
+function kn(t) {
 	let n = t.clone(!0), r = /* @__PURE__ */ new Map();
 	return n.traverse((t) => {
 		if (!(t instanceof e.Mesh)) return;
 		let n = r.get(t.geometry);
-		n || (n = dn(t.geometry), r.set(t.geometry, n)), t.geometry = n;
+		n || (n = On(t.geometry), r.set(t.geometry, n)), t.geometry = n;
 	}), n;
 }
-function pn(t, n = 75) {
+function An(t, n = 75) {
 	let r = new e.PerspectiveCamera(), i = t.update.bind(t);
 	t.update = (e) => {
 		let t = e, a = Number.isFinite(t.fov) ? Math.max(1, Math.tan(n * Math.PI / 360) / Math.tan(t.fov * Math.PI / 360)) : 1;
@@ -2985,25 +3372,690 @@ function pn(t, n = 75) {
 	};
 }
 //#endregion
+//#region src/world/main_hall_finish.ts
+var jn = /* @__PURE__ */ new Map();
+function Mn(t, n, r, i) {
+	let a = jn.get(t);
+	if (a) return a;
+	let o = document.createElement("canvas");
+	o.width = n, o.height = r, i(o.getContext("2d"), n, r);
+	let s = new e.CanvasTexture(o);
+	return s.name = `lingyin-hall-${t}`, s.colorSpace = e.SRGBColorSpace, s.anisotropy = 8, jn.set(t, s), s;
+}
+function Nn() {
+	return Mn("altar-mural", 1024, 512, (e, t, n) => {
+		let r = new _("hall-mural"), i = e.createLinearGradient(0, 0, 0, n);
+		i.addColorStop(0, "#24120f"), i.addColorStop(.55, "#321713"), i.addColorStop(1, "#170c0a"), e.fillStyle = i, e.fillRect(0, 0, t, n);
+		for (let [t, r] of [
+			[34, 292],
+			[366, 292],
+			[698, 292]
+		]) e.fillStyle = "rgba(8,4,3,.48)", e.fillRect(t, 34, r, n - 68), e.strokeStyle = "rgba(179,136,68,.68)", e.lineWidth = 3, e.strokeRect(t + 8, 42, r - 16, n - 84), e.strokeStyle = "rgba(95,60,28,.8)", e.lineWidth = 1, e.strokeRect(t + 17, 51, r - 34, n - 102);
+		let a = (t, n, r, i = 1) => {
+			e.save(), e.translate(t, n), e.scale(r * i, r), e.strokeStyle = "rgba(203,161,82,.55)";
+			for (let [t, n, r] of [
+				[
+					58,
+					.1,
+					4.4
+				],
+				[
+					40,
+					.9,
+					5.2
+				],
+				[
+					24,
+					2,
+					6.1
+				]
+			]) e.lineWidth = 3, e.beginPath(), e.arc(0, 0, t, n, r), e.stroke();
+			e.restore();
+		};
+		a(210, 190, 1.1, 1), a(210, 360, .8, -1), a(814, 200, 1.15, -1), a(814, 370, .75, 1);
+		for (let t of [
+			180,
+			512,
+			844
+		]) {
+			let n = e.createRadialGradient(t, 300, 20, t, 300, 200);
+			n.addColorStop(0, "rgba(126,78,38,.22)"), n.addColorStop(.6, "rgba(69,36,19,.12)"), n.addColorStop(1, "rgba(0,0,0,0)"), e.fillStyle = n, e.fillRect(t - 140, 70, 280, 400), e.strokeStyle = "rgba(190,145,74,.62)", e.lineWidth = 3, e.beginPath(), e.moveTo(t - 130, 468), e.lineTo(t - 130, 232), e.quadraticCurveTo(t - 130, 126, t, 118), e.quadraticCurveTo(t + 130, 126, t + 130, 232), e.lineTo(t + 130, 468), e.stroke(), e.strokeStyle = "rgba(96,58,27,.8)", e.lineWidth = 1.5, e.beginPath(), e.moveTo(t - 113, 460), e.lineTo(t - 113, 238), e.quadraticCurveTo(t - 113, 145, t, 138), e.quadraticCurveTo(t + 113, 145, t + 113, 238), e.lineTo(t + 113, 460), e.stroke();
+			for (let n = 0; n < 7; n++) e.fillStyle = n % 2 ? "rgba(189,140,68,.55)" : "rgba(120,76,35,.65)", e.beginPath(), e.ellipse(t - 84 + n * 28, 446, 14, 22, 0, 0, Math.PI * 2), e.fill();
+			e.fillStyle = "rgba(206,160,83,.75)", e.beginPath(), e.arc(t, 380, 9, 0, Math.PI * 2), e.fill(), e.strokeStyle = "rgba(206,160,83,.5)", e.lineWidth = 1.5;
+			for (let n = 0; n < 8; n++) {
+				let r = n / 8 * Math.PI * 2;
+				e.beginPath(), e.ellipse(t + Math.cos(r) * 22, 380 + Math.sin(r) * 22, 12, 4, r, 0, Math.PI * 2), e.stroke();
+			}
+		}
+		for (let r = 0; r < t; r += 7) e.strokeStyle = `rgba(0,0,0,${.04 + (r % 21 == 0 ? .05 : 0)})`, e.lineWidth = 1, e.beginPath(), e.moveTo(r, 0), e.lineTo(r + 2, n), e.stroke();
+		for (let i = 0; i < 420; i++) e.fillStyle = r.chance(.5) ? "rgba(221,179,101,.16)" : "rgba(0,0,0,.14)", e.fillRect(r.range(0, t), r.range(0, n), r.range(1, 3), r.range(1, 3));
+		e.strokeStyle = "#0c0705", e.lineWidth = 22, e.strokeRect(11, 11, t - 22, n - 22), e.strokeStyle = "rgba(178,133,63,.9)", e.lineWidth = 4, e.strokeRect(25, 25, t - 50, n - 50);
+	});
+}
+function Pn() {
+	return Mn("ceiling-coffers", 512, 512, (e, t, n) => {
+		let r = new _("hall-coffers");
+		e.fillStyle = "#2a1a12", e.fillRect(0, 0, t, n);
+		let i = t / 4;
+		for (let t = 0; t < 4; t++) for (let n = 0; n < 4; n++) {
+			let a = n * i + 5, o = t * i + 5, s = i - 10;
+			e.fillStyle = (t + n) % 2 ? "#241813" : "#1d130f", e.fillRect(a, o, s, s), e.strokeStyle = "rgba(95,139,133,.55)", e.lineWidth = 4, e.strokeRect(a, o, s, s), e.strokeStyle = "rgba(174,130,64,.5)", e.lineWidth = 1.5, e.strokeRect(a + 7, o + 7, s - 14, s - 14), e.fillStyle = "rgba(183,140,70,.5)";
+			for (let [t, n] of [
+				[a + 12, o + 12],
+				[a + s - 12, o + 12],
+				[a + 12, o + s - 12],
+				[a + s - 12, o + s - 12]
+			]) e.beginPath(), e.arc(t, n, 2.2, 0, Math.PI * 2), e.fill();
+			e.save(), e.translate(a + s / 2, o + s / 2), e.strokeStyle = "rgba(198,153,82,.35)", e.lineWidth = 2;
+			for (let t = 0; t < 8; t++) e.rotate(Math.PI / 4), e.beginPath(), e.ellipse(0, -s * .16, s * .035, s * .14, 0, 0, Math.PI * 2), e.stroke();
+			e.restore();
+			for (let t = 0; t < 12; t++) e.fillStyle = "rgba(0,0,0,.16)", e.fillRect(a + r.range(4, s - 4), o + r.range(4, s - 4), 2, 2);
+		}
+	});
+}
+function Fn() {
+	return Mn("wall-scrolls", 1024, 512, (e, t, n) => {
+		let r = new _("hall-scrolls");
+		[
+			{
+				bg: "#d8c9a8",
+				ink: "#3b3a31",
+				kind: "mountain"
+			},
+			{
+				bg: "#d9cfb5",
+				ink: "#333b2d",
+				kind: "bamboo"
+			},
+			{
+				bg: "#d7c6a4",
+				ink: "#3d3026",
+				kind: "lotus"
+			},
+			{
+				bg: "#d6c8ad",
+				ink: "#2d312d",
+				kind: "calligraphy"
+			}
+		].forEach((t, i) => {
+			let a = i * 256;
+			e.fillStyle = t.bg, e.fillRect(a, 0, 256, n);
+			for (let t = 0; t < 1200; t++) e.fillStyle = `rgba(80,65,42,${r.range(.015, .06)})`, e.fillRect(a + r.range(0, 256), r.range(0, n), 1, r.range(1, 4));
+			if (e.strokeStyle = "rgba(77,61,38,.45)", e.lineWidth = 2, e.strokeRect(a + 8, 8, 240, n - 16), e.save(), e.translate(a + 128, n / 2), t.kind === "mountain") {
+				for (let t = 0; t < 4; t++) {
+					e.fillStyle = `rgba(52,55,46,${.22 - t * .04})`, e.beginPath(), e.moveTo(-105, 80 - t * 18);
+					for (let n = -105; n <= 105; n += 15) e.lineTo(n, 80 - t * 18 - Math.abs(Math.sin(n * .035 + t)) * (80 - t * 12) - r.range(0, 9));
+					e.lineTo(105, 150), e.lineTo(-105, 150), e.fill();
+				}
+				e.strokeStyle = t.ink, e.lineWidth = 5, e.beginPath(), e.moveTo(-90, -70), e.quadraticCurveTo(-20, -20, 70, 35), e.stroke();
+			} else if (t.kind === "bamboo") for (let n = 0; n < 5; n++) {
+				let i = -90 + n * 46, a = -175 + r.range(0, 50);
+				e.strokeStyle = t.ink, e.lineWidth = 3.5, e.beginPath(), e.moveTo(i, 170), e.quadraticCurveTo(i - 12, 0, i + 12, a), e.stroke();
+				for (let t = 0; t < 6; t++) e.lineWidth = 2, e.beginPath(), e.ellipse(i + 18, a + 50 + t * 22, 28, 5, -.4, 0, Math.PI * 2), e.stroke(), e.beginPath(), e.ellipse(i - 16, a + 64 + t * 22, 24, 4, .45, 0, Math.PI * 2), e.stroke();
+			}
+			else if (t.kind === "lotus") {
+				e.fillStyle = "rgba(122,49,39,.65)";
+				for (let t = 0; t < 9; t++) {
+					let n = t / 9 * Math.PI * 2;
+					e.save(), e.rotate(n), e.beginPath(), e.ellipse(0, -70, 20, 58, 0, 0, Math.PI * 2), e.fill(), e.restore();
+				}
+				e.fillStyle = "rgba(186,133,61,.8)", e.beginPath(), e.arc(0, 0, 25, 0, Math.PI * 2), e.fill(), e.strokeStyle = "rgba(57,71,47,.6)", e.lineWidth = 4, e.beginPath(), e.moveTo(0, 35), e.quadraticCurveTo(-35, 100, -10, 160), e.stroke();
+			} else e.fillStyle = t.ink, e.font = "bold 84px \"Songti SC\", \"STSong\", \"SimSun\", serif", e.textAlign = "center", e.textBaseline = "middle", [
+				"山",
+				"河",
+				"寂",
+				"照"
+			].forEach((t, n) => e.fillText(t, 0, -120 + n * 82)), e.fillStyle = "rgba(128,42,30,.8)", e.fillRect(64, 124, 30, 30);
+			e.restore();
+		});
+	});
+}
+function In(e) {
+	return Mn(`banner-${e}`, 256, 1024, (t, n, r) => {
+		let i = t.createLinearGradient(0, 0, n, 0);
+		i.addColorStop(0, "#4d1414"), i.addColorStop(.5, "#7a2420"), i.addColorStop(1, "#43100f"), t.fillStyle = i, t.fillRect(0, 0, n, r), t.strokeStyle = "#b78b48", t.lineWidth = 10, t.strokeRect(11, 11, n - 22, r - 22), t.strokeStyle = "rgba(239,205,135,.55)", t.lineWidth = 2, t.strokeRect(25, 25, n - 50, r - 50);
+		let a = [...e];
+		t.font = "bold 112px \"Songti SC\", \"STSong\", \"SimSun\", serif", t.textAlign = "center", t.textBaseline = "middle";
+		let o = r / 2 - (a.length - 1) * 138 / 2;
+		for (let [e, r] of a.entries()) {
+			let i = n / 2, a = o + e * 138;
+			t.fillStyle = "rgba(0,0,0,.45)", t.fillText(r, i + 4, a + 4);
+			let s = t.createLinearGradient(i, a - 55, i, a + 55);
+			s.addColorStop(0, "#f4dcaa"), s.addColorStop(.5, "#c89b4d"), s.addColorStop(1, "#8d6328"), t.fillStyle = s, t.fillText(r, i, a);
+		}
+		for (let e = 0; e < 12; e++) t.fillStyle = "rgba(196,148,76,.7)", t.fillRect(28 + e * 17, r - 38, 2, 22);
+	});
+}
+function Ln(e) {
+	return Mn(`interior-plaque-${e}`, 768, 224, (t, n, r) => {
+		let i = t.createLinearGradient(0, 0, 0, r);
+		i.addColorStop(0, "#2a1a10"), i.addColorStop(.5, "#1d120b"), i.addColorStop(1, "#120b07"), t.fillStyle = i, t.fillRect(0, 0, n, r), t.strokeStyle = "#0e0805", t.lineWidth = 18, t.strokeRect(9, 9, n - 18, r - 18), t.strokeStyle = "#b48a49", t.lineWidth = 4, t.strokeRect(24, 24, n - 48, r - 48), t.strokeStyle = "rgba(220,183,112,.35)", t.lineWidth = 1, t.strokeRect(36, 36, n - 72, r - 72), t.font = "bold 116px \"Songti SC\", \"STSong\", \"SimSun\", serif", t.textAlign = "center", t.textBaseline = "middle";
+		let a = [...e], o = n / 2 - (a.length - 1) * 132 / 2;
+		for (let [e, n] of a.entries()) {
+			let i = t.createLinearGradient(0, 45, 0, 180);
+			i.addColorStop(0, "#f5dda9"), i.addColorStop(.5, "#c99b4e"), i.addColorStop(1, "#90662b"), t.fillStyle = i, t.fillText(n, o + e * 132, r / 2 + 4);
+		}
+	});
+}
+function Rn() {
+	return Mn("hall-shaft", 128, 256, (e, t, n) => {
+		let r = e.createLinearGradient(0, 0, 0, n);
+		r.addColorStop(0, "rgba(255,236,194,.75)"), r.addColorStop(.35, "rgba(255,228,180,.28)"), r.addColorStop(1, "rgba(255,213,155,0)"), e.fillStyle = r, e.fillRect(0, 0, t, n);
+		let i = e.createLinearGradient(0, 0, t, 0);
+		i.addColorStop(0, "rgba(0,0,0,1)"), i.addColorStop(.25, "rgba(0,0,0,0)"), i.addColorStop(.75, "rgba(0,0,0,0)"), i.addColorStop(1, "rgba(0,0,0,1)"), e.globalCompositeOperation = "destination-out", e.fillStyle = i, e.fillRect(0, 0, t, n), e.globalCompositeOperation = "source-over";
+	});
+}
+function zn() {
+	return Mn("hall-glow", 256, 256, (e, t, n) => {
+		let r = e.createRadialGradient(t / 2, n / 2, 2, t / 2, n / 2, t / 2);
+		r.addColorStop(0, "rgba(255,218,150,.85)"), r.addColorStop(.25, "rgba(255,196,112,.38)"), r.addColorStop(.7, "rgba(255,172,80,.08)"), r.addColorStop(1, "rgba(255,160,70,0)"), e.fillStyle = r, e.fillRect(0, 0, t, n);
+	});
+}
+function Bn() {
+	return Mn("hall-dust", 64, 64, (e, t, n) => {
+		let r = e.createRadialGradient(32, 32, 0, 32, 32, 30);
+		r.addColorStop(0, "rgba(255,240,206,.9)"), r.addColorStop(.4, "rgba(255,226,170,.35)"), r.addColorStop(1, "rgba(255,210,150,0)"), e.fillStyle = r, e.fillRect(0, 0, t, n);
+	});
+}
+function Vn(t) {
+	let { cx: n, cz: r, floor: i, ceiling: a, halfW: o, halfD: s, sz: c, mats: l } = t, u = new e.Group();
+	u.name = "lingyin-main-hall-finishing";
+	let d = new e.MeshStandardMaterial({
+		name: "hall-gilt-column-collars",
+		color: 10119208,
+		roughness: .52,
+		metalness: .12,
+		emissive: 2758664,
+		emissiveIntensity: .25
+	}), f = new e.MeshBasicMaterial({
+		name: "hall-column-collar-gold",
+		color: 9069354
+	}), p = new e.MeshBasicMaterial({
+		name: "hall-lotus-pedestal-gold",
+		color: 11041071
+	}), m = r - s + 1.22, h = new e.MeshBasicMaterial({
+		name: "hall-halo-backlight",
+		map: zn(),
+		transparent: !0,
+		opacity: .18,
+		depthWrite: !1,
+		blending: e.AdditiveBlending,
+		side: e.DoubleSide
+	}), g = [];
+	for (let [t, r, a] of [
+		[
+			-4.6,
+			3.56,
+			4.2
+		],
+		[
+			0,
+			4.05,
+			5.4
+		],
+		[
+			4.6,
+			3.56,
+			4.2
+		]
+	]) {
+		let o = new e.PlaneGeometry(a, a);
+		o.translate(n + t, i + r, m + .11), g.push(o);
+	}
+	let v = new e.Mesh(H(g), h);
+	v.name = "hall-statue-backlight", v.renderOrder = 5, u.add(v);
+	let y = new e.MeshStandardMaterial({
+		name: "hall-carved-altar-screen",
+		map: Nn(),
+		emissive: "#1c0f06",
+		emissiveMap: Nn(),
+		emissiveIntensity: .05,
+		roughness: .82,
+		metalness: .02
+	}), b = new e.Mesh(new e.PlaneGeometry(18.2, 7.35), y);
+	b.name = "hall-altar-screen", y.color.setRGB(.74, .7, .64), b.position.set(n, i + 4.15, m), u.add(b);
+	let x = [], S = l.darkWood, C = [];
+	for (let [e, t, r, a] of [
+		[
+			18.8,
+			.24,
+			0,
+			7.93
+		],
+		[
+			18.8,
+			.24,
+			0,
+			.38
+		],
+		[
+			.24,
+			7.8,
+			-9.28,
+			4.15
+		],
+		[
+			.24,
+			7.8,
+			9.28,
+			4.15
+		]
+	]) x.push(B(e, t, .22, n + r, i + a, m + .09)), C.push(B(e + (e > 1 ? 0 : .06), .045, .25, n + r, i + a + (t > 1 ? t / 2 - .02 : 0), m + .13));
+	u.add(new e.Mesh(H(x), S)), u.add(new e.Mesh(H(C), l.gilt));
+	let T = [], E = [];
+	for (let [t, r] of [[-7.35, "萬德莊嚴"], [7.35, "法輪常轉"]]) {
+		let a = In(r), o = new e.MeshStandardMaterial({
+			name: `hall-banner-${r}`,
+			map: a,
+			emissive: "#2a0907",
+			emissiveMap: a,
+			emissiveIntensity: .08,
+			roughness: .9,
+			side: e.DoubleSide
+		});
+		E.push(o);
+		let s = new e.PlaneGeometry(.95, 4.35);
+		s.translate(n + t, i + 5, m + .16), T.push(s);
+		let c = V(.028, .028, 1.15, 6, n + t, i + 7.18, m + .18);
+		c.rotateX(Math.PI / 2), C.push(c);
+		let l = V(.024, .024, 1.1, 6, n + t, i + 2.8, m + .18);
+		l.rotateX(Math.PI / 2), C.push(l);
+	}
+	T.forEach((t, n) => u.add(new e.Mesh(t, E[n])));
+	let D = new e.MeshStandardMaterial({
+		name: "hall-interior-plaque",
+		map: Ln("大雄寶殿"),
+		emissive: "#2b180a",
+		emissiveMap: Ln("大雄寶殿"),
+		emissiveIntensity: .25,
+		roughness: .72,
+		metalness: .1,
+		side: e.DoubleSide
+	}), O = new e.Mesh(new e.PlaneGeometry(3.4, .98), D);
+	O.position.set(n, i + 8.55, m + .12), u.add(O);
+	let k = [];
+	for (let [e, t, r, a] of [
+		[
+			3.6,
+			.1,
+			0,
+			9.08
+		],
+		[
+			3.6,
+			.1,
+			0,
+			8.020000000000001
+		],
+		[
+			.1,
+			1.08,
+			-1.75,
+			8.55
+		],
+		[
+			.1,
+			1.08,
+			1.75,
+			8.55
+		]
+	]) k.push(B(e, t, .12, n + r, i + a, m + .08));
+	u.add(new e.Mesh(H(k), l.darkWood));
+	let ee = new e.MeshStandardMaterial({
+		name: "hall-ceiling-coffers",
+		map: Pn(),
+		roughness: .83,
+		metalness: .02,
+		emissive: "#5a3a22",
+		emissiveMap: Pn(),
+		emissiveIntensity: .85,
+		side: e.DoubleSide
+	}), te = [], ne = (t, i, o, s) => {
+		let c = new e.PlaneGeometry(i - t, s - o);
+		c.rotateX(Math.PI / 2), c.translate(n + (t + i) / 2, a - .19, r + (o + s) / 2), te.push(c);
+	};
+	ne(-o + .35, -4.15, -s + .35, s - .35), ne(4.15, o - .35, -s + .35, s - .35), ne(-4.15, 4.15, 4.55, s - .35), ne(-4.15, 4.15, -s + .35, -4.55);
+	let A = new e.Mesh(H(te), ee);
+	A.name = "hall-side-ceiling-coffers", u.add(A);
+	let re = new e.MeshStandardMaterial({
+		name: "hall-lantern-silk",
+		color: "#76201a",
+		emissive: "#ff5420",
+		emissiveIntensity: .2,
+		roughness: .86,
+		metalness: 0
+	}), ie = [], ae = [], oe = [];
+	for (let [t, o] of [
+		[-8.6, -3],
+		[8.6, -3],
+		[-8.6, -8],
+		[8.6, -8]
+	]) {
+		let s = i + 6, c = new e.CylinderGeometry(.3, .3, .58, 12, 1, !0);
+		c.translate(n + t, s, r + o), ie.push(c);
+		for (let i of [-.29, .29]) {
+			let a = new e.CylinderGeometry(.3, .3, .035, 12);
+			a.translate(n + t, s + i, r + o), ae.push(a);
+		}
+		for (let i of [.34, -.34]) {
+			let a = new e.CylinderGeometry(.1, .14, .08, 10);
+			a.translate(n + t, s + i, r + o), ae.push(a);
+		}
+		for (let i = 0; i < 6; i++) {
+			let a = i / 6 * Math.PI * 2, c = new e.BoxGeometry(.012, .58, .012);
+			c.translate(n + t + Math.cos(a) * .302, s, r + o + Math.sin(a) * .302), ae.push(c);
+		}
+		let l = Math.max(.3, a - (s + .93)), u = new e.CylinderGeometry(.012, .012, l, 5);
+		u.translate(n + t, s + .93 + l / 2, r + o), ae.push(u);
+		let d = new e.ConeGeometry(.04, .24, 6);
+		d.rotateX(Math.PI), d.translate(n + t, s - .48, r + o), ae.push(d);
+		let f = new e.PlaneGeometry(1.5, 1.5);
+		f.translate(n + t, s, r + o + .2), oe.push(f);
+	}
+	let se = new e.Mesh(H(ie), re);
+	se.name = "hall-hanging-lantern-silk", u.add(se);
+	let j = new e.Mesh(H(ae), l.gilt);
+	j.name = "hall-hanging-lantern-gold", u.add(j);
+	let ce = new e.Mesh(H(oe), h);
+	ce.name = "hall-hanging-lantern-glow", ce.renderOrder = 4, u.add(ce);
+	let le = [];
+	for (let t of [-1, 1]) for (let a of [
+		-3.75,
+		0,
+		3.75
+	]) {
+		let s = new e.PlaneGeometry(4.6, 5.6);
+		s.rotateX(-Math.PI / 2), s.translate(n + t * (o - 3), i + .018, r + a * c), le.push(s);
+	}
+	let ue = new e.Mesh(H(le), new e.MeshBasicMaterial({
+		name: "hall-window-floor-pools",
+		map: Rn(),
+		transparent: !0,
+		opacity: .2,
+		depthWrite: !1,
+		blending: e.AdditiveBlending,
+		color: 13624034,
+		side: e.DoubleSide,
+		toneMapped: !0
+	}));
+	ue.name = "hall-window-floor-pools", ue.renderOrder = 2, u.add(ue);
+	let M = [];
+	for (let t of [-1, 1]) {
+		let a = n + t * (o - .24);
+		for (let n of [
+			-3.75,
+			0,
+			3.75
+		]) {
+			let o = r + n * c, s = new e.Vector3(a, i + 6.2, o), l = new e.Vector3(a - t * 4.8, i + .12, o + 1.1), u = l.clone().sub(s), d = u.length(), f = new e.CylinderGeometry(.72, 2.6, d, 8, 1, !0), p = new e.Quaternion().setFromUnitVectors(new e.Vector3(0, 1, 0), u.clone().normalize());
+			f.applyQuaternion(p), f.translate((s.x + l.x) / 2, (s.y + l.y) / 2, (s.z + l.z) / 2), M.push(f);
+		}
+	}
+	let N = new e.Mesh(H(M), new e.MeshBasicMaterial({
+		name: "hall-window-beams",
+		map: Rn(),
+		color: 14216175,
+		transparent: !0,
+		opacity: .17,
+		depthWrite: !1,
+		blending: e.AdditiveBlending,
+		side: e.DoubleSide,
+		toneMapped: !0
+	}));
+	N.name = "hall-window-beams", N.renderOrder = 3, u.add(N);
+	let P = [];
+	for (let t of [
+		-4.6,
+		0,
+		4.6
+	]) {
+		let a = n + t, o = r - 4.82 * c;
+		for (let t = 0; t < 14; t++) {
+			let n = t / 14 * Math.PI * 2, r = new e.SphereGeometry(.24, 6, 4);
+			r.scale(1, .34, .5), r.rotateY(n), r.rotateZ(-.25), r.translate(a + Math.cos(n) * 1.28, i + 1.02, o + Math.sin(n) * 1.28), P.push(r);
+		}
+		P.push(V(1.22, 1.34, .12, 24, a, i + .94, o));
+	}
+	u.add(new e.Mesh(H(P), p));
+	let F = [], de = [], I = new e.MeshStandardMaterial({
+		name: "hall-candle-wax",
+		color: "#eadcc2",
+		roughness: .82,
+		emissive: "#7a3a10",
+		emissiveIntensity: .1
+	}), fe = new e.MeshBasicMaterial({
+		name: "hall-candle-flame",
+		color: 16765322
+	}), pe = new e.MeshStandardMaterial({
+		name: "hall-offering-orange",
+		color: "#b65f21",
+		roughness: .72
+	}), L = new e.MeshStandardMaterial({
+		name: "hall-lotus-stems",
+		color: "#4c613d",
+		roughness: .9
+	}), me = new e.MeshStandardMaterial({
+		name: "hall-lotus-petals",
+		color: "#b9786e",
+		roughness: .82,
+		side: e.DoubleSide
+	}), he = [], ge = [], _e = [], ve = [], ye = [], R = r - 1.3 * c;
+	for (let e of [-5.6, 5.6]) F.push(V(.13, .2, .18, 12, n + e, i + 1.22, R + .2)), de.push(V(.05, .07, 1.05, 10, n + e, i + 1.82, R + .2)), de.push(V(.18, .09, .1, 12, n + e, i + 2.38, R + .2)), he.push(V(.07, .08, .48, 10, n + e, i + 2.68, R + .2)), ge.push(V(.005, .035, .16, 6, n + e, i + 2.98, R + .2));
+	for (let t of [-3.1, 3.1]) {
+		F.push(V(.18, .26, .55, 12, n + t, i + 1.5, R + .1));
+		for (let r = 0; r < 7; r++) {
+			let a = r / 7 * Math.PI * 2;
+			ve.push(V(.018, .025, 1, 5, n + t + Math.cos(a) * .1, i + 2.22, R + .1 + Math.sin(a) * .1)), ye.push(new e.SphereGeometry(.07, 6, 4).scale(1, .5, .7).translate(n + t + Math.cos(a) * .3, i + 2.78, R + .1 + Math.sin(a) * .3));
+		}
+	}
+	for (let t of [-1.25, 1.25]) {
+		F.push(V(.23, .15, .12, 14, n + t, i + 1.27, R - .18));
+		for (let r = 0; r < 3; r++) {
+			let a = r / 3 * Math.PI * 2;
+			_e.push(new e.SphereGeometry(.075, 10, 8).translate(n + t + Math.cos(a) * .075, i + 1.37, R - .18 + Math.sin(a) * .075));
+		}
+	}
+	u.add(new e.Mesh(H(F), l.bronze)), u.add(new e.Mesh(H(de), d)), u.add(new e.Mesh(H(he), I)), u.add(new e.Mesh(H(ge), fe)), u.add(new e.Mesh(H(_e), pe)), u.add(new e.Mesh(H(ve), L)), u.add(new e.Mesh(H(ye), me));
+	let be = new Float32Array(660), z = new _("hall-dust");
+	for (let e = 0; e < 220; e++) be[e * 3] = n + z.range(-o + 1, o - 1), be[e * 3 + 1] = i + z.range(1, 7.6), be[e * 3 + 2] = r + z.range(-s + 1, s - 1);
+	let xe = new e.BufferGeometry();
+	xe.setAttribute("position", new e.BufferAttribute(be, 3));
+	let Se = new e.Points(xe, new e.PointsMaterial({
+		name: "hall-dust-motes",
+		size: .085,
+		map: Bn(),
+		transparent: !0,
+		opacity: .45,
+		depthWrite: !1,
+		blending: e.AdditiveBlending,
+		sizeAttenuation: !0
+	}));
+	Se.name = "hall-dust-motes", Se.renderOrder = 4, u.add(Se);
+	let Ce = Fn(), we = [], Te = [], Ee = [r - 2.7 * c, r + 2.7 * c], De = 0;
+	for (let t of [-1, 1]) for (let r of Ee) {
+		let a = new e.PlaneGeometry(1.5, 3), s = a.getAttribute("uv"), c = De % 4;
+		for (let e = 0; e < s.count; e++) s.setXY(e, c / 4 + s.getX(e) / 4, s.getY(e));
+		a.rotateY(t * Math.PI / 2), a.translate(n + t * (o - .27), i + 3.75, r), we.push(a);
+		for (let a of [1.6, -1.6]) {
+			let s = new e.CylinderGeometry(.035, .035, 1.7, 8);
+			s.rotateX(Math.PI / 2), s.translate(n + t * (o - .3), i + 3.75 + a, r), Te.push(s);
+		}
+		De++;
+	}
+	let Oe = new e.Mesh(H(we), new e.MeshBasicMaterial({
+		name: "hall-painted-scrolls",
+		map: Ce,
+		color: 11049345,
+		side: e.DoubleSide,
+		toneMapped: !0
+	}));
+	Oe.name = "hall-painted-scrolls", u.add(Oe), u.add(new e.Mesh(H(Te), l.darkWood));
+	let U = [], ke = r + 1.38 * c, Ae = 11.6 * c;
+	for (let e of [-1, 1]) U.push(B(.055, .015, Ae, n + e * 2.17, i + .072, ke));
+	u.add(new e.Mesh(H(U), l.gilt));
+	let je = new e.MeshStandardMaterial({
+		name: "hall-dark-stone-border",
+		color: "#3f3b34",
+		roughness: .9,
+		metalness: 0
+	}), Me = [];
+	Me.push(B(.65, .02, s * 2 - .4, n - o + .34, i + .045, r)), Me.push(B(.65, .02, s * 2 - .4, n + o - .34, i + .045, r)), Me.push(B(o * 2 - .4, .02, .65, n, i + .045, r - s + .34)), Me.push(B(o * 2 - .4, .02, .65, n, i + .045, r + s - .34)), u.add(new e.Mesh(H(Me), je));
+	let Ne = [], Pe = [], Fe = [];
+	for (let e of En(w)) {
+		let t = n + e.x, a = r + e.z;
+		for (let e of [i + 2.15, i + 6.05]) Ne.push(V(.4, .4, .09, 16, t, e, a));
+		Pe.push(V(.485, .485, .13, 16, t, i + 1.05, a)), Fe.push(V(.39, .43, .22, 14, t, i + .16, a));
+	}
+	u.add(new e.Mesh(H(Ne), d)), u.add(new e.Mesh(H(Pe), f)), u.add(new e.Mesh(H(Fe), l.bronze));
+	let Ie = new e.MeshStandardMaterial({
+		name: "hall-cushion-faded-silk",
+		color: "#6f2620",
+		roughness: .93,
+		emissive: "#140706",
+		emissiveIntensity: .18
+	}), W = [], Le = [];
+	for (let t of [-1, 1]) for (let r of [-23.2, -25.6]) {
+		let a = n + t * 2.75;
+		W.push(B(1.05, .16, .78, a, i + .19, r));
+		let o = new e.CylinderGeometry(.42, .45, .12, 14);
+		o.scale(1, 1, .9), o.translate(a, i + .3, r), W.push(o), Le.push(B(1.09, .03, .04, a, i + .275, r - .38)), Le.push(B(1.09, .03, .04, a, i + .275, r + .38));
+	}
+	u.add(new e.Mesh(H(W), Ie)), u.add(new e.Mesh(H(Le), d));
+	let Re = [];
+	for (let e of [-1, 1]) {
+		let t = ke + e * (Ae / 2 + .12);
+		for (let e = 0; e < 13; e++) {
+			let r = n - 2 + e * .33;
+			Re.push(B(.045, .018, .34, r, i + .06, t));
+		}
+	}
+	return u.add(new e.Mesh(H(Re), l.gilt)), Hn(u), u;
+}
+function Hn(t) {
+	t.updateMatrixWorld(!0);
+	let n = /* @__PURE__ */ new Map(), r = [];
+	t.traverse((t) => {
+		!(t instanceof e.Mesh) || t instanceof e.Points || Array.isArray(t.material) || t.material.transparent || t.userData.noBatch || r.push(t);
+	});
+	for (let e of r) {
+		let t = e.material, r = n.get(t);
+		r ? r.push(e) : n.set(t, [e]);
+	}
+	let i = 0;
+	for (let [r, a] of n) {
+		if (a.length < 2) continue;
+		let n = a.map((e) => {
+			let t = e.geometry.clone();
+			return t.applyMatrix4(e.matrixWorld), t;
+		}), o = new e.Mesh(H(n), r);
+		o.name = `hall-finish-batch-${i++}`, o.castShadow = a.some((e) => e.castShadow), o.receiveShadow = a.some((e) => e.receiveShadow), o.renderOrder = a[0].renderOrder, t.add(o);
+		for (let e of a) e.parent?.remove(e), e.geometry.dispose();
+	}
+}
+//#endregion
+//#region src/world/buddha_surface.ts
+var Un = null;
+function Wn() {
+	if (Un) return Un;
+	let t = new _("buddha-gilt-leaf"), n = new Float32Array(256 * 256), r = (e, t) => (t & 255) * 256 + (e & 255), i = (e) => {
+		let n = new Float32Array(e * e);
+		for (let e = 0; e < n.length; e++) n[e] = t.value();
+		return (t, r) => {
+			let i = t / 256 * e, a = r / 256 * e, o = Math.floor(i), s = Math.floor(a), c = i - o, l = a - s, u = c * c * (3 - 2 * c), d = l * l * (3 - 2 * l), f = n[(s % e + e) % e * e + (o % e + e) % e], p = n[(s % e + e) % e * e + ((o + 1) % e + e) % e], m = n[((s + 1) % e + e) % e * e + (o % e + e) % e], h = n[((s + 1) % e + e) % e * e + ((o + 1) % e + e) % e];
+			return (f * (1 - u) + p * u) * (1 - d) + (m * (1 - u) + h * u) * d;
+		};
+	}, a = i(8), o = i(16), s = i(32), c = i(64);
+	for (let e = 0; e < 256; e++) for (let t = 0; t < 256; t++) n[r(t, e)] = .5 + .28 * (a(t, e) - .5) + .16 * (o(t, e) - .5) + .09 * (s(t, e) - .5) + .04 * (c(t, e) - .5);
+	for (let e = 0; e < 160; e++) {
+		let e = t.range(0, 256), i = t.range(0, 256), a = t.range(1.5, 7), o = t.range(.015, .07);
+		for (let t = -Math.ceil(a); t <= Math.ceil(a); t++) for (let s = -Math.ceil(a); s <= Math.ceil(a); s++) {
+			let c = Math.hypot(s, t) / a;
+			c >= 1 || (n[r(Math.round(e + s), Math.round(i + t))] -= o * (1 - c * c) ** 2);
+		}
+	}
+	for (let e = 0; e < 22; e++) {
+		let i = t.range(0, 256), a = t.range(0, 256), o = t.range(0, Math.PI * 2), s = t.range(12, 48);
+		for (let t = 0; t < s; t++) {
+			let s = o + Math.sin(t * .12 + e) * .35;
+			i += Math.cos(s) * .9, a += Math.sin(s) * .9, n[r(Math.round(i), Math.round(a))] -= .035;
+		}
+	}
+	let l = document.createElement("canvas");
+	l.width = l.height = 256;
+	let u = l.getContext("2d"), d = u.createImageData(256, 256), f = (e, t) => n[r(e, t)];
+	for (let e = 0; e < 256; e++) for (let t = 0; t < 256; t++) {
+		let n = (f(t - 1, e) - f(t + 1, e)) * 7, r = (f(t, e - 1) - f(t, e + 1)) * 7, i = Math.hypot(n, r, 1), a = (e * 256 + t) * 4;
+		d.data[a] = Math.round((n / i * .5 + .5) * 255), d.data[a + 1] = Math.round((r / i * .5 + .5) * 255), d.data[a + 2] = Math.round((1 / i * .5 + .5) * 255), d.data[a + 3] = 255;
+	}
+	u.putImageData(d, 0, 0);
+	let p = new e.CanvasTexture(l);
+	return p.name = "buddha-gilt-triplanar-normal", p.wrapS = p.wrapT = e.RepeatWrapping, p.colorSpace = e.NoColorSpace, p.minFilter = e.LinearMipmapLinearFilter, p.magFilter = e.LinearFilter, p.anisotropy = 4, Un = p, p;
+}
+function Gn(e) {
+	let t = Wn();
+	return e.vertexColors = !0, e.onBeforeCompile = (e) => {
+		e.uniforms.uGiltNormal = { value: t }, e.uniforms.uGiltScale = { value: 2 }, e.vertexShader = e.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vGiltWPos;\nvarying vec3 vGiltWNormal;"), e.vertexShader = e.vertexShader.replace("#include <worldpos_vertex>", "#include <worldpos_vertex>\nvGiltWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGiltWNormal = normalize(mat3(modelMatrix) * objectNormal);"), e.fragmentShader = e.fragmentShader.replace("#include <common>", "#include <common>\nuniform sampler2D uGiltNormal;\nuniform float uGiltScale;\nvarying vec3 vGiltWPos;\nvarying vec3 vGiltWNormal;"), e.fragmentShader = e.fragmentShader.replace("#include <normal_fragment_maps>", "vec3 gN = normalize(vGiltWNormal);\nvec3 gx = texture2D(uGiltNormal, vGiltWPos.yz * uGiltScale).xyz * 2.0 - 1.0;\nvec3 gy = texture2D(uGiltNormal, vGiltWPos.xz * uGiltScale).xyz * 2.0 - 1.0;\nvec3 gz = texture2D(uGiltNormal, vGiltWPos.xy * uGiltScale).xyz * 2.0 - 1.0;\nvec3 gw = pow(abs(gN), vec3(5.0));\ngw /= max(1e-4, gw.x + gw.y + gw.z);\nvec3 gn = normalize(gx * gw.x + gy * gw.y + gz * gw.z);\nvec3 gUp = abs(gN.y) < 0.94 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);\nvec3 gT = normalize(cross(gUp, gN));\nvec3 gB = cross(gN, gT);\nvec3 gWorld = normalize(gN + (gT * gn.x + gB * gn.y) * 0.55);\nnormal = normalize((viewMatrix * vec4(gWorld, 0.0)).xyz);"), e.fragmentShader = e.fragmentShader.replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + (1.0 - clamp(vColor.r, 0.0, 1.0)) * 0.24, 0.18, 1.0);"), e.fragmentShader = e.fragmentShader.replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\nmetalnessFactor *= mix(0.55, 1.0, clamp(vColor.r, 0.0, 1.0));");
+	}, e.customProgramCacheKey = () => "buddha-triplanar-gilt-v1", e.needsUpdate = !0, e;
+}
+function Kn(e, t, n) {
+	let r = Math.hypot(e, t, n) || 1;
+	return [
+		e / r,
+		t / r,
+		n / r
+	];
+}
+function qn(t) {
+	let n = t.geometry;
+	if (n.userData.lingyinBuddhaSurface) return;
+	let r = n.getAttribute("position"), i = n.getAttribute("normal"), a = n.index;
+	if (!r || !i || !a) return;
+	let o = r.count, s = n.getAttribute("normal"), c = new Float32Array(o * 3), l = new Uint32Array(o);
+	for (let e = 0; e < a.count; e += 3) {
+		let t = [
+			a.getX(e),
+			a.getX(e + 1),
+			a.getX(e + 2)
+		];
+		for (let e of t) {
+			l[e]++;
+			for (let n of t) c[e * 3] += r.getX(n), c[e * 3 + 1] += r.getY(n), c[e * 3 + 2] += r.getZ(n);
+		}
+	}
+	let u = Infinity, d = -Infinity;
+	for (let e = 0; e < o; e++) u = Math.min(u, r.getY(e)), d = Math.max(d, r.getY(e));
+	let f = new Float32Array(o * 3);
+	for (let e = 0; e < o; e++) {
+		let t = r.getX(e), n = r.getY(e), i = r.getZ(e), a = s.getX(e), o = s.getY(e), m = s.getZ(e), h = Math.max(1, l[e]), g = Kn(c[e * 3] / h - t, c[e * 3 + 1] / h - n, c[e * 3 + 2] / h - i), _ = p(a * g[0] + o * g[1] + m * g[2], 0, 1), v = p((n - u) / Math.max(.001, d - u), 0, 1), y = p(o * .5 + .5, 0, 1), b = S(t * 2.4 + i * 1.3, n * 1.9 + 4.1, 3) * .5 + .5, x = S(t * 11, i * 9 + n * 3, 2) * .5 + .5, C = 1 - p(.34 * (1 - v) + .3 * (1 - y) + .52 * _ + .24 * b + .12 * x, 0, 1) * .66;
+		f[e * 3] = C, f[e * 3 + 1] = C * .935, f[e * 3 + 2] = C * .79;
+	}
+	n.setAttribute("color", new e.BufferAttribute(f, 3)), n.userData.lingyinBuddhaSurface = !0;
+}
+function Jn(t, n) {
+	t.updateMatrixWorld(!0), t.traverse((t) => {
+		t instanceof e.Mesh && (qn(t), t.material instanceof e.MeshStandardMaterial && (t.material.vertexColors = !0, t.material.needsUpdate = !0));
+	}), n instanceof e.MeshStandardMaterial && (n.vertexColors = !0);
+}
+//#endregion
 //#region src/world/main_hall_study.ts
-function mn(t, n) {
+function Yn(t, n) {
 	let r = new e.Group();
 	r.name = "lingyin-main-hall-interior";
-	let i = O.temple.x, a = O.temple.z, o = O.platform.y + 1.35, s = O.platform.y + 9.72, c = (S.w - 3.25) / C.x, l = (S.d - 3.25) / C.z, u = O.platform.y + 9.9;
+	let i = j.temple.x, a = j.temple.z, o = j.platform.y + 1.35, s = j.platform.y + 9.72, c = (w.w - 3.25) / T.x, l = (w.d - 3.25) / T.z, u = j.platform.y + 9.9;
 	function d() {
 		let s = t.materials.mainRoof;
 		s instanceof e.MeshStandardMaterial && (s.map = n.redRoof, s.normalMap = null, s.bumpMap = n.redRoof, s.bumpScale = .035, s.color.set("#f3dfd4"), s.roughness = .88, s.needsUpdate = !0);
 		let c = u + 1.55;
-		y("darkWood", 24, 2.5, .09, 0, c, 7.45);
+		b("darkWood", 24, 2.5, .09, 0, c, 7.45);
 		for (let e of [
 			-9.2,
 			-5.1,
 			5.1,
 			9.2
 		]) {
-			y("teal", 3.5, 1.45, .055, e, c, 7.52);
-			for (let t = -4; t <= 4; t++) y("darkWood", .055, 1.43, .06, e + t * .39, c, 7.57);
-			for (let t = -1; t <= 1; t++) y("gilt", 3.5, .035, .06, e, c + t * .48, 7.58);
+			b("teal", 3.5, 1.45, .055, e, c, 7.52);
+			for (let t = -4; t <= 4; t++) b("darkWood", .055, 1.43, .06, e + t * .39, c, 7.57);
+			for (let t = -1; t <= 1; t++) b("gilt", 3.5, .035, .06, e, c + t * .48, 7.58);
 		}
 		for (let e of [
 			-12,
@@ -3012,7 +4064,7 @@ function mn(t, n) {
 			3.25,
 			7.15,
 			12
-		]) y("lacquer", .36, 2.56, .32, e, c, 7.69), y("gilt", .47, .07, .37, e, u + .29, 7.69);
+		]) b("lacquer", .36, 2.56, .32, e, c, 7.69), b("gilt", .47, .07, .37, e, u + .29, 7.69);
 		let l = n.paintedBeam.clone();
 		l.wrapS = e.RepeatWrapping, l.repeat.set(9, 1), l.needsUpdate = !0;
 		let d = new e.MeshStandardMaterial({
@@ -3042,11 +4094,11 @@ function mn(t, n) {
 				7.82
 			]
 		]) {
-			y("teal", t + .1, n + .06, .16, 0, r, o - .1), y("gilt", t + .12, .035, .17, 0, r - n / 2 - .04, o - .09), y("gilt", t + .12, .035, .17, 0, r + n / 2 + .04, o - .09);
+			b("teal", t + .1, n + .06, .16, 0, r, o - .1), b("gilt", t + .12, .035, .17, 0, r - n / 2 - .04, o - .09), b("gilt", t + .12, .035, .17, 0, r + n / 2 + .04, o - .09);
 			let s = new e.PlaneGeometry(t, n);
 			s.translate(i, r, a + o), f.push(s);
 		}
-		let p = new e.Mesh(P(f), d);
+		let p = new e.Mesh(H(f), d);
 		p.name = "hall-exterior-painted-eaves", r.add(p);
 		for (let t of [-9.2, 9.2]) {
 			let n = new e.Mesh(new e.CircleGeometry(1.28, 32), new e.MeshStandardMaterial({
@@ -3065,23 +4117,23 @@ function mn(t, n) {
 			s.position.set(i + t, o + 3.95, a + 7.49), r.add(s);
 		}
 		for (let e of [-5.75, 5.75]) {
-			y("darkWood", 3.65, 5.25, .085, e, o + 3.05, 7.51);
-			for (let t of [-1.87, 1.87]) y("lacquer", .16, 5.48, .12, e + t, o + 3.05, 7.59);
-			for (let t of [-2.7, 2.7]) y("lacquer", 3.95, .16, .12, e, o + 3.05 + t, 7.59);
+			b("darkWood", 3.65, 5.25, .085, e, o + 3.05, 7.51);
+			for (let t of [-1.87, 1.87]) b("lacquer", .16, 5.48, .12, e + t, o + 3.05, 7.59);
+			for (let t of [-2.7, 2.7]) b("lacquer", 3.95, .16, .12, e, o + 3.05 + t, 7.59);
 			for (let t of [
 				-1.15,
 				-.58,
 				0,
 				.58,
 				1.15
-			]) y("teal", .055, 5.1, .09, e + t, o + 3.05, 7.61);
+			]) b("teal", .055, 5.1, .09, e + t, o + 3.05, 7.61);
 			for (let t of [
 				-1.8,
 				-.9,
 				0,
 				.9,
 				1.8
-			]) y("teal", 3.55, .055, .09, e, o + 3.05 + t, 7.61);
+			]) b("teal", 3.55, .055, .09, e, o + 3.05 + t, 7.61);
 		}
 	}
 	let f = new e.MeshStandardMaterial({
@@ -3089,9 +4141,9 @@ function mn(t, n) {
 		map: n.redLacquer,
 		roughness: .51,
 		metalness: .02
-	}), p = gt(!0);
+	}), p = ft(!0);
 	p.name = "hall-carved-dark-wood", p.color.set("#aa9381"), p.roughness = .9;
-	let m = bt();
+	let m = gt();
 	m.name = "hall-painted-dougong", m.color.set("#8bafa7"), m.roughness = .92;
 	let h = new e.MeshStandardMaterial({
 		name: "hall-aged-gilt",
@@ -3100,35 +4152,37 @@ function mn(t, n) {
 		roughness: .39,
 		emissive: "#2d1907",
 		emissiveIntensity: .12
-	}), g = new e.MeshStandardMaterial({
+	}), g = h.clone();
+	g.name = "hall-buddha-warm-gold", g.color.set("#c79a4e"), g.metalness = .48, g.roughness = .42, g.emissive.set("#1b0e04"), g.emissiveIntensity = .06, Gn(g);
+	let _ = new e.MeshStandardMaterial({
 		name: "hall-cast-bronze",
 		color: "#77603d",
 		metalness: .57,
 		roughness: .48
-	}), _ = {
+	}), v = {
 		lacquer: f,
 		darkWood: p,
 		teal: m,
 		gilt: h,
-		bronze: g
-	}, v = {
+		bronze: _
+	}, y = {
 		lacquer: [],
 		darkWood: [],
 		teal: [],
 		gilt: [],
 		bronze: []
-	}, y = (e, t, n, r, o, s, c) => v[e].push(M(t, n, r, i + o, s, a + c)), b = (e, t, n, r, o, s, c, l = 24) => v[e].push(N(t, n, r, l, i + o, s, a + c));
+	}, b = (e, t, n, r, o, s, c) => y[e].push(B(t, n, r, i + o, s, a + c)), x = (e, t, n, r, o, s, c, l = 24) => y[e].push(V(t, n, r, l, i + o, s, a + c));
 	d();
-	let x = t.materials.stone.clone();
-	x.name = "hall-weathered-stone-floor", x.vertexColors = !1, x.color.set("#e3dfd6"), x.roughness = .9, x.map = n.stoneFloor, x.map.wrapS = x.map.wrapT = e.RepeatWrapping, x.map.repeat.set(7 * C.x, 4 * C.z), x.map.needsUpdate = !0, x.normalMap = null, x.roughnessMap = null, x.bumpMap = n.stoneFloor, x.bumpScale = .024;
-	let w = new e.Mesh(new e.PlaneGeometry(c - .08, l - .08), x);
-	w.name = "hall-stone-floor", w.rotation.x = -Math.PI / 2, w.position.set(i, o + .04, a), w.receiveShadow = !0, r.add(w), y("darkWood", c - .08, .16, l - .08, 0, s, 0);
+	let S = t.materials.stone.clone();
+	S.name = "hall-weathered-stone-floor", S.vertexColors = !1, S.color.set("#e3dfd6"), S.roughness = .9, S.map = n.stoneFloor, S.map.wrapS = S.map.wrapT = e.RepeatWrapping, S.map.repeat.set(7 * T.x, 4 * T.z), S.map.needsUpdate = !0, S.normalMap = null, S.roughnessMap = null, S.bumpMap = n.stoneFloor, S.bumpScale = .024;
+	let C = new e.Mesh(new e.PlaneGeometry(c - .08, l - .08), S);
+	C.name = "hall-stone-floor", C.rotation.x = -Math.PI / 2, C.position.set(i, o + .04, a), C.receiveShadow = !0, r.add(C), b("darkWood", c - .08, .16, l - .08, 0, s, 0);
 	for (let e of [
 		-5.55,
 		-2,
 		1.55,
 		5.35
-	]) y("teal", c - .2, .72, .54, 0, s - .38, e), y("gilt", c - .2, .045, .62, 0, s - .76, e);
+	]) b("teal", c - .2, .72, .54, 0, s - .38, e), b("gilt", c - .2, .045, .62, 0, s - .76, e);
 	for (let e of [
 		-10,
 		-7.7,
@@ -3136,17 +4190,17 @@ function mn(t, n) {
 		3.8,
 		7.7,
 		10
-	]) y("teal", .54, .55, l - .2, e, s - .28, 0);
-	for (let e of [-10.7, 10.7]) y("gilt", .035, .06, l - .2, e, s - .58, 0);
-	let T = n.paintedBeam.clone();
-	T.wrapS = e.RepeatWrapping, T.repeat.set(8, 1), T.needsUpdate = !0;
-	let E = new e.MeshStandardMaterial({
+	]) b("teal", .54, .55, l - .2, e, s - .28, 0);
+	for (let e of [-10.7, 10.7]) b("gilt", .035, .06, l - .2, e, s - .58, 0);
+	let E = n.paintedBeam.clone();
+	E.wrapS = e.RepeatWrapping, E.repeat.set(8, 1), E.needsUpdate = !0;
+	let D = new e.MeshStandardMaterial({
 		name: "hall-painted-beam-art",
-		map: T,
+		map: E,
 		roughness: .74,
 		metalness: .03,
 		side: e.DoubleSide
-	}), ee = [];
+	}), O = [];
 	for (let t of [
 		-5.55,
 		-2,
@@ -3154,25 +4208,25 @@ function mn(t, n) {
 		5.35
 	]) {
 		let n = new e.PlaneGeometry(c - .25, .61);
-		n.translate(i, s - .37, a + t + .286), ee.push(n);
+		n.translate(i, s - .37, a + t + .286), O.push(n);
 	}
-	let te = new e.Mesh(P(ee), E);
-	te.name = "hall-painted-crossbeams", r.add(te);
-	let ne = new e.MeshStandardMaterial({
+	let k = new e.Mesh(H(O), D);
+	k.name = "hall-painted-crossbeams", r.add(k);
+	let ee = new e.MeshStandardMaterial({
 		name: "hall-dragon-coffer-art",
 		map: n.coffer,
 		roughness: .76,
 		side: e.DoubleSide,
 		emissive: "#45301d",
 		emissiveIntensity: .08
-	}), D = new e.Mesh(new e.PlaneGeometry(6.75, 6.15), ne);
-	D.name = "hall-central-dragon-coffer", D.rotation.x = Math.PI / 2, D.position.set(i, s - .11, a + .1), r.add(D);
-	for (let e of [-1, 1]) y("gilt", .09, .045, 6.48, e * 3.43, s - .12, .1), y("gilt", 6.95, .045, .09, 0, s - .12, .1 + e * 3.15);
-	for (let [e, t] of rn) {
-		for (let n of an) b(n.role, n.rt, n.rb, n.h, e, O.platform.y + n.y, t, n.segments);
+	}), te = new e.Mesh(new e.PlaneGeometry(6.75, 6.15), ee);
+	te.name = "hall-central-dragon-coffer", te.rotation.x = Math.PI / 2, te.position.set(i, s - .11, a + .1), r.add(te);
+	for (let e of [-1, 1]) b("gilt", .09, .045, 6.48, e * 3.43, s - .12, .1), b("gilt", 6.95, .045, .09, 0, s - .12, .1 + e * 3.15);
+	for (let [e, t] of xn) {
+		for (let n of Sn) x(n.role, n.rt, n.rb, n.h, e, j.platform.y + n.y, t, n.segments);
 		for (let n = 0; n < 3; n++) {
 			let r = s - .44 + n * .16, i = .85 + n * .25;
-			y("teal", 2 * i, .16, .58, e, r, t), y("teal", .62, .16, 2 * i, e, r + .07, t), y("gilt", 2 * i, .025, .06, e, r - .09, t + .29);
+			b("teal", 2 * i, .16, .58, e, r, t), b("teal", .62, .16, 2 * i, e, r + .07, t), b("gilt", 2 * i, .025, .06, e, r - .09, t + .29);
 		}
 	}
 	for (let e of [
@@ -3185,76 +4239,78 @@ function mn(t, n) {
 		-2,
 		1.55,
 		5.35
-	]) y("teal", 1.42, .16, .38, e, s - .82, t), y("teal", .47, .22, .9, e, s - .68, t), y("gilt", 1.32, .035, .04, e, s - .92, t + .22);
-	let re = new e.MeshStandardMaterial({
+	]) b("teal", 1.42, .16, .38, e, s - .82, t), b("teal", .47, .22, .9, e, s - .68, t), b("gilt", 1.32, .035, .04, e, s - .92, t + .22);
+	let ne = Xe(), A = new e.MeshStandardMaterial({
 		name: "hall-daylit-paper",
-		color: "#e4d5b7",
-		roughness: 1,
-		emissive: "#fff0d0",
-		emissiveIntensity: .76,
+		color: "#d9c9a9",
+		map: ne,
+		roughness: .96,
+		emissive: "#f4e3c4",
+		emissiveMap: ne,
+		emissiveIntensity: .34,
 		side: e.DoubleSide
-	}), ie = [];
+	}), re = [];
 	for (let t of [-1, 1]) for (let n of [
 		-3.75,
 		0,
 		3.75
 	]) {
 		let r = t * (c / 2 - .22), s = o + 4.18, l = new e.PlaneGeometry(2.7, 5.5);
-		l.rotateY(-t * Math.PI / 2), l.translate(i + r, s, a + n), ie.push(l);
-		for (let e of [-1.39, 1.39]) y("darkWood", .12, 5.7, .13, r - t * .08, s, n + e);
-		for (let e of [-2.82, 2.82]) y("darkWood", .12, .14, 2.85, r - t * .08, s + e, n);
-		for (let e = -3; e <= 3; e++) y("darkWood", .045, 5.5, .045, r - t * .13, s, n + e * .36);
-		for (let e = -6; e <= 6; e++) y("darkWood", .045, .045, 2.7, r - t * .13, s + e * .4, n);
+		l.rotateY(-t * Math.PI / 2), l.translate(i + r, s, a + n), re.push(l);
+		for (let e of [-1.39, 1.39]) b("darkWood", .12, 5.7, .13, r - t * .08, s, n + e);
+		for (let e of [-2.82, 2.82]) b("darkWood", .12, .14, 2.85, r - t * .08, s + e, n);
+		for (let e = -3; e <= 3; e++) b("darkWood", .045, 5.5, .045, r - t * .13, s, n + e * .36);
+		for (let e = -6; e <= 6; e++) b("darkWood", .045, .045, 2.7, r - t * .13, s + e * .4, n);
 	}
-	let ae = new e.Mesh(P(ie), re);
-	ae.name = "hall-daylit-lattice-windows", r.add(ae);
-	for (let e of [-1, 1]) y("darkWood", .18, 1.05, l - .25, e * (c / 2 - .12), o + .57, 0), y("gilt", .035, .035, l - .25, e * (c / 2 - .19), o + 1.12, 0);
-	for (let e of cn) y(e.role, e.w, e.h, e.d, e.x, o + e.y, e.z);
-	y("teal", 18, .8, .42, 0, s - .65, -6.23);
+	let ie = new e.Mesh(H(re), A);
+	ie.name = "hall-daylit-lattice-windows", r.add(ie);
+	for (let e of [-1, 1]) b("darkWood", .18, 1.05, l - .25, e * (c / 2 - .12), o + .57, 0), b("gilt", .035, .035, l - .25, e * (c / 2 - .19), o + 1.12, 0);
+	for (let e of Tn) b(e.role, e.w, e.h, e.d, e.x, o + e.y, e.z);
+	b("teal", 18, .8, .42, 0, s - .65, -6.23);
 	for (let e of [
 		-6.9,
 		-2.3,
 		2.3,
 		6.9
-	]) y("lacquer", .18, 6.95, .13, e, o + 4.1, -6.48), y("gilt", .035, 6.9, .04, e + .13, o + 4.1, -6.4);
-	for (let e of [o + 5.5, o + 7.15]) y("teal", 17.1, .24, .2, 0, e, -6.45), y("gilt", 17.1, .035, .22, 0, e - .13, -6.45);
-	for (let e of [-8.75, 8.75]) y("lacquer", .4, 4.8, .36, e, o + 2.5, -6.35), y("gilt", .07, 4.4, .04, e + (e < 0 ? .23 : -.23), o + 2.52, -6.12);
-	let oe = gn(), se = new e.MeshBasicMaterial({
+	]) b("lacquer", .18, 6.95, .13, e, o + 4.1, -6.48), b("gilt", .035, 6.9, .04, e + .13, o + 4.1, -6.4);
+	for (let e of [-8.75, 8.75]) b("lacquer", .4, 4.8, .36, e, o + 2.5, -6.35), b("gilt", .07, 4.4, .04, e + (e < 0 ? .23 : -.23), o + 2.52, -6.12);
+	let ae = Zn(), oe = new e.MeshBasicMaterial({
 		name: "hall-gilt-halos",
-		map: oe,
+		map: ae,
+		color: 10123850,
 		transparent: !0,
 		depthWrite: !1,
 		side: e.DoubleSide
-	}), ce = fn(n.buddhaSideLod);
+	}), se = kn(n.buddhaSideLod), ce = [];
 	for (let t of [
 		-4.6,
 		0,
 		4.6
 	]) {
-		let s = t === 0, c = new e.Mesh(new e.PlaneGeometry(s ? 4.5 : 3.55, s ? 4.5 : 3.55), se);
+		let s = t === 0, c = new e.Mesh(new e.PlaneGeometry(s ? 4.5 : 3.55, s ? 4.5 : 3.55), oe);
 		c.name = "hall-statue-halo", c.position.set(i + t, o + (s ? 4.05 : 3.56), a - 6.37), r.add(c);
 		let l = new e.LOD();
-		l.position.set(i + t, o + .9, a - 4.82), l.addLevel(hn(s ? n.buddhaScan : n.buddhaSideLod, h, s ? 1.35 : 1.05, 0, 0, 0), 0), s && l.addLevel(hn(n.buddhaSideLod, h, 1.35, 0, 0, 0), 20, .12), l.addLevel(hn(ce, h, s ? 1.35 : 1.05, 0, 0, 0), 40, .12), pn(l), l.name = s ? "hall-central-buddha" : "hall-flanking-buddha", r.add(l);
+		l.position.set(i + t, o + .9, a - 4.82), l.addLevel(Xn(s ? n.buddhaScan : n.buddhaSideLod, g, s ? 1.35 : 1.05, 0, 0, 0), 0), s && l.addLevel(Xn(n.buddhaSideLod, g, 1.35, 0, 0, 0), 20, .12), l.addLevel(Xn(se, g, s ? 1.35 : 1.05, 0, 0, 0), 40, .12), An(l), l.name = s ? "hall-central-buddha" : "hall-flanking-buddha", r.add(l), ce.push(l);
 	}
-	y("gilt", 13.4, .035, .06, 0, o + 1.07, -1.3), y("gilt", 13.4, .035, .06, 0, o + .59, -1.3);
-	let k = n.carvedAltar.clone();
-	k.wrapS = e.RepeatWrapping, k.repeat.set(5, 1), k.needsUpdate = !0;
-	let le = new e.Mesh(new e.PlaneGeometry(13.26, .7), new e.MeshStandardMaterial({
+	b("gilt", 13.4, .035, .06, 0, o + 1.07, -1.3), b("gilt", 13.4, .035, .06, 0, o + .59, -1.3);
+	let le = n.carvedAltar.clone();
+	le.wrapS = e.RepeatWrapping, le.repeat.set(5, 1), le.needsUpdate = !0;
+	let ue = new e.Mesh(new e.PlaneGeometry(13.26, .7), new e.MeshStandardMaterial({
 		name: "hall-carved-altar-front",
-		map: k,
+		map: le,
 		roughness: .68,
 		metalness: .04,
 		side: e.DoubleSide
 	}));
-	le.name = "hall-carved-altar-front", le.position.set(i, o + .84, a - 1.31), r.add(le);
+	ue.name = "hall-carved-altar-front", ue.position.set(i, o + .84, a - 1.31), r.add(ue);
 	for (let e of [
 		-6.3,
 		-3.2,
 		0,
 		3.2,
 		6.3
-	]) y("gilt", .08, .45, .08, e, o + .87, -1.15);
-	let ue = [];
+	]) b("gilt", .08, .45, .08, e, o + .87, -1.15);
+	let M = [];
 	for (let t of [
 		-5.7,
 		-4.4,
@@ -3265,59 +4321,119 @@ function mn(t, n) {
 		4.4,
 		5.7
 	]) {
-		b("bronze", .13, .2, .25, t, o + 1.45, -2.04, 12), b("gilt", .045, .07, .28, t, o + 1.72, -2.04, 10);
+		x("bronze", .13, .2, .25, t, o + 1.45, -2.04, 12), x("gilt", .045, .07, .28, t, o + 1.72, -2.04, 10);
 		let n = new e.SphereGeometry(.08, 10, 8);
-		n.scale(.75, 1.7, .75), n.translate(i + t, o + 1.93, a - 2.04), ue.push(n);
+		n.scale(.75, 1.7, .75), n.translate(i + t, o + 1.93, a - 2.04), M.push(n);
 	}
-	let de = new e.Mesh(P(ue), new e.MeshBasicMaterial({ color: "#ffd185" }));
-	de.name = "hall-altar-flames", r.add(de);
-	let fe = new e.Mesh(new e.PlaneGeometry(3.65, 11.6), new e.MeshStandardMaterial({
+	let N = new e.Mesh(H(M), new e.MeshBasicMaterial({ color: "#ffd185" }));
+	N.name = "hall-altar-flames", r.add(N);
+	let P = Qn(), F = new e.Mesh(new e.PlaneGeometry(3.65, 11.6), new e.MeshStandardMaterial({
 		name: "hall-woven-carpet",
-		map: _n(),
-		roughness: .94,
+		map: P,
+		bumpMap: P,
+		bumpScale: .012,
+		roughness: .96,
 		metalness: 0
 	}));
-	fe.name = "hall-processional-carpet", fe.rotation.x = -Math.PI / 2, fe.position.set(i, o + .055, a + 1.38), r.add(fe);
-	let pe = vn(g, h, i + on.x, o, a + on.z);
-	pe.scale.setScalar(on.scale), pe.position.set((i + on.x) * (1 - on.scale), o * (1 - on.scale), (a + on.z) * (1 - on.scale)), r.add(pe);
-	let me = new e.PointLight(16759920, 13, 16, 2);
-	me.position.set(i, o + 3.6, a - 3), r.add(me);
+	F.material.color.setRGB(.82, .84, .84), F.name = "hall-processional-carpet", F.rotation.x = -Math.PI / 2, F.position.set(i, o + .055, a + 1.38), r.add(F);
+	let de = $n(_, h, i + Cn.x, o, a + Cn.z);
+	de.scale.setScalar(Cn.scale), de.position.set((i + Cn.x) * (1 - Cn.scale), o * (1 - Cn.scale), (a + Cn.z) * (1 - Cn.scale)), r.add(de);
+	let I = new e.SpotLight(16769206, 100, 30, .34, .65, 1.55);
+	I.name = "hall-altar-key-shadowed", I.position.set(i, o + 7.55, a + 2.4), I.target.position.set(i, o + 3.4, a - 5.2), r.add(I, I.target);
+	let fe = new e.PointLight(16760184, 20, 24, 1.9);
+	fe.position.set(i, o + 3.8, a - 3.6), r.add(fe);
 	for (let t of [-1, 1]) {
-		let n = new e.PointLight(16770494, 6, 8, 2);
-		n.position.set(i + t * 9, o + 3.2, a + .2), r.add(n);
+		let n = new e.PointLight(14148580, 26, 13, 1.9);
+		n.position.set(i + t * 9, o + 3.8, a + .2), r.add(n);
 	}
-	for (let t of Object.keys(v)) {
-		if (!v[t].length) continue;
-		let n = P(v[t]), i = t === "lacquer" ? F(n, 2.4) : t === "darkWood" || t === "teal" ? F(n, .9) : n;
-		(t === "lacquer" || t === "darkWood" || t === "teal") && (nn(i, "wood", o), _[t].vertexColors = !0);
-		let a = new e.Mesh(i, _[t]);
+	let pe = new e.PointLight(13624552, 42, 18, 1.9);
+	pe.name = "hall-entrance-daylight-fill", pe.position.set(i, o + 4.6, a + 8.2), r.add(pe);
+	let L = new e.PointLight(12376290, 34, 7, 2);
+	L.name = "hall-buddha-cool-rim", L.position.set(i, o + 5.6, a - 7.2), r.add(L);
+	for (let t of Object.keys(y)) {
+		if (!y[t].length) continue;
+		let n = H(y[t]), i = t === "lacquer" ? U(n, 2.4) : t === "darkWood" || t === "teal" ? U(n, .9) : n;
+		(t === "lacquer" || t === "darkWood" || t === "teal") && (bn(i, "wood", o), v[t].vertexColors = !0);
+		let a = new e.Mesh(i, v[t]);
 		a.name = "hall-structure-" + t, a.receiveShadow = !0, r.add(a);
 	}
-	let he = new e.Group();
-	he.name = "main-hall-expanded-layout";
-	let { x: ge, z: _e } = C, ve = (t, n) => {
+	let me = new e.Group();
+	me.name = "main-hall-expanded-layout";
+	let { x: he, z: ge } = T, _e = (t, n) => {
 		let i = new e.Group();
-		i.name = `${t.name}-proportion-pivot`, i.position.copy(n), i.scale.set(1 / ge, 1, 1 / _e), t.position.sub(n), r.remove(t), i.add(t), r.add(i);
+		i.name = `${t.name}-proportion-pivot`, i.position.copy(n), i.scale.set(1 / he, 1, 1 / ge), t.position.sub(n), r.remove(t), i.add(t), r.add(i);
 	};
-	for (let t of [...r.children]) (t instanceof e.LOD || t.name === "hall-statue-halo" || t.name === "hall-exterior-round-window" || t instanceof e.Mesh && t.geometry.type === "RingGeometry") && ve(t, t.position.clone());
-	ve(pe, new e.Vector3(i + on.x, o, a + on.z));
-	for (let e of [...r.children]) r.remove(e), he.add(e);
-	return he.scale.set(ge, 1, _e), he.position.set(i * (1 - ge), 0, a * (1 - _e)), r.add(he), r.userData.expandedLayout = {
-		width: S.w,
-		depth: S.d,
+	for (let t of [...r.children]) (t instanceof e.LOD || t.name === "hall-statue-halo" || t.name === "hall-exterior-round-window" || t instanceof e.Mesh && t.geometry.type === "RingGeometry") && _e(t, t.position.clone());
+	_e(de, new e.Vector3(i + Cn.x, o, a + Cn.z));
+	for (let e of [...r.children]) r.remove(e), me.add(e);
+	me.scale.set(he, 1, ge), me.position.set(i * (1 - he), 0, a * (1 - ge)), r.add(me), r.updateMatrixWorld(!0);
+	let ve = [];
+	for (let t of ce) {
+		let n = new e.Box3().setFromObject(t), r = n.max.x - n.min.x + .56, i = n.max.y - n.min.y + .3, a = (n.min.x + n.max.x) / 2, o = (n.min.y + n.max.y) / 2, s = n.min.z - .1, c = new e.PlaneGeometry(r, i, 24, 4), l = c.getAttribute("position");
+		for (let e = 0; e < l.count; e++) {
+			let t = l.getX(e) / r + .5;
+			l.setZ(e, Math.sin(t * Math.PI * 9 + 1.2) * .012);
+		}
+		c.rotateY(Math.PI), c.translate(a, o, s), ve.push(c);
+		let u = .62;
+		for (let t of [-1, 1]) {
+			let n = new e.PlaneGeometry(u, i, 1, 4);
+			n.rotateY(t > 0 ? Math.PI / 2 : -Math.PI / 2), n.translate(a + r / 2 * t, o, s + u / 2), ve.push(n);
+		}
+		let d = new e.PlaneGeometry(r, u, 4, 1);
+		d.rotateX(-Math.PI / 2), d.translate(a, n.max.y + .15, s + u / 2), ve.push(d);
+	}
+	let ye = (() => {
+		let t = document.createElement("canvas");
+		t.width = 512, t.height = 1024;
+		let n = t.getContext("2d"), r = n.createLinearGradient(0, 0, 512, 0);
+		r.addColorStop(0, "#3a1213"), r.addColorStop(.5, "#5e1d1a"), r.addColorStop(1, "#351011"), n.fillStyle = r, n.fillRect(0, 0, 512, 1024);
+		for (let e = 0; e < 90; e++) n.fillStyle = `rgba(${80 + e % 25},${20 + e % 10},${18 + e % 8},.22)`, n.fillRect(e * 73 % 512, 0, 3 + e % 7, 1024);
+		n.strokeStyle = "#a87b3f", n.lineWidth = 10, n.strokeRect(18, 18, 476, 988), n.strokeStyle = "rgba(226,192,122,.45)", n.lineWidth = 2, n.strokeRect(34, 34, 444, 956);
+		for (let e of [
+			92,
+			180,
+			332,
+			420
+		]) {
+			let t = n.createLinearGradient(e - 16, 0, e + 16, 0);
+			t.addColorStop(0, "rgba(0,0,0,0)"), t.addColorStop(.5, "rgba(0,0,0,.16)"), t.addColorStop(1, "rgba(0,0,0,0)"), n.fillStyle = t, n.fillRect(e - 16, 0, 32, 1024);
+		}
+		let i = new e.CanvasTexture(t);
+		return i.colorSpace = e.SRGBColorSpace, i;
+	})(), R = new e.MeshBasicMaterial({
+		name: "hall-buddha-rear-backing-card",
+		map: ye,
+		color: 16777215,
+		side: e.FrontSide,
+		toneMapped: !1
+	}), be = new e.Mesh(H(ve), R);
+	return be.name = "hall-buddha-rear-cards", r.add(be), r.add(Vn({
+		cx: i,
+		cz: a,
+		floor: o,
+		ceiling: s,
+		halfW: (w.w - 3.25) / 2,
+		halfD: (w.d - 3.25) / 2,
+		sx: he,
+		sz: ge,
+		mats: v
+	})), r.userData.expandedLayout = {
+		width: w.w,
+		depth: w.d,
 		centerZ: a,
 		statueProportionsPreserved: !0
 	}, r;
 }
-function hn(t, n, r, i, a, o) {
+function Xn(t, n, r, i, a, o) {
 	let s = t.clone(!0);
 	s.rotation.x = Math.PI / 2, s.scale.setScalar(.027 * r), s.position.set(0, 0, 0), s.traverse((t) => {
 		t instanceof e.Mesh && (t.material = n);
-	}), s.updateMatrixWorld(!0);
+	}), s.updateMatrixWorld(!0), Jn(s, n);
 	let c = new e.Box3().setFromObject(s);
 	return s.position.set(i - (c.min.x + c.max.x) / 2, a - c.min.y, o - (c.min.z + c.max.z) / 2), s;
 }
-function gn() {
+function Zn() {
 	let t = document.createElement("canvas");
 	t.width = t.height = 512;
 	let n = t.getContext("2d"), r = (e, t, r) => {
@@ -3335,30 +4451,41 @@ function gn() {
 	let i = new e.CanvasTexture(t);
 	return i.colorSpace = e.SRGBColorSpace, i.anisotropy = 8, i;
 }
-function _n() {
+function Qn() {
 	let t = document.createElement("canvas");
-	t.width = 384, t.height = 1024;
-	let n = t.getContext("2d");
-	n.fillStyle = "#6f2520", n.fillRect(0, 0, 384, 1024);
-	for (let e = 0; e < 4800; e++) {
-		let t = (Math.imul(e, 1597334677) >>> 0) % 384, r = (Math.imul(e, 3812015801) >>> 0) % 1024;
-		n.fillStyle = e % 3 ? "#8c332a22" : "#32141322", n.fillRect(t, r, 2, 5);
-	}
-	for (let e of [
-		18,
-		31,
-		353,
-		366
-	]) n.fillStyle = "#b48a49", n.fillRect(e, 0, e === 18 || e === 366 ? 3 : 7, 1024);
-	n.strokeStyle = "#aa7c43", n.lineWidth = 3;
-	for (let e of [43, 341]) for (let t = 0; t < 1024; t += 32) n.beginPath(), n.moveTo(e, t), n.lineTo(e + (e < 100 ? 11 : -11), t + 16), n.lineTo(e, t + 32), n.stroke();
-	let r = new e.CanvasTexture(t);
-	return r.colorSpace = e.SRGBColorSpace, r.anisotropy = 8, r;
+	t.width = 512, t.height = 2048;
+	let n = t.getContext("2d"), r = new _("hall-carpet"), i = n.createLinearGradient(0, 0, 512, 0);
+	i.addColorStop(0, "#4d1518"), i.addColorStop(.5, "#721f1e"), i.addColorStop(1, "#481316"), n.fillStyle = i, n.fillRect(0, 0, 512, 2048);
+	for (let e = 0; e < 12e3; e++) n.fillStyle = e % 3 ? "rgba(255,190,150,.035)" : "rgba(20,4,4,.06)", n.fillRect(r.range(0, 512), r.range(0, 2048), 2, r.range(2, 7));
+	n.fillStyle = "#b48a49", n.fillRect(0, 0, 22, 2048), n.fillRect(490, 0, 22, 2048), n.fillRect(0, 0, 512, 22), n.fillRect(0, 2026, 512, 22), n.fillStyle = "#2c5a55", n.fillRect(34, 34, 12, 1980), n.fillRect(466, 34, 12, 1980), n.fillRect(34, 34, 444, 12), n.fillRect(34, 2002, 444, 12), n.strokeStyle = "rgba(222,180,104,.75)", n.lineWidth = 3, n.strokeRect(58, 58, 396, 1932);
+	for (let e of [68, 432]) for (let t = 80; t < 1970; t += 52) n.strokeStyle = "rgba(204,158,84,.72)", n.lineWidth = 3, n.beginPath(), n.moveTo(e, t), n.lineTo(e + (e < 100 ? 22 : -22), t + 26), n.lineTo(e, t + 52), n.stroke();
+	let a = (e, t) => {
+		n.save(), n.translate(256, e), n.scale(t, t), n.strokeStyle = "rgba(209,167,91,.8)", n.lineWidth = 4, n.beginPath(), n.arc(0, 0, 118, 0, Math.PI * 2), n.stroke(), n.beginPath(), n.arc(0, 0, 98, 0, Math.PI * 2), n.stroke();
+		for (let e = 0; e < 12; e++) {
+			let t = e / 12 * Math.PI * 2;
+			n.save(), n.rotate(t), n.fillStyle = e % 2 ? "rgba(206,158,84,.55)" : "rgba(146,91,42,.5)", n.beginPath(), n.ellipse(0, -64, 22, 46, 0, 0, Math.PI * 2), n.fill(), n.restore();
+		}
+		n.fillStyle = "rgba(218,174,98,.75)", n.beginPath(), n.arc(0, 0, 26, 0, Math.PI * 2), n.fill(), n.fillStyle = "rgba(53,70,59,.65)", n.beginPath(), n.arc(0, 0, 14, 0, Math.PI * 2), n.fill(), n.restore();
+	};
+	a(580, 1), a(1468, 1);
+	let o = (e, t, r) => {
+		n.save(), n.translate(e, t), n.scale(r, 1), n.strokeStyle = "rgba(202,158,86,.55)", n.lineWidth = 3;
+		for (let e of [
+			44,
+			29,
+			16
+		]) n.beginPath(), n.arc(0, 0, e, .2, 4.6), n.stroke();
+		n.restore();
+	};
+	for (let e of [300, 1750]) o(140, e, 1), o(372, e, -1);
+	for (let e = 0; e < 30; e++) n.fillStyle = "rgba(230,190,150,.035)", n.beginPath(), n.ellipse(r.range(60, 452), r.range(120, 1920), r.range(8, 35), r.range(3, 12), r.range(0, 3), 0, Math.PI * 2), n.fill();
+	let s = new e.CanvasTexture(t);
+	return s.colorSpace = e.SRGBColorSpace, s.anisotropy = 8, s;
 }
-function vn(t, n, r, i, a) {
+function $n(t, n, r, i, a) {
 	let o = new e.Group();
 	o.name = "hall-tripod-incense-burner";
-	let s = sn.map(([t, n]) => new e.Vector2(t, n)), c = new e.Mesh(new e.LatheGeometry(s, 28), t);
+	let s = wn.map(([t, n]) => new e.Vector2(t, n)), c = new e.Mesh(new e.LatheGeometry(s, 28), t);
 	c.position.set(r, i + .4, a), o.add(c);
 	let l = new e.Mesh(new e.TorusGeometry(.88, .055, 8, 32), n);
 	l.rotation.x = Math.PI / 2, l.position.set(r, i + 1.2, a), o.add(l);
@@ -3373,8 +4500,8 @@ function vn(t, n, r, i, a) {
 	return o;
 }
 //#endregion
-//#region ../scripts/lingyin_small_halls.js
-var yn = [{
+//#region src/shared/lingyin_small_halls.js
+var er = [{
 	name: "west",
 	x: -25.5,
 	z: 7,
@@ -3441,7 +4568,7 @@ var yn = [{
 		}))
 	]
 }];
-function bn(e) {
+function tr(e) {
 	let t = Math.abs(Math.cos(e.rot)), n = Math.abs(Math.sin(e.rot));
 	return {
 		x: e.x,
@@ -3453,7 +4580,7 @@ function bn(e) {
 }
 //#endregion
 //#region src/world/small_hall_interior.ts
-function xn(t, n) {
+function nr(t, n) {
 	let r = new e.Group();
 	r.name = "lingyin-small-hall-interiors";
 	let i = {
@@ -3468,7 +4595,7 @@ function xn(t, n) {
 	}, a = t.materials.woodDark.clone();
 	a.name = "small-hall-worn-timber", a.color.set("#e0c5a9"), a.roughness = .84, a.vertexColors = !0;
 	let o = t.materials.wall.clone();
-	o.name = "small-hall-limewash", o.color.set("#dfd7be"), o.vertexColors = !0, o.map = tt(), o.bumpMap = o.map, o.bumpScale = .009, o.normalMap = null, o.roughnessMap = null, o.roughness = .98;
+	o.name = "small-hall-limewash", o.color.set("#dfd7be"), o.vertexColors = !0, o.map = Xe(), o.bumpMap = o.map, o.bumpScale = .009, o.normalMap = null, o.roughnessMap = null, o.roughness = .98;
 	let s = new e.MeshStandardMaterial({
 		name: "small-hall-aged-stone",
 		map: n.stoneFloor,
@@ -3479,8 +4606,8 @@ function xn(t, n) {
 		vertexColors: !0
 	}), c = new e.MeshStandardMaterial({
 		name: "small-hall-paper-and-woven-fabric",
-		map: tt(),
-		bumpMap: tt(),
+		map: Xe(),
+		bumpMap: Xe(),
 		bumpScale: .006,
 		roughness: .94,
 		vertexColors: !0
@@ -3526,16 +4653,16 @@ function xn(t, n) {
 		}
 		return t.setAttribute("color", new e.BufferAttribute(a, 3, !0)), t;
 	};
-	for (let t of yn) {
+	for (let t of er) {
 		let r = t.plinth + .25, a = t.w / 2 - 1.35 - .18, o = t.d / 2 - 1.35 - .18, s = t.eave - t.plinth - .38, c = s - r, l = (n, r, a = 16777215) => {
-			if ((n === "timber" || n === "plaster") && (r = F(r, n === "timber" ? .8 : 2.4)), n === "paint" || n === "carving") {
+			if ((n === "timber" || n === "plaster") && (r = U(r, n === "timber" ? .8 : 2.4)), n === "paint" || n === "carving") {
 				let t = f[n].map, i = r.getAttribute("uv");
 				r.computeBoundingBox();
 				let a = r.boundingBox.getSize(new e.Vector3()).length(), o = Math.max(1, a / 2.8);
 				for (let e = 0; e < i.count; e++) i.setXY(e, (i.getX(e) * o - t.offset.x) / t.repeat.x, (i.getY(e) - t.offset.y) / t.repeat.y);
 			}
-			f[n].vertexColors && !r.hasAttribute("color") && p(r, a), r.rotateY(t.rot), r.translate(t.x, O.platform.y, t.z), i[n].push(r);
-		}, u = (e, t, n, r, i, a, o, s) => l(e, M(t, n, r, i, a, o), s), d = (t, n, r, i, a, o, s = 0, c) => {
+			f[n].vertexColors && !r.hasAttribute("color") && p(r, a), r.rotateY(t.rot), r.translate(t.x, j.platform.y, t.z), i[n].push(r);
+		}, u = (e, t, n, r, i, a, o, s) => l(e, B(t, n, r, i, a, o), s), d = (t, n, r, i, a, o, s = 0, c) => {
 			let u = new e.PlaneGeometry(n, r);
 			u.rotateY(s), u.translate(i, a, o), l(t, u, c);
 		}, m = new e.PlaneGeometry(a * 2, o * 2, Math.ceil(a * 2 / .8), Math.ceil(o * 2 / .8));
@@ -3543,7 +4670,7 @@ function xn(t, n) {
 		let h = m.attributes.uv, g = m.attributes.position;
 		for (let e = 0; e < g.count; e++) h.setXY(e, g.getX(e) / (3.3 * n.stoneFloor.repeat.x), g.getZ(e) / (3.3 * n.stoneFloor.repeat.y));
 		p(m, 16777215);
-		let _ = m.getAttribute("color"), v = t.furniture.map(bn);
+		let _ = m.getAttribute("color"), v = t.furniture.map(tr);
 		for (let e = 0; e < g.count; e++) {
 			let t = g.getX(e), n = g.getZ(e), r = Math.min(a - Math.abs(t), o - Math.abs(n)), i = .88 + .12 * Math.min(1, r / .4);
 			for (let e of v) {
@@ -3595,7 +4722,7 @@ function xn(t, n) {
 			u("timber", .48, .065, .48, 0, b + e * .22, 0);
 			for (let t of [-1, 1]) u("timber", .035, .43, .035, e * .195, b, t * .195);
 		}
-		for (let e of t.furniture) Sn(e, r, l);
+		for (let e of t.furniture) rr(e, r, l);
 		if (t.name !== "west") {
 			let e = t.name === "rear" ? 5.1 : 3.8, n = t.name === "rear" ? 2.65 : 2.12, i = r + (t.name === "rear" ? 2.05 : 1.7), a = -o + .075;
 			u("timber", e + .22, n + .22, .085, 0, i, a), d("paper", e + .09, n + .09, 0, i, a + .047, 0, 13153933), d("mural", e, n, 0, i, a + .053);
@@ -3603,21 +4730,21 @@ function xn(t, n) {
 	}
 	let m = 0;
 	for (let t of Object.keys(i)) {
-		let n = P(i[t]), a = new e.Mesh(n, f[t]);
+		let n = H(i[t]), a = new e.Mesh(n, f[t]);
 		a.name = `small-halls-${t}`, a.receiveShadow = !0, a.castShadow = !1, r.add(a), m += (n.index?.count || n.attributes.position.count) / 3;
 	}
 	return r.userData = {
-		halls: yn.length,
+		halls: er.length,
 		batches: r.children.length,
 		triangles: m,
 		addedLights: 0,
 		addedDownloads: 0
 	}, r;
 }
-function Sn(t, n, r) {
+function rr(t, n, r) {
 	let i = (e, i, a) => {
 		i.rotateY(t.rot), i.translate(t.x, n, t.z), r(e, i, a);
-	}, a = (e, t, n, r, a, o, s, c) => i(e, M(t, n, r, a, o, s), c), o = (t, n, r, a, o, s, c) => i(t, new e.PlaneGeometry(n, r).translate(a, o, s), c), { w: s, d: c, h: l } = t;
+	}, a = (e, t, n, r, a, o, s, c) => i(e, B(t, n, r, a, o, s), c), o = (t, n, r, a, o, s, c) => i(t, new e.PlaneGeometry(n, r).translate(a, o, s), c), { w: s, d: c, h: l } = t;
 	if (t.kind === "bookcase") {
 		a("timber", s - .06, l - .08, .045, 0, l / 2, -c / 2 + .04, 8549736);
 		for (let e of [-1, 1]) a("timber", .075, l, c, e * (s / 2 - .038), l / 2, 0);
@@ -3647,15 +4774,15 @@ function Sn(t, n, r) {
 			a("timber", s - .16, e - .2, c - .1, 0, (e + .1) / 2, 0);
 			for (let e of [-1, 1]) a("paper", s * .43, .42, .008, e * s * .235, .64, c / 2 - .045, 9074272), a("timber", .025, .09, .035, e * .07, .7, c / 2 - .018);
 		} else if (t.kind === "altar" || t.kind === "lectern") if (o("carving", s - .3, .28, 0, e - .21, c / 2 + .002), t.kind === "lectern") {
-			let e = M(.68, .045, .36, 0, 0, 0);
+			let e = B(.68, .045, .36, 0, 0, 0);
 			e.rotateX(-.12), e.translate(0, l + .008, 0), i("paper", e, 13154189);
-		} else for (let e of [-1, 1]) i("timber", N(.12, .16, .055, 10, e * s * .32, l + .01, 0)), i("paper", N(.1, .08, .08, 10, e * s * .32, l + .065, 0), 9350314);
+		} else for (let e of [-1, 1]) i("timber", V(.12, .16, .055, 10, e * s * .32, l + .01, 0)), i("paper", V(.1, .08, .08, 10, e * s * .32, l + .065, 0), 9350314);
 		else a("paper", .52, .065, .36, -s * .18, l + .01, 0, 12366739), a("paper", .34, .035, .33, s * .2, l + .006, 0, 10199951);
 	}
 }
 //#endregion
 //#region src/world/static_collision.ts
-function Cn(e) {
+function ir(e) {
 	e.sort((e, t) => e.x - t.x || e.z - t.z);
 	let t = (e, t, n) => (t.x - e.x) * (n.z - e.z) - (t.z - e.z) * (n.x - e.x), n = (e) => {
 		let n = [];
@@ -3667,7 +4794,7 @@ function Cn(e) {
 	}, r = n(e), i = n([...e].reverse());
 	return [...r.slice(0, -1), ...i.slice(0, -1)];
 }
-function wn(t) {
+function ar(t) {
 	t.updateMatrixWorld(!0);
 	let n = [], r = 0;
 	return t.traverse((t) => {
@@ -3680,7 +4807,7 @@ function wn(t) {
 		});
 		let o = new e.Box3().setFromPoints(a), s = o.max.y - o.min.y;
 		for (let e = 0; e < 6; e++) {
-			let t = o.min.y + s * e / 6, i = o.min.y + s * (e + 1) / 6, c = Cn(a.filter((e) => e.y >= t - .06 && e.y <= i + .06).map((e) => ({
+			let t = o.min.y + s * e / 6, i = o.min.y + s * (e + 1) / 6, c = ir(a.filter((e) => e.y >= t - .06 && e.y <= i + .06).map((e) => ({
 				x: e.x,
 				z: e.z
 			})));
@@ -3723,26 +4850,26 @@ function wn(t) {
 }
 //#endregion
 //#region src/world/runtime_textures.ts
-var Tn = /* @__PURE__ */ new Map(), En = null;
-function Dn() {
+var or = /* @__PURE__ */ new Map(), sr = null;
+function cr() {
 	if (["127.0.0.1", "localhost"].includes(location.hostname) && new URLSearchParams(location.search).get("bakeLingyinTextures") === "1") return Promise.resolve();
-	if (En) return En;
+	if (sr) return sr;
 	let t = new e.TextureLoader();
-	return En = Promise.all([
+	return sr = Promise.all([
 		"forest-atlas",
 		"gate-atlas",
 		"gate-paving"
 	].map(async (n) => {
 		let r = await t.loadAsync(new URL(`./assets/lingyin/runtime-textures/${n}.webp`, document.baseURI).href + "?v=2");
-		r.name = `lingyin-baked-${n}`, r.colorSpace = e.SRGBColorSpace, r.minFilter = e.LinearMipmapLinearFilter, r.magFilter = e.LinearFilter, r.anisotropy = 8, n === "gate-paving" && (r.wrapS = r.wrapT = e.RepeatWrapping), Tn.set(n, r);
-	})).then(() => {}), En;
+		r.name = `lingyin-baked-${n}`, r.colorSpace = e.SRGBColorSpace, r.minFilter = e.LinearMipmapLinearFilter, r.magFilter = e.LinearFilter, r.anisotropy = 8, n === "gate-paving" && (r.wrapS = r.wrapT = e.RepeatWrapping), or.set(n, r);
+	})).then(() => {}), sr;
 }
-function On(e) {
-	return Tn.get(e);
+function lr(e) {
+	return or.get(e);
 }
-var kn = null;
-function An() {
-	if (!kn) {
+var ur = null;
+function dr() {
+	if (!ur) {
 		let t = document.createElement("canvas");
 		t.width = 128, t.height = 512;
 		let n = t.getContext("2d"), r = n.createImageData(128, 512);
@@ -3750,12 +4877,12 @@ function An() {
 			let n = e * 8 / 512 % 1, i = n < .04 ? .48 : n < .09 ? 1.12 : 1, a = .91 + .09 * Math.sin(t * 1.8 + Math.sin(e * .013)), o = (.85 + .15 * Math.sin(t / 128 * Math.PI * 2)) * i * a, s = (e * 128 + t) * 4;
 			r.data[s] = 82 * o, r.data[s + 1] = 103 * o, r.data[s + 2] = 48 * o, r.data[s + 3] = 255;
 		}
-		n.putImageData(r, 0, 0), kn = new e.CanvasTexture(t), kn.name = "lingyin-bamboo-node-and-fibre", kn.colorSpace = e.SRGBColorSpace, kn.wrapS = kn.wrapT = e.RepeatWrapping, kn.anisotropy = 8;
+		n.putImageData(r, 0, 0), ur = new e.CanvasTexture(t), ur.name = "lingyin-bamboo-node-and-fibre", ur.colorSpace = e.SRGBColorSpace, ur.wrapS = ur.wrapT = e.RepeatWrapping, ur.anisotropy = 8;
 	}
 	return new e.MeshStandardMaterial({
 		name: "bamboo-textured-culm",
-		map: kn,
-		bumpMap: kn,
+		map: ur,
+		bumpMap: ur,
 		bumpScale: .008,
 		roughness: .8,
 		metalness: 0
@@ -3763,7 +4890,7 @@ function An() {
 }
 //#endregion
 //#region src/data/shots.ts
-var jn = [
+var fr = [
 	{
 		id: "gate",
 		index: 1,
@@ -3832,21 +4959,21 @@ var jn = [
 		],
 		fov: 38
 	}
-], Mn = 1024, B = 256, Nn = null, Pn = null;
-function Fn() {
-	if (On("forest-atlas")) return Promise.resolve();
-	if (Pn) return Pn;
+], pr = 1024, K = 256, mr = null, hr = null;
+function gr() {
+	if (lr("forest-atlas")) return Promise.resolve();
+	if (hr) return hr;
 	let e = (e) => new Promise((t, n) => {
 		let r = new Image();
 		r.onload = () => t(r), r.onerror = () => n(/* @__PURE__ */ Error(`Lingyin foliage image failed: ${e}`)), r.src = new URL(`./assets/lingyin/temple-textures/${e}`, document.baseURI).href + "?v=1";
 	});
-	return Pn = Promise.all([
+	return hr = Promise.all([
 		e("pine-foliage-albedo.jpg"),
 		e("pine-foliage-alpha.png"),
 		e("broad-foliage-albedo.jpg"),
 		e("broad-foliage-alpha.png")
 	]).then(([e, t, n, r]) => {
-		Nn = {
+		mr = {
 			pine: {
 				diffuse: e,
 				alpha: t
@@ -3856,9 +4983,9 @@ function Fn() {
 				alpha: r
 			}
 		};
-	}), Pn;
+	}), hr;
 }
-function In(e) {
+function _r(e) {
 	let t = {
 		pine: 0,
 		broad: 1,
@@ -3872,40 +4999,40 @@ function In(e) {
 		row: Math.floor(t / 4)
 	};
 }
-function Ln() {
-	let t = On("forest-atlas");
+function vr() {
+	let t = lr("forest-atlas");
 	if (t) return t;
 	let n = document.createElement("canvas");
-	n.width = Mn, n.height = Mn;
+	n.width = pr, n.height = pr;
 	let r = n.getContext("2d");
 	if (!r) throw Error("no 2d");
-	r.clearRect(0, 0, Mn, Mn);
-	let i = new h("foliage-atlas"), a = (e, t) => {
-		let { col: n, row: i } = In(e), a = n * B, o = i * B;
-		r.save(), r.translate(a, o), r.beginPath(), r.rect(0, 0, B, B), r.clip(), t(r), r.restore();
+	r.clearRect(0, 0, pr, pr);
+	let i = new _("foliage-atlas"), a = (e, t) => {
+		let { col: n, row: i } = _r(e), a = n * K, o = i * K;
+		r.save(), r.translate(a, o), r.beginPath(), r.rect(0, 0, K, K), r.clip(), t(r), r.restore();
 	};
 	if (a("pine", (e) => {
-		let t = B / 2, n = B * .62, r = e.createRadialGradient(t, n - 20, 10, t, n - 20, 190);
-		r.addColorStop(0, "rgba(22,36,24,0.55)"), r.addColorStop(.6, "rgba(22,36,24,0.22)"), r.addColorStop(1, "rgba(22,36,24,0)"), e.fillStyle = r, e.fillRect(0, 0, B, B);
+		let t = K / 2, n = K * .62, r = e.createRadialGradient(t, n - 20, 10, t, n - 20, 190);
+		r.addColorStop(0, "rgba(22,36,24,0.55)"), r.addColorStop(.6, "rgba(22,36,24,0.22)"), r.addColorStop(1, "rgba(22,36,24,0)"), e.fillStyle = r, e.fillRect(0, 0, K, K);
 		for (let r = 0; r < 10; r++) {
 			let a = -Math.PI * .95 + r / 6 * Math.PI * 1.9;
 			e.strokeStyle = `rgb(${34 + i.int(0, 16)},${44 + i.int(0, 20)},${30 + i.int(0, 14)})`, e.lineWidth = 2, e.beginPath(), e.moveTo(t, n);
 			let o = t + Math.cos(a) * 110, s = n + Math.sin(a) * 95;
 			e.lineTo(o, s), e.stroke();
 			for (let r = 0; r < 44; r++) {
-				let c = .15 + r / 34 * .85, l = f(t, o, c), u = f(n, s, c), d = a + (i.chance(.5) ? 1 : -1) * (.5 + i.value() * .45), p = 22 + i.value() * 34 * (1 - c * .4);
-				e.strokeStyle = `rgba(${40 + i.int(0, 22)},${62 + i.int(0, 32)},${36 + i.int(0, 18)},0.85)`, e.lineWidth = 1.15, e.beginPath(), e.moveTo(l, u), e.lineTo(l + Math.cos(d) * p, u + Math.sin(d) * p), e.stroke();
+				let c = .15 + r / 34 * .85, l = m(t, o, c), u = m(n, s, c), d = a + (i.chance(.5) ? 1 : -1) * (.5 + i.value() * .45), f = 22 + i.value() * 34 * (1 - c * .4);
+				e.strokeStyle = `rgba(${40 + i.int(0, 22)},${62 + i.int(0, 32)},${36 + i.int(0, 18)},0.85)`, e.lineWidth = 1.15, e.beginPath(), e.moveTo(l, u), e.lineTo(l + Math.cos(d) * f, u + Math.sin(d) * f), e.stroke();
 			}
 		}
 	}), a("broad", (e) => {
-		let t = B / 2, n = B * .6, r = e.createRadialGradient(t, n, 8, t, n, 180);
-		r.addColorStop(0, "rgba(24,40,22,0.5)"), r.addColorStop(.65, "rgba(24,40,22,0.18)"), r.addColorStop(1, "rgba(24,40,22,0)"), e.fillStyle = r, e.fillRect(0, 0, B, B);
+		let t = K / 2, n = K * .6, r = e.createRadialGradient(t, n, 8, t, n, 180);
+		r.addColorStop(0, "rgba(24,40,22,0.5)"), r.addColorStop(.65, "rgba(24,40,22,0.18)"), r.addColorStop(1, "rgba(24,40,22,0)"), e.fillStyle = r, e.fillRect(0, 0, K, K);
 		for (let r = 0; r < 12; r++) {
 			let r = i.range(-Math.PI, Math.PI), a = i.range(40, 105), o = t + Math.cos(r) * a, s = n + Math.sin(r) * a;
 			e.strokeStyle = "#3b3122", e.lineWidth = 2.4, e.beginPath(), e.moveTo(t, n), e.lineTo(o, s), e.stroke();
 			for (let a = 0; a < 7; a++) {
-				let c = .25 + a / 7 * .75, l = f(t, o, c), u = f(n, s, c), d = r + (a % 2 ? 1 : -1) * 1.2, p = i.range(12, 22);
-				e.save(), e.translate(l, u), e.rotate(d), e.fillStyle = `rgba(${44 + i.int(0, 26)},${78 + i.int(0, 40)},${40 + i.int(0, 22)},0.94)`, e.beginPath(), e.ellipse(p * .6, 0, p, p * .42, 0, 0, Math.PI * 2), e.fill(), e.restore();
+				let c = .25 + a / 7 * .75, l = m(t, o, c), u = m(n, s, c), d = r + (a % 2 ? 1 : -1) * 1.2, f = i.range(12, 22);
+				e.save(), e.translate(l, u), e.rotate(d), e.fillStyle = `rgba(${44 + i.int(0, 26)},${78 + i.int(0, 40)},${40 + i.int(0, 22)},0.94)`, e.beginPath(), e.ellipse(f * .6, 0, f, f * .42, 0, 0, Math.PI * 2), e.fill(), e.restore();
 			}
 		}
 	}), a("maple", (e) => {
@@ -3917,7 +5044,7 @@ function Ln() {
 			"#7d2f22"
 		];
 		for (let n = 0; n < 72; n++) {
-			let n = i.range(30, B - 30), r = i.range(30, B - 30), a = i.range(16, 30);
+			let n = i.range(30, K - 30), r = i.range(30, K - 30), a = i.range(16, 30);
 			e.save(), e.translate(n, r), e.rotate(i.range(0, Math.PI * 2)), e.fillStyle = t[i.int(0, t.length - 1)], e.beginPath();
 			for (let t = 0; t < 5; t++) {
 				let n = -Math.PI / 2 + (t - 2) * .62, r = Math.cos(n) * a, i = Math.sin(n) * a;
@@ -3927,7 +5054,7 @@ function Ln() {
 		}
 	}), a("bamboo", (e) => {
 		for (let t = 0; t < 5; t++) {
-			let t = i.range(30, B - 30), n = i.range(40, B - 40);
+			let t = i.range(30, K - 30), n = i.range(40, K - 40);
 			for (let r = 0; r < 12; r++) {
 				let r = i.range(-Math.PI, Math.PI), a = i.range(30, 68);
 				e.save(), e.translate(t + i.range(-10, 10), n + i.range(-10, 10)), e.rotate(r), e.fillStyle = `rgba(${70 + i.int(0, 25)},${100 + i.int(0, 30)},${48 + i.int(0, 20)},0.9)`, e.beginPath(), e.ellipse(a * .5, 0, a * .5, 3.2, 0, 0, Math.PI * 2), e.fill(), e.restore();
@@ -3935,48 +5062,48 @@ function Ln() {
 		}
 	}), a("grass", (e) => {
 		for (let t = 0; t < 46; t++) {
-			let t = B / 2 + i.range(-70, 70), n = -Math.PI / 2 + i.range(-.55, .55), r = i.range(80, 210);
-			e.strokeStyle = `rgba(${72 + i.int(0, 35)},${94 + i.int(0, 35)},${44 + i.int(0, 22)},0.95)`, e.lineWidth = i.range(1.5, 3.4), e.beginPath(), e.moveTo(t, B - 4), e.quadraticCurveTo(t + Math.cos(n) * r * .45, B - r * .55, t + Math.cos(n) * r, B - 4 - Math.sin(-n) * r), e.stroke();
+			let t = K / 2 + i.range(-70, 70), n = -Math.PI / 2 + i.range(-.55, .55), r = i.range(80, 210);
+			e.strokeStyle = `rgba(${72 + i.int(0, 35)},${94 + i.int(0, 35)},${44 + i.int(0, 22)},0.95)`, e.lineWidth = i.range(1.5, 3.4), e.beginPath(), e.moveTo(t, K - 4), e.quadraticCurveTo(t + Math.cos(n) * r * .45, K - r * .55, t + Math.cos(n) * r, K - 4 - Math.sin(-n) * r), e.stroke();
 		}
 	}), a("fern", (e) => {
 		for (let t = 0; t < 5; t++) {
-			let t = -Math.PI / 2 + i.range(-.8, .8), n = i.range(120, 210), r = B / 2, a = B - 10;
+			let t = -Math.PI / 2 + i.range(-.8, .8), n = i.range(120, 210), r = K / 2, a = K - 10;
 			e.strokeStyle = "#3f5a34", e.lineWidth = 2.2, e.beginPath(), e.moveTo(r, a), e.quadraticCurveTo(r + Math.cos(t) * n * .6, a - n * .6, r + Math.cos(t) * n, a - n * .85), e.stroke();
 			for (let o = 4; o < 20; o++) {
 				let s = o / 20, c = r + Math.cos(t) * n * s, l = a - n * .85 * s - Math.sin(Math.abs(t)) * 6;
 				for (let t of [-1, 1]) e.strokeStyle = `rgba(${54 + i.int(0, 20)},${80 + i.int(0, 22)},${40 + i.int(0, 18)},0.95)`, e.lineWidth = 1.2, e.beginPath(), e.moveTo(c, l), e.lineTo(c + t * 18 * (1 - s), l + 8), e.stroke();
 			}
 		}
-	}), Nn) {
+	}), mr) {
 		let e = (e, t, n, i, a, o, s = !1) => {
 			let c = document.createElement("canvas"), l = document.createElement("canvas");
-			c.width = c.height = B, l.width = l.height = B;
+			c.width = c.height = K, l.width = l.height = K;
 			let u = c.getContext("2d"), d = l.getContext("2d");
-			u.drawImage(t.diffuse, n, i, a, o, 12, 12, B - 24, B - 24), d.drawImage(t.alpha, n, i, a, o, 12, 12, B - 24, B - 24);
-			let f = u.getImageData(0, 0, B, B), p = d.getImageData(0, 0, B, B);
+			u.drawImage(t.diffuse, n, i, a, o, 12, 12, K - 24, K - 24), d.drawImage(t.alpha, n, i, a, o, 12, 12, K - 24, K - 24);
+			let f = u.getImageData(0, 0, K, K), p = d.getImageData(0, 0, K, K);
 			for (let t = 0; t < f.data.length; t += 4) {
 				let n = f.data[t], r = f.data[t + 1], i = f.data[t + 2], a = e === "pine" ? r > n * .94 && r > i * 1.12 : r > n * 1.025 && r > i * 1.18;
 				f.data[t + 3] = a && p.data[t] > 230 ? 255 : 0, f.data[t] = Math.min(255, n * 1.06), f.data[t + 1] = Math.min(255, r * 1.16), s && (f.data[t] = Math.min(255, f.data[t] * 1.5 + 52), f.data[t + 1] = Math.min(255, f.data[t + 1] * .68 + 12), f.data[t + 2] = Math.min(255, f.data[t + 2] * .52));
 			}
 			u.putImageData(f, 0, 0);
-			let { col: m, row: h } = In(e);
-			r.clearRect(m * B, h * B, B, B), r.drawImage(c, m * B, h * B);
+			let { col: m, row: h } = _r(e);
+			r.clearRect(m * K, h * K, K, K), r.drawImage(c, m * K, h * K);
 		};
-		e("pine", Nn.pine, 30, 42, 197, 360), e("broad", Nn.broad, 560, 35, 290, 620), e("maple", Nn.broad, 560, 35, 290, 620, !0);
+		e("pine", mr.pine, 30, 42, 197, 360), e("broad", mr.broad, 560, 35, 290, 620), e("maple", mr.broad, 560, 35, 290, 620, !0);
 	}
 	let o = new e.CanvasTexture(n);
 	return o.colorSpace = e.SRGBColorSpace, o.anisotropy = 8, o.needsUpdate = !0, o;
 }
-function Rn(t, n, r) {
-	let { col: i, row: a } = In(t), o = 3 / Mn, s = i / 4 + o, c = 1 - (a + 1) / 4 + o, l = new e.PlaneGeometry(n, r), u = l.getAttribute("uv");
+function yr(t, n, r) {
+	let { col: i, row: a } = _r(t), o = 3 / pr, s = i / 4 + o, c = 1 - (a + 1) / 4 + o, l = new e.PlaneGeometry(n, r), u = l.getAttribute("uv");
 	for (let e = 0; e < u.count; e++) u.setXY(e, s + u.getX(e) * (.25 - o * 2), c + u.getY(e) * (.25 - o * 2));
 	return l;
 }
-function zn(e, t, n, r, i, a = 0, o = !0, s = 0, c = 0) {
-	let l = Rn(e, t, n);
+function br(e, t, n, r, i, a = 0, o = !0, s = 0, c = 0) {
+	let l = yr(e, t, n);
 	return o && l.translate(0, n / 2, 0), l.rotateX(a), l.rotateY(i), l.translate(s, r, c), l;
 }
-var Bn = class {
+var xr = class {
 	trunk;
 	cards;
 	blobs;
@@ -3984,10 +5111,10 @@ var Bn = class {
 		this.trunk = e, this.cards = t, this.blobs = n;
 	}
 };
-function Vn(n) {
+function Sr(n) {
 	let r = n.range(10, 16), i = [], a = 0, o = 0;
 	for (let t = 0; t < 5; t++) {
-		let s = t / 5 * r, c = (t + 1) / 5 * r, l = f(.42, .1, t / 5), u = f(.42, .1, (t + 1) / 5), d = new e.CylinderGeometry(u, l, c - s, 8);
+		let s = t / 5 * r, c = (t + 1) / 5 * r, l = m(.42, .1, t / 5), u = m(.42, .1, (t + 1) / 5), d = new e.CylinderGeometry(u, l, c - s, 8);
 		d.translate(a, (s + c) / 2, o), i.push(d), a += n.range(-.35, .35), o += n.range(-.35, .35);
 	}
 	let s = [];
@@ -3998,15 +5125,15 @@ function Vn(n) {
 	let c = [], l = [];
 	for (let e of s) for (let t = 0; t < 8; t++) {
 		let r = e.x + n.range(-1, 1), i = e.z + n.range(-1, 1);
-		c.push(zn("pine", n.range(3.2, 4.6), n.range(2, 2.8), e.y - .9 + n.range(-.4, .4), t / 8 * Math.PI + n.range(-.3, .3), .1, !0, r, i));
+		c.push(br("pine", n.range(3.2, 4.6), n.range(2, 2.8), e.y - .9 + n.range(-.4, .4), t / 8 * Math.PI + n.range(-.3, .3), .1, !0, r, i));
 	}
 	for (let e = 0; e < 6; e++) {
 		let t = e / 6 * Math.PI * 2;
-		c.push(zn("pine", 3.6, 2.3, r * .82, t, .02, !0, Math.cos(t) * .7, Math.sin(t) * .7));
+		c.push(br("pine", 3.6, 2.3, r * .82, t, .02, !0, Math.cos(t) * .7, Math.sin(t) * .7));
 	}
-	return new Bn(t(i, !1), t(c, !1), l.length ? t(l, !1) : new e.BufferGeometry());
+	return new xr(t(i, !1), t(c, !1), l.length ? t(l, !1) : new e.BufferGeometry());
 }
-function Hn(n, r) {
+function Cr(n, r) {
 	let i = n.range(5.5, 9), a = [];
 	a.push(new e.CylinderGeometry(.16, .38, i * .62, 8).translate(0, i * .31, 0));
 	let o = [];
@@ -4017,16 +5144,16 @@ function Hn(n, r) {
 	let s = i * .78, c = [];
 	for (let e = 0; e < 8; e++) {
 		let t = e * Math.PI / 8;
-		c.push(zn(r, 4.8, 3.3, s - 1.7, t, e % 2 ? .12 : -.12, !0, Math.cos(t * 2) * .24, Math.sin(t * 2) * .24));
+		c.push(br(r, 4.8, 3.3, s - 1.7, t, e % 2 ? .12 : -.12, !0, Math.cos(t * 2) * .24, Math.sin(t * 2) * .24));
 	}
 	for (let e = 0; e < 72; e++) {
 		let e = n.range(0, Math.PI * 2), t = n.range(.3, 2.9), i = s + n.range(-1.5, 1.9), a = n.range(2, 3.4);
-		c.push(zn(r, a, a * n.range(.65, .95), i, e, n.range(-.5, .5), !0, Math.cos(e) * t, Math.sin(e) * t));
+		c.push(br(r, a, a * n.range(.65, .95), i, e, n.range(-.5, .5), !0, Math.cos(e) * t, Math.sin(e) * t));
 	}
-	for (let e of o) c.push(zn(r, 2, 1.4, e.y, n.range(0, Math.PI), n.range(-.3, .3), !0, e.x, e.z));
-	return new Bn(t(a, !1), t(c, !1), new e.BufferGeometry());
+	for (let e of o) c.push(br(r, 2, 1.4, e.y, n.range(0, Math.PI), n.range(-.3, .3), !0, e.x, e.z));
+	return new xr(t(a, !1), t(c, !1), new e.BufferGeometry());
 }
-function Un(n) {
+function wr(n) {
 	let r = n.range(6.5, 10), i = [];
 	for (let t = 0; t < 4; t++) {
 		let a = t / 4 * Math.PI * 2, o = n.range(.04, .12), s = new e.CylinderGeometry(.035, .05, r, 6);
@@ -4035,11 +5162,11 @@ function Un(n) {
 	let a = t(i, !1), o = [];
 	for (let e = 0; e < 22; e++) {
 		let e = n.range(0, Math.PI * 2), t = r * n.range(.55, 1), i = n.range(.2, 1.4);
-		o.push(zn("bamboo", n.range(1, 1.7), n.range(.5, .9), t, e, n.range(-.4, .4), !0, Math.cos(e) * i, Math.sin(e) * i));
+		o.push(br("bamboo", n.range(1, 1.7), n.range(.5, .9), t, e, n.range(-.4, .4), !0, Math.cos(e) * i, Math.sin(e) * i));
 	}
-	return new Bn(a, t(o, !1), new e.BufferGeometry());
+	return new xr(a, t(o, !1), new e.BufferGeometry());
 }
-var Wn = class {
+var Tr = class {
 	group = new e.Group();
 	tiles = [];
 	atlas;
@@ -4049,14 +5176,14 @@ var Wn = class {
 	fernGeo;
 	time = n.time;
 	constructor() {
-		this.group.name = "vegetation", this.atlas = Ln(), this.bark = ot() ?? o({
+		this.group.name = "vegetation", this.atlas = vr(), this.bark = nt() ?? s({
 			name: "bark",
 			params: {
 				color: 16777215,
 				roughness: .95
 			},
 			color: "\n        float n = cgFbm2(vec2(cgP.x * 6.0 + cgP.z * 2.0, cgP.y * 0.9));\n        vec3 c = mix(vec3(0.10,0.075,0.055), vec3(0.24,0.19,0.14), n);\n        c *= 0.8 + 0.3 * smoothstep(0.2, 0.9, cgNoise2(vec2(cgP.y * 3.0, cgP.x * 2.0)));\n        diffuseColor.rgb = c;\n      "
-		}), this.leafMat = o({
+		}), this.leafMat = s({
 			name: "leaf-card",
 			params: {
 				color: 16777215,
@@ -4078,35 +5205,35 @@ var Wn = class {
 			emissive: "\n        vec3 V = normalize(cameraPosition - cgP);\n        float back = pow(max(dot(-V, uSunDir), 0.0), 2.2);\n        totalEmissiveRadiance += vec3(0.10, 0.13, 0.05) * back * (0.45 + 0.55 * cgN.y);\n      "
 		});
 		let r = [];
-		for (let e = 0; e < 3; e++) r.push(zn("grass", 1.1, .85, 0, e / 3 * Math.PI, 0, !0));
+		for (let e = 0; e < 3; e++) r.push(br("grass", 1.1, .85, 0, e / 3 * Math.PI, 0, !0));
 		this.grassGeo = t(r, !1);
 		let i = [];
-		for (let e = 0; e < 4; e++) i.push(zn("fern", 1.3, .9, 0, e / 4 * Math.PI * 2, .1, !0));
+		for (let e = 0; e < 4; e++) i.push(br("fern", 1.3, .9, 0, e / 4 * Math.PI * 2, .1, !0));
 		this.fernGeo = t(i, !1), this.populate();
 	}
 	canPlace(e, t, n) {
-		if (!we(e, t, n) || Ce(e, t, n)) return !1;
-		for (let r of jn) {
+		if (!ye(e, t, n) || ve(e, t, n)) return !1;
+		for (let r of fr) {
 			let i = r.pos[0], a = r.pos[2], o = r.target[0], s = r.target[2], c = o - i, l = s - a, u = c * c + l * l || 1, d = ((e - i) * c + (t - a) * l) / u;
 			if (d > -.05 && d < .5) {
 				let r = i + c * d, o = a + l * d;
 				if (Math.hypot(e - r, t - o) < 9 + n) return !1;
 			}
 		}
-		return !(Te(e, t) < n + 1.6 || ce(e, t) < 2.72 + n + .35 || he(e, t) < n || Se(e, t) > .8);
+		return !(R(e, t) < n + 1.6 || se(e, t) < 2.72 + n + .35 || de(e, t) < n || _e(e, t) > .8);
 	}
 	populate() {
-		let t = new h("vegetation"), n = [
-			Vn(new h("pine-a")),
-			Vn(new h("pine-b")),
-			Vn(new h("pine-c"))
-		], r = [Hn(new h("broad-a"), "broad"), Hn(new h("broad-b"), "broad")], i = [Hn(new h("maple-a"), "maple"), Hn(new h("maple-b"), "maple")], a = Un(new h("bamboo")), o = [], s = [], c = [], l = [], u = new e.Quaternion(), d = new e.Euler(), f = new e.Vector3(), p = (t, n, r, i, a) => (d.set(0, a, 0), u.setFromEuler(d), f.set(i, i, i), new e.Matrix4().compose(new e.Vector3(t, n, r), u, f)), m = 0;
+		let t = new _("vegetation"), n = [
+			Sr(new _("pine-a")),
+			Sr(new _("pine-b")),
+			Sr(new _("pine-c"))
+		], r = [Cr(new _("broad-a"), "broad"), Cr(new _("broad-b"), "broad")], i = [Cr(new _("maple-a"), "maple"), Cr(new _("maple-b"), "maple")], a = wr(new _("bamboo")), o = [], s = [], c = [], l = [], u = new e.Quaternion(), d = new e.Euler(), f = new e.Vector3(), p = (t, n, r, i, a) => (d.set(0, a, 0), u.setFromEuler(d), f.set(i, i, i), new e.Matrix4().compose(new e.Vector3(t, n, r), u, f)), m = 0;
 		for (; o.length < 190 && m < 12e3;) {
 			m++;
 			let r = t.range(-250, 250), i = t.range(-250, 220);
-			this.canPlace(r, i, 3.5) && (Se(r, i) < .08 && t.chance(.7) || o.push({
+			this.canPlace(r, i, 3.5) && (_e(r, i) < .08 && t.chance(.7) || o.push({
 				v: t.int(0, n.length - 1),
-				m: p(r, A(r, i) - .25, i, t.range(.75, 1.25), t.range(0, 6.28)),
+				m: p(r, L(r, i) - .25, i, t.range(.75, 1.25), t.range(0, 6.28)),
 				c: new e.Color().setHSL(.29 + t.range(-.02, .02), .1, .76 + t.range(-.08, .06))
 			}));
 		}
@@ -4115,48 +5242,48 @@ var Wn = class {
 			let n = t.range(-210, 210), i = t.range(-190, 200);
 			this.canPlace(n, i, 3) && (Math.abs(n + 2) > 90 && t.chance(.5) || s.push({
 				v: t.int(0, r.length - 1),
-				m: p(n, A(n, i) - .2, i, t.range(.8, 1.3), t.range(0, 6.28)),
+				m: p(n, L(n, i) - .2, i, t.range(.8, 1.3), t.range(0, 6.28)),
 				c: new e.Color().setHSL(.27 + t.range(-.03, .03), .1, .74 + t.range(-.08, .06))
 			}));
 		}
 		for (m = 0; c.length < 30 && m < 3e3;) {
 			m++;
 			let n = t.range(-90, 80), r = t.range(-70, 90);
-			this.canPlace(n, r, 3) && (Ce(n, r, 5) || c.push({
+			this.canPlace(n, r, 3) && (ve(n, r, 5) || Math.hypot(n + 56, r - 66) < 19 || c.push({
 				v: t.int(0, i.length - 1),
-				m: p(n, A(n, r) - .2, r, t.range(.75, 1.15), t.range(0, 6.28)),
+				m: p(n, L(n, r) - .2, r, t.range(.75, 1.15), t.range(0, 6.28)),
 				c: new e.Color().setHSL(.05 + t.range(-.02, .02), .12, .82 + t.range(-.06, .05))
 			}));
 		}
 		for (let n = 0; n < 170; n++) {
 			let n = t.range(-62, -38), r = t.range(-10, 52);
 			this.canPlace(n, r, 1.2) && l.push({
-				m: p(n, A(n, r) - .1, r, t.range(.8, 1.2), t.range(0, 6.28)),
+				m: p(n, L(n, r) - .1, r, t.range(.8, 1.2), t.range(0, 6.28)),
 				c: new e.Color().setHSL(.24 + t.range(-.02, .02), .1, .8)
 			});
 		}
 		this.buildSpecies(n, o), this.buildSpecies(r, s), this.buildSpecies(i, c), this.buildSpecies([a], l.map((e) => ({
 			v: 0,
 			...e
-		})), An());
-		let g = [], _ = [];
-		for (m = 0; g.length < 7e3 && m < 26e3;) {
+		})), dr());
+		let h = [], g = [];
+		for (m = 0; h.length < 7e3 && m < 26e3;) {
 			m++;
 			let e = t.range(-120, 100), n = t.range(-90, 110);
-			this.canPlace(e, n, .5) && (Ce(e, n, 1.5) || g.push(p(e, A(e, n) - .02, n, t.range(.7, 1.4), t.range(0, 6.28))));
+			this.canPlace(e, n, .5) && (ve(e, n, 1.5) || h.push(p(e, L(e, n) - .02, n, t.range(.7, 1.4), t.range(0, 6.28))));
 		}
-		for (m = 0; _.length < 800 && m < 7e3;) {
+		for (m = 0; g.length < 800 && m < 7e3;) {
 			m++;
 			let e = t.range(-95, 90), n = t.range(-70, 95);
-			this.canPlace(e, n, 1.2) && _.push(p(e, A(e, n) - .02, n, t.range(.7, 1.2), t.range(0, 6.28)));
+			this.canPlace(e, n, 1.2) && g.push(p(e, L(e, n) - .02, n, t.range(.7, 1.2), t.range(0, 6.28)));
 		}
-		this.addInstanced(this.grassGeo, this.leafMat, g, !1, "grass"), this.addInstanced(this.fernGeo, this.leafMat, _, !1, "fern"), this.shrubsAndRocks(t);
+		this.addInstanced(this.grassGeo, this.leafMat, h, !1, "grass"), this.addInstanced(this.fernGeo, this.leafMat, g, !1, "fern"), this.shrubsAndRocks(t);
 	}
 	shrubsAndRocks(n) {
 		let r = [];
 		for (let e = 0; e < 5; e++) {
 			let t = e * Math.PI / 5;
-			r.push(zn("broad", n.range(1.55, 2.15), n.range(1.1, 1.6), 0, t, n.range(-.16, .16), !0, Math.cos(t * 2) * .28, Math.sin(t * 2) * .28));
+			r.push(br("broad", n.range(1.55, 2.15), n.range(1.1, 1.6), 0, t, n.range(-.16, .16), !0, Math.cos(t * 2) * .28, Math.sin(t * 2) * .28));
 		}
 		let i = t(r, !1), a = [], o = 0;
 		for (; a.length < 260 && o < 4e3;) {
@@ -4164,7 +5291,7 @@ var Wn = class {
 			let t = n.range(-140, 130), r = n.range(-100, 120);
 			if (!this.canPlace(t, r, 1.7)) continue;
 			let i = n.range(.7, 1.7);
-			a.push(new e.Matrix4().compose(new e.Vector3(t, A(t, r) - .15, r), new e.Quaternion().setFromEuler(new e.Euler(0, n.range(0, 6.28), 0)), new e.Vector3(i, i * n.range(.8, 1.2), i)));
+			a.push(new e.Matrix4().compose(new e.Vector3(t, L(t, r) - .15, r), new e.Quaternion().setFromEuler(new e.Euler(0, n.range(0, 6.28), 0)), new e.Vector3(i, i * n.range(.8, 1.2), i)));
 		}
 		this.addInstanced(i, this.leafMat, a, !0, "shrub");
 		let s = [];
@@ -4176,15 +5303,15 @@ var Wn = class {
 			}
 			r.computeVertexNormals(), s.push(r);
 		}
-		let c = t(s, !1), l = Ct();
-		l.name === "limestone-photogrammetry" && (c = nn(F(c, 1.6), "stone"));
+		let c = t(s, !1), l = yt();
+		l.name === "limestone-photogrammetry" && (c = bn(U(c, 1.6), "stone"));
 		let u = [];
 		for (o = 0; u.length < 85 && o < 3e3;) {
 			o++;
 			let t = n.range(-150, 140), r = n.range(-110, 130);
-			if (!we(t, r, 2.2)) continue;
+			if (!ye(t, r, 2.2)) continue;
 			let i = n.range(.5, 2.2);
-			Ce(t, r, 2.2 * i + 1) || Te(t, r) < 3 || ce(t, r) < 2.72 + 1.8 * i + .35 || u.push(new e.Matrix4().compose(new e.Vector3(t, A(t, r) - .35 * i, r), new e.Quaternion().setFromEuler(new e.Euler(n.range(-.2, .2), n.range(0, 6.28), n.range(-.2, .2))), new e.Vector3(i, i * n.range(.6, 1.1), i)));
+			ve(t, r, 2.2 * i + 1) || R(t, r) < 3 || se(t, r) < 2.72 + 1.8 * i + .35 || u.push(new e.Matrix4().compose(new e.Vector3(t, L(t, r) - .35 * i, r), new e.Quaternion().setFromEuler(new e.Euler(n.range(-.2, .2), n.range(0, 6.28), n.range(-.2, .2))), new e.Vector3(i, i * n.range(.6, 1.1), i)));
 		}
 		this.addInstanced(c, l, u, !0, "boulder");
 	}
@@ -4193,12 +5320,12 @@ var Wn = class {
 			let i = t.filter((e) => e.v === r);
 			if (!i.length) continue;
 			let a = i.map((e) => e.m), o = i.map((e) => e.c), s = e[r].trunk;
-			n.name === "bark-photogrammetry" && (s = nn(F(s, 2.4), "bark")), this.addInstanced(s, n, a, !0, "trunk"), this.addInstanced(e[r].cards, this.leafMat, a, !0, "cards", o);
+			n.name === "bark-photogrammetry" && (s = bn(U(s, 2.4), "bark")), this.addInstanced(s, n, a, !0, "trunk"), this.addInstanced(e[r].cards, this.leafMat, a, !0, "cards", o);
 		}
 	}
 	addInstanced(t, n, r, i, a, o) {
 		if (!t.getAttribute("position") || t.getAttribute("position").count === 0 || !r.length) return;
-		let s = a === "far-forest" ? 200 : a === "grass" || a === "fern" ? 48 : 96, c = a === "grass" ? 75 : a === "fern" ? 100 : a === "shrub" ? 125 : a === "far-forest" ? 380 : 185, l = /* @__PURE__ */ new Map();
+		let s = a === "far-forest" ? 200 : a === "grass" || a === "fern" ? 96 : 112, c = a === "grass" ? 54 : a === "fern" ? 78 : a === "shrub" ? 108 : a === "far-forest" ? 380 : 168, l = /* @__PURE__ */ new Map();
 		for (let e = 0; e < r.length; e++) {
 			let t = r[e].elements, n = `${Math.floor(t[12] / s)},${Math.floor(t[14] / s)}`, i = l.get(n);
 			i ? i.push(e) : l.set(n, [e]);
@@ -4231,7 +5358,7 @@ var Wn = class {
 			e.mesh.visible = r * r + i * i < e.range * e.range;
 		}
 	}
-}, Gn = class {
+}, Er = class {
 	group = new e.Group();
 	smokeOrigin = new e.Vector3(-2, 7.4, 22);
 	lanterns = [];
@@ -4239,26 +5366,26 @@ var Wn = class {
 		this.group.name = "details", this.bridge(), this.lanternsAlongPath(), this.censer(), this.lions(), this.stele(), this.pavilion(), this.streamRailing(), this.paving();
 	}
 	paving() {
-		let t = O.platform, n = t.x0 + .7, r = t.x1 - .7, i = t.z0 + 1.2, a = t.z1 - .55, o = r - n, s = a - i, c = new e.Mesh(new e.PlaneGeometry(o, s), Qe(o, s));
-		c.rotation.x = -Math.PI / 2, c.position.set((n + r) / 2, O.platform.y + .025, (i + a) / 2), c.receiveShadow = !0, c.name = "temple-enclosure-photographic-paving", this.group.add(c);
+		let t = j.platform, n = t.x0 + .7, r = t.x1 - .7, i = t.z0 + 1.2, a = t.z1 - .55, o = r - n, s = a - i, c = new e.Mesh(new e.PlaneGeometry(o, s), qe(o, s));
+		c.rotation.x = -Math.PI / 2, c.position.set((n + r) / 2, j.platform.y + .025, (i + a) / 2), c.receiveShadow = !0, c.name = "temple-enclosure-photographic-paving", this.group.add(c);
 	}
 	bridge() {
-		let t = R(.35), n = [], r = Le(13.4, 3.3, .45, 3.15, 1.05);
-		for (let e of [26.1, 29.9]) n.push(r.clone().translate(36, .45, e));
-		n.push(M(13.6, .34, 4.6, 36, 3.66, 28)), n.push(M(13.9, .18, 4.9, 36, 3.86, 28));
+		let t = et(.35), n = [], r = je(13.4, 3.3, .45, 3.15, 1.05);
+		for (let e of [24, 32]) n.push(r.clone().translate(36, .45, e));
+		n.push(B(13.6, .34, 8.2, 36, 3.66, 28)), n.push(B(13.9, .18, 8.5, 36, 3.86, 28));
 		for (let e of [-1, 1]) {
 			for (let t = 0; t <= 12; t++) {
 				let r = 29.5 + t * 1.1;
-				n.push(M(.2, 1, .2, r, 4.45, 28 + e * 2.05)), t < 12 && n.push(M(1.1, .15, .16, r + .55, 4.88, 28 + e * 2.05));
+				n.push(B(.2, 1, .2, r, 4.45, 28 + e * 3.95)), t < 12 && n.push(B(1.1, .15, .16, r + .55, 4.88, 28 + e * 3.95));
 			}
-			n.push(M(13.4, .18, .26, 36, 4.95, 28 + e * 2.05));
+			n.push(B(13.4, .18, .26, 36, 4.95, 28 + e * 3.95));
 		}
-		for (let e of [-1, 1]) for (let t = 0; t < 3; t++) n.push(M(1.2, .18, 4.2, 36 + e * (7 + t * .5), 3.4 - t * .18, 28));
-		let i = new e.Mesh(F(P(n), 1.4), t);
+		for (let e of [-1, 1]) for (let t = 0; t < 3; t++) n.push(B(1.2, .18, 8.2, 36 + e * (7 + t * .5), 3.4 - t * .18, 28));
+		let i = new e.Mesh(U(H(n), 1.4), t);
 		i.castShadow = !0, i.receiveShadow = !0, this.group.add(i);
 	}
 	lanternsAlongPath() {
-		let t = R(.5), n = [];
+		let t = et(.5), n = [];
 		for (let [t, r] of [
 			[-7.5, 44],
 			[3.5, 44],
@@ -4269,10 +5396,10 @@ var Wn = class {
 			[25, 33],
 			[29, 52]
 		]) {
-			let i = A(t, r);
-			n.push(M(.75, .22, .75, t, i + .11, r)), n.push(N(.16, .2, 1.15, 8, t, i + .78, r)), n.push(M(.55, .55, .55, t, i + 1.62, r)), n.push(new e.ConeGeometry(.62, .42, 6).translate(t, i + 2.1, r)), n.push(new e.SphereGeometry(.09, 6, 4).translate(t, i + 2.38, r)), this.lanterns.push(new e.Vector3(t, i + 1.62, r));
+			let i = L(t, r);
+			n.push(B(.75, .22, .75, t, i + .11, r)), n.push(V(.16, .2, 1.15, 8, t, i + .78, r)), n.push(B(.55, .55, .55, t, i + 1.62, r)), n.push(new e.ConeGeometry(.62, .42, 6).translate(t, i + 2.1, r)), n.push(new e.SphereGeometry(.09, 6, 4).translate(t, i + 2.38, r)), this.lanterns.push(new e.Vector3(t, i + 1.62, r));
 		}
-		let r = new e.Mesh(F(P(n), 1.4), t);
+		let r = new e.Mesh(U(H(n), 1.4), t);
 		r.castShadow = !0, r.receiveShadow = !0, this.group.add(r);
 		let i = new e.Mesh(new e.SphereGeometry(.2, 8, 6), new e.MeshStandardMaterial({
 			color: 2759181,
@@ -4288,17 +5415,17 @@ var Wn = class {
 			n.position.copy(this.lanterns[t]).add(new e.Vector3(0, .05, 0)), this.group.add(n);
 		}
 		let a = new e.PointLight(16747068, 9, 8, 2);
-		a.position.set(-2, O.platform.y + 4.3, 22), this.group.add(a);
+		a.position.set(-2, j.platform.y + 4.3, 22), this.group.add(a);
 	}
 	censer() {
-		let t = yt(), n = [], r = O.platform.y;
+		let t = ht(), n = [], r = j.platform.y;
 		for (let t = 0; t < 3; t++) {
 			let r = t / 3 * Math.PI * 2, i = new e.Vector3(Math.cos(r) * 1.9, .19, Math.sin(r) * 1.9), a = new e.Vector3(Math.cos(r) * 1.55, 1.96, Math.sin(r) * 1.55);
-			n.push(N(.23, .29, .18, 10, i.x, .105, i.z));
+			n.push(V(.23, .29, .18, 10, i.x, .105, i.z));
 			let o = a.clone().sub(i), s = new e.CylinderGeometry(.13, .18, o.length(), 10);
 			s.applyQuaternion(new e.Quaternion().setFromUnitVectors(new e.Vector3(0, 1, 0), o.normalize())), s.translate((i.x + a.x) / 2, (i.y + a.y) / 2, (i.z + a.z) / 2), n.push(s);
 		}
-		n.push(N(1.55, 1.4, .16, 20, 0, 1.91, 0));
+		n.push(V(1.55, 1.4, .16, 20, 0, 1.91, 0));
 		let i = [];
 		for (let t = 0; t <= 12; t++) {
 			let n = t / 12;
@@ -4310,43 +5437,43 @@ var Wn = class {
 			let r = new e.TorusGeometry(.38, .07, 8, 16, Math.PI * 1.2);
 			r.rotateY(Math.PI / 2), r.translate(t * 1.35, 2.6, 0), n.push(r);
 		}
-		n.push(N(1.1, 1.25, .22, 20, 0, 3.17, 0)), n.push(new e.SphereGeometry(.22, 10, 8).translate(0, 3.5, 0)), n.push(new e.ConeGeometry(.2, .55, 8).translate(0, 3.8, 0));
-		let o = new e.Mesh(P(n), t);
+		n.push(V(1.1, 1.25, .22, 20, 0, 3.17, 0)), n.push(new e.SphereGeometry(.22, 10, 8).translate(0, 3.5, 0)), n.push(new e.ConeGeometry(.2, .55, 8).translate(0, 3.8, 0));
+		let o = new e.Mesh(H(n), t);
 		o.position.set(-2, r, 22), o.castShadow = !0, o.receiveShadow = !0, this.group.add(o), this.smokeOrigin.set(-2, r + 4.15, 22);
 	}
 	lions() {
-		let t = R(.55), n = [];
+		let t = et(.55), n = [];
 		for (let t of [-10.5, 6.5]) {
-			let r = 41.5, i = A(t, r);
-			n.push(M(1.4, .5, 1.8, t, i + .25, r)), n.push(new e.SphereGeometry(.55, 12, 10).scale(1, 1.15, 1.25).translate(t, i + 1.1, r)), n.push(new e.SphereGeometry(.42, 12, 10).translate(t, i + 1.75, r + .45));
+			let r = 41.5, i = L(t, r);
+			n.push(B(1.4, .5, 1.8, t, i + .25, r)), n.push(new e.SphereGeometry(.55, 12, 10).scale(1, 1.15, 1.25).translate(t, i + 1.1, r)), n.push(new e.SphereGeometry(.42, 12, 10).translate(t, i + 1.75, r + .45));
 			for (let a of [-1, 1]) n.push(new e.SphereGeometry(.28, 8, 6).translate(t + a * .38, i + 2, r + .4)), n.push(new e.CylinderGeometry(.12, .15, .8, 6).translate(t + a * .35, i + .65, r + .5));
 			n.push(new e.CylinderGeometry(.1, .16, .9, 6).translate(t, i + .9, r + 1.05));
 		}
-		let r = new e.Mesh(F(P(n), 1.4), t);
+		let r = new e.Mesh(U(H(n), 1.4), t);
 		r.castShadow = !0, r.receiveShadow = !0, this.group.add(r);
 	}
 	stele() {
-		let t = R(.7), n = R(.42), r = new e.Group(), i = new e.Mesh(new e.BoxGeometry(1.8, .4, 1.1), t);
+		let t = et(.7), n = et(.42), r = new e.Group(), i = new e.Mesh(new e.BoxGeometry(1.8, .4, 1.1), t);
 		i.position.y = .2;
 		let a = new e.Mesh(new e.BoxGeometry(1.3, 2.4, .22), n);
 		a.position.set(0, 1.55, 0);
 		let o = new e.Mesh(new e.BoxGeometry(1.5, .16, .4), t);
-		o.position.y = 2.82, r.add(i, a, o), r.position.set(7.5, A(7.5, 36.5), 36.5), r.rotation.y = -.35, r.traverse((t) => {
+		o.position.y = 2.82, r.add(i, a, o), r.position.set(7.5, L(7.5, 36.5), 36.5), r.rotation.y = -.35, r.traverse((t) => {
 			t instanceof e.Mesh && (t.castShadow = !0, t.receiveShadow = !0);
 		}), this.group.add(r);
 	}
 	pavilion() {
-		let t = gt(!1), n = st(), r = R(.4), i = new e.Group(), a = Math.max(A(29, 51), ge) + .15, o = new e.Mesh(new e.CylinderGeometry(3.8, 4.1, .5, 6), r);
+		let t = ft(!1), n = rt(), r = et(.4), i = new e.Group(), a = Math.max(L(29, 51), I) + .15, o = new e.Mesh(new e.CylinderGeometry(3.8, 4.1, .5, 6), r);
 		o.position.y = .25, o.castShadow = !0, o.receiveShadow = !0, i.add(o);
 		for (let n = 0; n < 6; n++) {
 			let r = n / 6 * Math.PI * 2 + Math.PI / 6, a = new e.Mesh(new e.CylinderGeometry(.13, .16, 3.1, 8), t);
 			a.position.set(Math.cos(r) * 3.1, 2.05, Math.sin(r) * 3.1), a.castShadow = !0, i.add(a);
-			let o = new e.Mesh(new e.CylinderGeometry(.18, .18, .08, 8), _t());
+			let o = new e.Mesh(new e.CylinderGeometry(.18, .18, .08, 8), pt());
 			o.position.set(Math.cos(r) * 3.1, 3.5, Math.sin(r) * 3.1), i.add(o);
 		}
 		let s = new e.Mesh(new e.CylinderGeometry(.25, 4.6, 1.7, 6), n);
 		s.position.y = 4.4, s.castShadow = !0, i.add(s);
-		let c = new e.Mesh(new e.ConeGeometry(.18, .8, 8), _t());
+		let c = new e.Mesh(new e.ConeGeometry(.18, .8, 8), pt());
 		c.position.y = 5.55, i.add(c);
 		for (let t = 0; t < 6; t++) {
 			let r = t / 6 * Math.PI * 2 + Math.PI / 6, a = new e.Mesh(new e.CylinderGeometry(.02, .09, .7, 5), n);
@@ -4355,43 +5482,43 @@ var Wn = class {
 		i.position.set(29, a, 51), this.group.add(i);
 	}
 	streamRailing() {
-		let t = R(.4), n = [];
+		let t = et(.4), n = [];
 		for (let e = 0; e < 14; e++) {
-			let t = 34 + e * 1.6, r = 31.6 - e * .06, i = A(r, t);
-			n.push(M(.18, 1, .18, r, i + .5, t)), e < 13 && n.push(M(.14, .14, 1.6, r - .03, i + .9, t + .8));
+			let t = 34 + e * 1.6, r = 31.6 - e * .06, i = L(r, t);
+			n.push(B(.18, 1, .18, r, i + .5, t)), e < 13 && n.push(B(.14, .14, 1.6, r - .03, i + .9, t + .8));
 		}
-		let r = new e.Mesh(F(P(n), 1.4), t);
+		let r = new e.Mesh(U(H(n), 1.4), t);
 		r.castShadow = !0, r.receiveShadow = !0, this.group.add(r);
 	}
 };
 //#endregion
 //#region src/gate-kit/world/geom.ts
-function Kn(t) {
+function Dr(t) {
 	if (!t.getAttribute("uv")) {
 		let n = t.getAttribute("position").count;
 		t.setAttribute("uv", new e.BufferAttribute(new Float32Array(n * 2), 2));
 	}
 	return t;
 }
-function V(t, n, r, i = 0, a = 0, o = 0, s = 0, c = 0, l = 0) {
+function q(t, n, r, i = 0, a = 0, o = 0, s = 0, c = 0, l = 0) {
 	let u = new e.BoxGeometry(t, n, r);
-	return c && u.rotateX(c), s && u.rotateY(s), l && u.rotateZ(l), u.translate(i, a, o), Kn(u);
+	return c && u.rotateX(c), s && u.rotateY(s), l && u.rotateZ(l), u.translate(i, a, o), Dr(u);
 }
-function qn(t, n, r, i, a = 0, o = 0, s = 0) {
+function Or(t, n, r, i, a = 0, o = 0, s = 0) {
 	let c = new e.CylinderGeometry(t, n, r, i, 1, !1);
-	return c.translate(a, o, s), Kn(c);
+	return c.translate(a, o, s), Dr(c);
 }
-function H(e) {
-	let n = e.filter((e) => e && e.getAttribute("position")?.count), r = n.every((e) => e.index !== null), i = t(n.map((e) => Kn(r ? e : e.index ? e.toNonIndexed() : e)), !1);
+function J(e) {
+	let n = e.filter((e) => e && e.getAttribute("position")?.count), r = n.every((e) => e.index !== null), i = t(n.map((e) => Dr(r ? e : e.index ? e.toNonIndexed() : e)), !1);
 	if (!i) throw Error("merge failed");
 	return i.computeBoundingSphere(), i;
 }
-function Jn(t, n) {
+function kr(t, n) {
 	let r = t.getAttribute("position").count, i = new Float32Array(r * 3);
 	for (let e = 0; e < r; e++) i[e * 3] = n.r, i[e * 3 + 1] = n.g, i[e * 3 + 2] = n.b;
 	return t.setAttribute("color", new e.BufferAttribute(i, 3)), t;
 }
-function Yn(t, n, r) {
+function Ar(t, n, r) {
 	let i = new e.Shape();
 	i.moveTo(0, 0), i.quadraticCurveTo(t * .15, n * .92, t * .55, n * .55), i.quadraticCurveTo(t * .86, n * .3, t, n * .62), i.lineTo(t, 0), i.quadraticCurveTo(t * .45, n * .28, 0, 0);
 	let a = new e.ExtrudeGeometry(i, {
@@ -4399,15 +5526,15 @@ function Yn(t, n, r) {
 		bevelEnabled: !1,
 		curveSegments: 12
 	});
-	return a.translate(0, 0, -r / 2), Kn(a);
+	return a.translate(0, 0, -r / 2), Dr(a);
 }
 //#endregion
 //#region src/gate-kit/core/math.ts
-var U = (e, t, n) => e < t ? t : e > n ? n : e, W = (e, t, n) => e + (t - e) * n, Xn = (e, t, n) => {
-	let r = U((n - e) / (t - e), 0, 1);
+var jr = (e, t, n) => e < t ? t : e > n ? n : e, Y = (e, t, n) => e + (t - e) * n, Mr = (e, t, n) => {
+	let r = jr((n - e) / (t - e), 0, 1);
 	return r * r * (3 - 2 * r);
 };
-function Zn(e) {
+function Nr(e) {
 	let t = e >>> 0;
 	return () => {
 		t |= 0, t = t + 1831565813 | 0;
@@ -4415,11 +5542,11 @@ function Zn(e) {
 		return e = e + Math.imul(e ^ e >>> 7, 61 | e) ^ e, ((e ^ e >>> 14) >>> 0) / 4294967296;
 	};
 }
-var G = class {
+var X = class {
 	next;
 	constructor(e) {
-		let t = typeof e == "number" ? e : Qn(e);
-		this.next = Zn(t);
+		let t = typeof e == "number" ? e : Pr(e);
+		this.next = Nr(t);
 	}
 	value() {
 		return this.next();
@@ -4444,32 +5571,32 @@ var G = class {
 		return Math.sqrt(-2 * Math.log(e)) * Math.cos(6.2831853 * this.next());
 	}
 };
-function Qn(e) {
+function Pr(e) {
 	let t = 2166136261;
 	for (let n = 0; n < e.length; n++) t ^= e.charCodeAt(n), t = Math.imul(t, 16777619);
 	return t >>> 0;
 }
-function $n(e, t) {
+function Fr(e, t) {
 	let n = Math.imul(e | 0, 374761393) + Math.imul(t | 0, 668265263);
 	return n = Math.imul(n ^ n >>> 13, 1274126177), ((n ^ n >>> 16) >>> 0) / 4294967296;
 }
-var er = (e) => e * e * (3 - 2 * e);
-function tr(e, t) {
-	let n = Math.floor(e), r = Math.floor(t), i = e - n, a = t - r, o = er(i), s = er(a), c = $n(n, r), l = $n(n + 1, r), u = $n(n, r + 1), d = $n(n + 1, r + 1);
-	return W(W(c, l, o), W(u, d, o), s) * 2 - 1;
+var Ir = (e) => e * e * (3 - 2 * e);
+function Lr(e, t) {
+	let n = Math.floor(e), r = Math.floor(t), i = e - n, a = t - r, o = Ir(i), s = Ir(a), c = Fr(n, r), l = Fr(n + 1, r), u = Fr(n, r + 1), d = Fr(n + 1, r + 1);
+	return Y(Y(c, l, o), Y(u, d, o), s) * 2 - 1;
 }
-function nr(e, t, n = 4, r = 2.02, i = .5) {
+function Rr(e, t, n = 4, r = 2.02, i = .5) {
 	let a = .5, o = 1, s = 0, c = 0;
-	for (let l = 0; l < n; l++) s += a * tr(e * o + l * 17.31, t * o - l * 9.13), c += a, a *= i, o *= r;
+	for (let l = 0; l < n; l++) s += a * Lr(e * o + l * 17.31, t * o - l * 9.13), c += a, a *= i, o *= r;
 	return s / c;
 }
 //#endregion
 //#region src/gate-kit/world/textures.ts
-var rr = /* @__PURE__ */ new Map();
-function ir(t = "flagstone", n = 8) {
-	let r = `${t}:${n}`, i = rr.get(r);
+var zr = /* @__PURE__ */ new Map();
+function Br(t = "flagstone", n = 8) {
+	let r = `${t}:${n}`, i = zr.get(r);
 	if (i) return i;
-	let a = 2048, o = new G(t), s = a / n, c = [], l = -o.range(0, s * .4), u = 0;
+	let a = 2048, o = new X(t), s = a / n, c = [], l = -o.range(0, s * .4), u = 0;
 	for (; l < a;) {
 		let e = s * o.range(.62, 1.02), t = -o.range(0, s * .8);
 		for (; t < a;) {
@@ -4509,7 +5636,7 @@ function ir(t = "flagstone", n = 8) {
 		}
 		l += e, u++;
 	}
-	let d = Xt(a, a, (e) => {
+	let d = mn(a, a, (e) => {
 		e.fillStyle = "#1b1c17", e.fillRect(0, 0, a, a);
 		for (let t = 0; t < 1e4; t++) {
 			let t = 18 + Math.floor(o.range(0, 22));
@@ -4544,7 +5671,7 @@ function ir(t = "flagstone", n = 8) {
 		}
 	});
 	d.wrapS = d.wrapT = e.RepeatWrapping, d.anisotropy = 16;
-	let f = Xt(a, a, (e) => {
+	let f = mn(a, a, (e) => {
 		e.fillStyle = "#090909", e.fillRect(0, 0, a, a);
 		for (let t of c) {
 			e.beginPath(), e.moveTo(t.pts[0][0], t.pts[0][1]);
@@ -4559,11 +5686,11 @@ function ir(t = "flagstone", n = 8) {
 		map: d,
 		height: f
 	};
-	return rr.set(r, p), p;
+	return zr.set(r, p), p;
 }
-function ar(e = 6, t = !0, n = 0, r = 0) {
-	let i = On("gate-paving") ?? ir("lingyin-flagstone", 8).map, a = e.toFixed(2);
-	return Jt({
+function Vr(e = 6, t = !0, n = 0, r = 0) {
+	let i = lr("gate-paving") ?? Br("lingyin-flagstone", 8).map, a = e.toFixed(2);
+	return fn({
 		name: t ? "flagstone-path" : "flagstone-platform",
 		params: {
 			color: 16777215,
@@ -4624,10 +5751,10 @@ function ar(e = 6, t = !0, n = 0, r = 0) {
     `
 	});
 }
-function or(t = 0) {
-	let n = at(t);
+function Hr(t = 0) {
+	let n = tt(t);
 	if (n) return n.name = "granite-photogrammetry", n;
-	let r = new G("granite-tex"), i = Xt(512, 512, (e) => {
+	let r = new X("granite-tex"), i = mn(512, 512, (e) => {
 		e.fillStyle = "#4a4a45", e.fillRect(0, 0, 512, 512);
 		for (let t = 0; t < 9e3; t++) {
 			let t = 60 + Math.floor(r.range(0, 80));
@@ -4639,7 +5766,7 @@ function or(t = 0) {
 			a.addColorStop(0, "rgba(40,60,26,0.32)"), a.addColorStop(1, "rgba(40,60,26,0)"), e.fillStyle = a, e.fillRect(t - i, n - i, i * 2, i * 2);
 		}
 	});
-	return i.wrapS = i.wrapT = e.RepeatWrapping, i.anisotropy = 16, Jt({
+	return i.wrapS = i.wrapT = e.RepeatWrapping, i.anisotropy = 16, fn({
 		name: "granite-textured",
 		params: {
 			color: 16777215,
@@ -4656,7 +5783,7 @@ function or(t = 0) {
 }
 //#endregion
 //#region src/gate-kit/world/roof.ts
-var K = {
+var Z = {
 	w: 13.8,
 	d: 6.4,
 	eaveY: 7.02,
@@ -4664,24 +5791,24 @@ var K = {
 	overhang: .9,
 	ridgeFrac: .44,
 	cornerLift: .3
-}, sr = K.w / 2 + K.overhang, q = K.d / 2 + K.overhang, cr = K.w * K.ridgeFrac / 2;
-function lr(t, n, r) {
-	let i = (Math.abs(n - .5) * 2) ** 5 * (1 - r) ** 2.15 * K.cornerLift, a = K.eaveY + K.rise * r ** 1.32 + i;
+}, Ur = Z.w / 2 + Z.overhang, Wr = Z.d / 2 + Z.overhang, Gr = Z.w * Z.ridgeFrac / 2;
+function Kr(t, n, r) {
+	let i = (Math.abs(n - .5) * 2) ** 5 * (1 - r) ** 2.15 * Z.cornerLift, a = Z.eaveY + Z.rise * r ** 1.32 + i;
 	if (t === "front" || t === "back") {
-		let i = t === "front" ? 1 : -1, o = (n - .5) * 2 * (sr * (1 - r) + cr * r), s = i * q * (1 - r) ** .94;
+		let i = t === "front" ? 1 : -1, o = (n - .5) * 2 * (Ur * (1 - r) + Gr * r), s = i * Wr * (1 - r) ** .94;
 		return new e.Vector3(o, a, s);
 	}
-	let o = (t === "left" ? -1 : 1) * (sr * (1 - r) + cr * r), s = (n - .5) * 2 * q * (1 - r);
+	let o = (t === "left" ? -1 : 1) * (Ur * (1 - r) + Gr * r), s = (n - .5) * 2 * Wr * (1 - r);
 	return new e.Vector3(o, a, s);
 }
-function ur(t, n, r) {
-	let i = .008, a = lr(t, Math.min(1, n + i), r).sub(lr(t, Math.max(0, n - i), r)), o = lr(t, n, Math.min(1, r + i)).sub(lr(t, n, Math.max(0, r - i))), s = new e.Vector3().crossVectors(a, o).normalize();
+function qr(t, n, r) {
+	let i = .008, a = Kr(t, Math.min(1, n + i), r).sub(Kr(t, Math.max(0, n - i), r)), o = Kr(t, n, Math.min(1, r + i)).sub(Kr(t, n, Math.max(0, r - i))), s = new e.Vector3().crossVectors(a, o).normalize();
 	return s.y < 0 && s.negate(), s;
 }
-var dr = class {
+var Jr = class {
 	group = new e.Group();
-	tileMat = en();
-	fieldMat = st();
+	tileMat = vn();
+	fieldMat = rt();
 	constructor() {
 		this.group.name = "roof", this.fieldMat.name = "gate-photographic-roof", this.fieldMat.color.set("#a3a99b"), this.buildField(), this.buildCoverTiles(), this.buildRidges(), this.buildEaves(), this.buildMossPatches();
 	}
@@ -4697,8 +5824,8 @@ var dr = class {
 			for (let e = 0; e <= 14; e++) {
 				let t = e / 14;
 				for (let e = 0; e <= 28; e++) {
-					let a = e / 28, o = lr(n, a, t);
-					r.push(o.x, o.y, o.z), i.push((a - .5) * (n === "front" || n === "back" ? sr * 2 : q * 2), t * 6.5);
+					let a = e / 28, o = Kr(n, a, t);
+					r.push(o.x, o.y, o.z), i.push((a - .5) * (n === "front" || n === "back" ? Ur * 2 : Wr * 2), t * 6.5);
 				}
 			}
 			for (let e = 0; e < 14; e++) for (let t = 0; t < 28; t++) {
@@ -4708,14 +5835,14 @@ var dr = class {
 			let o = new e.BufferGeometry();
 			o.setAttribute("position", new e.Float32BufferAttribute(r, 3)), o.setAttribute("uv", new e.Float32BufferAttribute(i, 2)), o.setIndex(a), o.computeVertexNormals(), t.push(o);
 		}
-		let n = new e.Mesh(H(t), this.fieldMat);
+		let n = new e.Mesh(J(t), this.fieldMat);
 		n.castShadow = !0, n.receiveShadow = !0, this.group.add(n);
 	}
 	buildCoverTiles() {
-		let t = new G("roof-tiles"), n = [], r = .095, i = (i, a, o, s) => {
+		let t = new X("roof-tiles"), n = [], r = .095, i = (i, a, o, s) => {
 			let c = [], l = [], u = [], d = new e.Color().setHSL(.12 + t.range(-.02, .02), .035, .13 + t.range(-.03, .045)), f = t.chance(.32), p = [], m = [], h = [];
 			for (let e = 0; e <= 3; e++) {
-				let t = o + (s - o) * (e / 3), n = lr(i, a, t), r = ur(i, a, t), c = .01, l = lr(i, Math.min(1, a + c), t).sub(lr(i, Math.max(0, a - c), t)).normalize();
+				let t = o + (s - o) * (e / 3), n = Kr(i, a, t), r = qr(i, a, t), c = .01, l = Kr(i, Math.min(1, a + c), t).sub(Kr(i, Math.max(0, a - c), t)).normalize();
 				p.push(n), m.push(l), h.push(r);
 			}
 			for (let n = 0; n <= 3; n++) {
@@ -4756,46 +5883,46 @@ var dr = class {
 				i("left", t, n, r), i("right", t, n, r);
 			}
 		}
-		let a = new e.Mesh(H(n), this.tileMat);
+		let a = new e.Mesh(J(n), this.tileMat);
 		a.castShadow = !0, a.receiveShadow = !0, this.group.add(a);
 	}
 	buildRidges() {
-		let t = [], n = K.eaveY + K.rise;
-		t.push(V(cr * 2 + 1.2, .2, .42, 0, n + .2, 0));
-		for (let r = -cr - .4; r <= cr + .4; r += .28) {
+		let t = [], n = Z.eaveY + Z.rise;
+		t.push(q(Gr * 2 + 1.2, .2, .42, 0, n + .2, 0));
+		for (let r = -Gr - .4; r <= Gr + .4; r += .28) {
 			let i = new e.CylinderGeometry(.16, .16, .22, 10);
 			i.translate(r, n + .36, 0), t.push(i);
 		}
-		for (let e = -cr - .3; e <= cr + .3; e += .34) for (let r of [-1, 1]) t.push(V(.24, .18, .04, e, n + .2, r * .22));
+		for (let e = -Gr - .3; e <= Gr + .3; e += .34) for (let r of [-1, 1]) t.push(q(.24, .18, .04, e, n + .2, r * .22));
 		for (let e of [-1, 1]) {
-			t.push(V(.4, .32, .46, e * (cr + .48), n + .18, 0));
-			let r = V(.3, .5, .34, e * (cr + .6), n + .5, .02);
+			t.push(q(.4, .32, .46, e * (Gr + .48), n + .18, 0));
+			let r = q(.3, .5, .34, e * (Gr + .6), n + .5, .02);
 			r.rotateZ(e * -.8), t.push(r);
-			let i = V(.2, .28, .28, e * (cr + .78), n + .7, .02);
+			let i = q(.2, .28, .28, e * (Gr + .78), n + .7, .02);
 			i.rotateZ(e * -1.25), t.push(i);
 		}
 		for (let r of [-1, 1]) for (let i of [-1, 1]) {
-			let a = new e.Vector3(r * cr, n + .1, 0), o = new e.Vector3(r * sr, K.eaveY + K.cornerLift * .65, i * q), s = o.clone().sub(a), c = s.length(), l = new e.BoxGeometry(.3, c, .3);
+			let a = new e.Vector3(r * Gr, n + .1, 0), o = new e.Vector3(r * Ur, Z.eaveY + Z.cornerLift * .65, i * Wr), s = o.clone().sub(a), c = s.length(), l = new e.BoxGeometry(.3, c, .3);
 			l.translate(0, c / 2, 0), l.applyQuaternion(new e.Quaternion().setFromUnitVectors(new e.Vector3(0, 1, 0), s.normalize())), l.translate(a.x, a.y, a.z), t.push(l);
 			for (let n = .06; n < .96; n += .1) {
 				let r = a.clone().lerp(o, n), i = new e.CylinderGeometry(.13, .13, .2, 8);
 				i.translate(r.x, r.y + .18, r.z), t.push(i);
 			}
 		}
-		let r = H(t);
-		Jn(r, new e.Color(.14, .15, .14));
+		let r = J(t);
+		kr(r, new e.Color(.14, .15, .14));
 		let i = new e.Mesh(r, this.tileMat);
 		i.castShadow = !0, i.receiveShadow = !0, this.group.add(i);
 	}
 	buildMossPatches() {
-		let t = new G("roof-moss-patches"), n = [], r = [];
+		let t = new X("roof-moss-patches"), n = [], r = [];
 		for (let i = 0; i < 120; i++) {
 			let a = [
 				"front",
 				"back",
 				"left",
 				"right"
-			][i % 4], o = t.range(.06, .94), s = t.chance(.55) ? t.range(.03, .3) : t.range(.55, .96), c = lr(a, o, s), l = ur(a, o, s), u = lr(a, Math.min(1, o + .01), s).sub(lr(a, Math.max(0, o - .01), s)).normalize(), d = new e.Vector3().crossVectors(l, u).normalize(), f = t.range(.14, .45), p = t.int(6, 9);
+			][i % 4], o = t.range(.06, .94), s = t.chance(.55) ? t.range(.03, .3) : t.range(.55, .96), c = Kr(a, o, s), l = qr(a, o, s), u = Kr(a, Math.min(1, o + .01), s).sub(Kr(a, Math.max(0, o - .01), s)).normalize(), d = new e.Vector3().crossVectors(l, u).normalize(), f = t.range(.14, .45), p = t.int(6, 9);
 			n.length;
 			let m = [], h = [];
 			m.push(c.x + l.x * .012, c.y + l.y * .012, c.z + l.z * .012);
@@ -4808,7 +5935,7 @@ var dr = class {
 			let _ = new e.Color().setHSL(.22 + t.range(-.02, .02), .5, .09 + t.range(0, .04));
 			for (let e = 0; e < m.length / 3; e++) r.push(_.r, _.g, _.b);
 		}
-		let i = H(n.map((t) => (t.setAttribute("color", new e.Float32BufferAttribute(r.slice(0, t.getAttribute("position").count * 3), 3)), t))), a = new e.MeshStandardMaterial({
+		let i = J(n.map((t) => (t.setAttribute("color", new e.Float32BufferAttribute(r.slice(0, t.getAttribute("position").count * 3), 3)), t))), a = new e.MeshStandardMaterial({
 			color: 5466936,
 			roughness: 1,
 			vertexColors: !0,
@@ -4820,40 +5947,40 @@ var dr = class {
 		o.receiveShadow = !0, this.group.add(o);
 	}
 	buildEaves() {
-		let t = Qt(1), n = [];
-		for (let e of [-1, 1]) n.push(V(sr * 2, .2, .16, 0, K.eaveY - .26, e * q)), n.push(V(.16, .2, q * 2, e * sr, K.eaveY - .26, 0));
-		for (let t = -sr + .3; t <= sr - .3; t += .34) for (let r of [-1, 1]) {
+		let t = gn(1), n = [];
+		for (let e of [-1, 1]) n.push(q(Ur * 2, .2, .16, 0, Z.eaveY - .26, e * Wr)), n.push(q(.16, .2, Wr * 2, e * Ur, Z.eaveY - .26, 0));
+		for (let t = -Ur + .3; t <= Ur - .3; t += .34) for (let r of [-1, 1]) {
 			let i = new e.BoxGeometry(.1, .14, 1.7);
-			i.rotateX(r * .22), i.translate(t, K.eaveY - .3, r * (q - .8)), n.push(i);
+			i.rotateX(r * .22), i.translate(t, Z.eaveY - .3, r * (Wr - .8)), n.push(i);
 			let a = new e.BoxGeometry(.11, .15, .06);
-			a.translate(t, K.eaveY - .42, r * (q + .04)), n.push(a);
+			a.translate(t, Z.eaveY - .42, r * (Wr + .04)), n.push(a);
 		}
-		for (let t = -q + .4; t <= q - .4; t += .36) for (let r of [-1, 1]) {
+		for (let t = -Wr + .4; t <= Wr - .4; t += .36) for (let r of [-1, 1]) {
 			let i = new e.BoxGeometry(1.6, .14, .1);
-			i.rotateZ(r * -.22), i.translate(r * (sr - .8), K.eaveY - .3, t), n.push(i);
+			i.rotateZ(r * -.22), i.translate(r * (Ur - .8), Z.eaveY - .3, t), n.push(i);
 		}
-		n.push(V(sr * 2 - .6, .12, q * 2 - .6, 0, K.eaveY - .14, 0));
-		let r = new e.Mesh(H(n), t);
+		n.push(q(Ur * 2 - .6, .12, Wr * 2 - .6, 0, Z.eaveY - .14, 0));
+		let r = new e.Mesh(J(n), t);
 		r.castShadow = !0, r.receiveShadow = !0, this.group.add(r);
 		let i = [];
 		for (let t of [-1, 1]) for (let n of [-1, 1]) {
 			let r = new e.CylinderGeometry(.04, .12, .75, 8);
-			r.rotateZ(t * -.7), r.rotateX(n * .25), r.translate(t * (sr - .1), K.eaveY + .28, n * (q - .1)), i.push(r);
+			r.rotateZ(t * -.7), r.rotateX(n * .25), r.translate(t * (Ur - .1), Z.eaveY + .28, n * (Wr - .1)), i.push(r);
 		}
-		let a = H(i);
-		Jn(a, new e.Color(.15, .16, .15));
+		let a = J(i);
+		kr(a, new e.Color(.15, .16, .15));
 		let o = new e.Mesh(a, this.tileMat);
 		o.castShadow = !0, this.group.add(o), this.group.traverse((t) => {
 			if (t instanceof e.Mesh) {
 				let n = t.geometry;
-				!n.getAttribute("color") && t.material === this.tileMat && Jn(n, new e.Color(.16, .17, .16));
+				!n.getAttribute("color") && t.material === this.tileMat && kr(n, new e.Color(.16, .17, .16));
 			}
 		});
 	}
 };
 //#endregion
 //#region src/world/static_batch.ts
-function fr(n) {
+function Yr(n) {
 	let r = /* @__PURE__ */ new Map();
 	for (let t of [...n.children]) {
 		if (!(t instanceof e.Mesh) || t instanceof e.InstancedMesh || t.name || Array.isArray(t.material) || t.material.transparent || !t.visible) continue;
@@ -4877,49 +6004,49 @@ function fr(n) {
 }
 //#endregion
 //#region src/gate-kit/world/gate.ts
-var J = .35, pr = 5.6, mr = [
+var Q = .35, Xr = 5.6, Zr = [
 	-6,
 	-2.6,
 	2.6,
 	6
-], Y = 2, hr = class {
+], Qr = 2, $r = class {
 	group = new e.Group();
 	roof;
-	timber = Qt(0);
-	timberDark = Qt(1);
-	stone = or(.12);
-	balustradeStone = R(.2);
-	plaster = $t();
-	gold = tn();
+	timber = gn(0);
+	timberDark = gn(1);
+	stone = Hr(.12);
+	balustradeStone = et(.2);
+	plaster = _n();
+	gold = yn();
 	constructor() {
 		this.group.name = "gate", this.buildPlatformAndBases(), this.buildColumns(), this.buildBrackets(), this.buildWalls(), this.buildRailings(), this.buildPlaque(), this.buildCeiling(), this.buildWings(), this.buildIvy(), this.buildContactShadow(), this.stone.name === "granite-photogrammetry" && this.group.traverse((t) => {
-			!(t instanceof e.Mesh) || t.material !== this.stone || (t.geometry = nn(F(t.geometry, 1.25), "stone"), this.stone.vertexColors = !0);
-		}), this.roof = new dr(), this.group.add(this.roof.group);
-		for (let t of this.group.children) !(t instanceof e.Mesh) || Array.isArray(t.material) || t.material.name.startsWith("gate-photographic-") && (t.geometry = F(t.geometry, t.material.name.includes("plaster") ? 2 : .8));
-		fr(this.group);
+			!(t instanceof e.Mesh) || t.material !== this.stone || (t.geometry = bn(U(t.geometry, 1.25), "stone"), this.stone.vertexColors = !0);
+		}), this.roof = new Jr(), this.group.add(this.roof.group);
+		for (let t of this.group.children) !(t instanceof e.Mesh) || Array.isArray(t.material) || t.material.name.startsWith("gate-photographic-") && (t.geometry = U(t.geometry, t.material.name.includes("plaster") ? 2 : .8));
+		Yr(this.group);
 	}
 	buildPlatformAndBases() {
 		let t = [];
-		t.push(V(17.2, .68, 7.4, 0, -.34, 0)), t.push(V(17.2, .35, 7.4, 0, .175, 0)), t.push(V(17.6, .12, 7.8, 0, .31, 0));
-		for (let n of mr) for (let r of [-Y, Y]) {
-			t.push(V(.95, .2, .95, n, J + .1, r));
+		t.push(q(17.2, .68, 7.4, 0, -.34, 0)), t.push(q(17.2, .35, 7.4, 0, .175, 0)), t.push(q(17.6, .12, 7.8, 0, .31, 0));
+		for (let n of Zr) for (let r of [-Qr, Qr]) {
+			t.push(q(.95, .2, .95, n, Q + .1, r));
 			let i = new e.CylinderGeometry(.42, .47, .42, 16);
-			i.translate(n, J + .41, r), t.push(i);
+			i.translate(n, Q + .41, r), t.push(i);
 			let a = new e.TorusGeometry(.43, .035, 6, 16);
-			a.rotateX(Math.PI / 2), a.translate(n, J + .62, r), t.push(a);
+			a.rotateX(Math.PI / 2), a.translate(n, Q + .62, r), t.push(a);
 			for (let e = 0; e < 12; e++) {
-				let i = e / 12 * Math.PI * 2, a = V(.16, .05, .26, 0, 0, 0);
-				a.rotateX(-.28), a.rotateY(-i), a.translate(n + Math.cos(i) * .5, J + .56, r + Math.sin(i) * .5), t.push(a);
+				let i = e / 12 * Math.PI * 2, a = q(.16, .05, .26, 0, 0, 0);
+				a.rotateX(-.28), a.rotateY(-i), a.translate(n + Math.cos(i) * .5, Q + .56, r + Math.sin(i) * .5), t.push(a);
 			}
 		}
-		for (let e = 0; e < 3; e++) t.push(V(9.5, .12, .5, 0, .06 + e * .12, 4 + (2 - e) * .5)), t.push(V(9.5, .12, .5, 0, .06 + e * .12, -4 - (2 - e) * .5));
+		for (let e = 0; e < 3; e++) t.push(q(9.5, .12, .5, 0, .06 + e * .12, 4 + (2 - e) * .5)), t.push(q(9.5, .12, .5, 0, .06 + e * .12, -4 - (2 - e) * .5));
 		for (let e = 0; e < 4; e++) {
 			let n = .16 * (e + 1);
-			for (let r of [-1, 1]) t.push(V(5, .15, .5, 0, n - .68 - .075, r * (7 - e * .5)));
+			for (let r of [-1, 1]) t.push(q(5, .15, .5, 0, n - .68 - .075, r * (7 - e * .5)));
 		}
-		let n = new e.Mesh(H(t), this.stone);
+		let n = new e.Mesh(J(t), this.stone);
 		n.castShadow = !0, n.receiveShadow = !0, this.group.add(n);
-		let r = ar(3.4, !1), i = new e.Mesh(new e.PlaneGeometry(16.7, 7), r);
+		let r = Vr(3.4, !1), i = new e.Mesh(new e.PlaneGeometry(16.7, 7), r);
 		i.rotation.x = -Math.PI / 2, i.position.set(0, .356, 0), i.receiveShadow = !0, this.group.add(i);
 		for (let t = 0; t < 3; t++) for (let n of [-1, 1]) {
 			let i = new e.Mesh(new e.PlaneGeometry(9.4, .48), r);
@@ -4928,61 +6055,61 @@ var J = .35, pr = 5.6, mr = [
 	}
 	buildColumns() {
 		let t = [];
-		for (let e of mr) for (let n of [-Y, Y]) {
-			let r = pr - (J + .62);
-			t.push(qn(.23, .28, r, 16, e, J + .62 + r / 2, n)), t.push(qn(.295, .295, .06, 16, e, J + .85, n));
+		for (let e of Zr) for (let n of [-Qr, Qr]) {
+			let r = Xr - (Q + .62);
+			t.push(Or(.23, .28, r, 16, e, Q + .62 + r / 2, n)), t.push(Or(.295, .295, .06, 16, e, Q + .85, n));
 		}
-		for (let e of mr) t.push(V(.26, .32, 4.5, e, pr - .12, 0));
-		for (let e = 0; e < mr.length - 1; e++) {
-			let n = mr[e + 1] - mr[e] - .5, r = (mr[e] + mr[e + 1]) / 2;
-			for (let e of [-Y, Y]) t.push(V(n, .42, .32, r, pr - .22, e)), t.push(V(n + .1, .24, .36, r, pr + .08, e));
+		for (let e of Zr) t.push(q(.26, .32, 4.5, e, Xr - .12, 0));
+		for (let e = 0; e < Zr.length - 1; e++) {
+			let n = Zr[e + 1] - Zr[e] - .5, r = (Zr[e] + Zr[e + 1]) / 2;
+			for (let e of [-Qr, Qr]) t.push(q(n, .42, .32, r, Xr - .22, e)), t.push(q(n + .1, .24, .36, r, Xr + .08, e));
 		}
 		for (let e of [-1.5, 1.5]) {
-			let n = qn(.11, .11, 13.4, 10, 0, 6.55, e);
+			let n = Or(.11, .11, 13.4, 10, 0, 6.55, e);
 			n.rotateZ(Math.PI / 2), t.push(n);
 		}
 		for (let e of [-5.2, 5.2]) {
-			let n = qn(.1, .1, 3.6, 10, e, 6.7, 0);
+			let n = Or(.1, .1, 3.6, 10, e, 6.7, 0);
 			n.rotateX(Math.PI / 2), t.push(n);
 		}
-		let n = new e.Mesh(H(t), this.timber);
+		let n = new e.Mesh(J(t), this.timber);
 		n.castShadow = !0, n.receiveShadow = !0, this.group.add(n);
 		let r = [];
-		for (let e of mr) for (let t of [-Y, Y]) for (let n of [-1, 1]) {
-			let i = Yn(1.55, .62, .16);
-			n < 0 && i.scale(-1, 1, 1), i.translate(e, pr - .45, t + (t > 0 ? -.15 : .15)), r.push(i);
+		for (let e of Zr) for (let t of [-Qr, Qr]) for (let n of [-1, 1]) {
+			let i = Ar(1.55, .62, .16);
+			n < 0 && i.scale(-1, 1, 1), i.translate(e, Xr - .45, t + (t > 0 ? -.15 : .15)), r.push(i);
 		}
-		let i = new e.Mesh(H(r), this.timberDark);
+		let i = new e.Mesh(J(r), this.timberDark);
 		i.castShadow = !0, i.receiveShadow = !0, this.group.add(i);
 	}
 	bracketCluster() {
 		let e = [];
-		e.push(V(.58, .26, .58, 0, .13, 0)), e.push(V(1.18, .15, .3, 0, .34, 0)), e.push(V(.32, .15, 1.12, 0, .34, .1));
+		e.push(q(.58, .26, .58, 0, .13, 0)), e.push(q(1.18, .15, .3, 0, .34, 0)), e.push(q(.32, .15, 1.12, 0, .34, .1));
 		for (let t of [
 			-.46,
 			0,
 			.46
-		]) e.push(V(.3, .2, .3, t, .5, 0));
-		e.push(V(1.5, .14, .27, 0, .64, .05)), e.push(V(.29, .14, 1.3, 0, .64, .16));
+		]) e.push(q(.3, .2, .3, t, .5, 0));
+		e.push(q(1.5, .14, .27, 0, .64, .05)), e.push(q(.29, .14, 1.3, 0, .64, .16));
 		for (let t of [
 			-.62,
 			0,
 			.62
-		]) e.push(V(.26, .18, .26, t, .8, .08));
-		e.push(V(1, .12, .24, 0, .92, .16)), e.push(V(.2, .15, 1.05, 0, .84, .55, 0, .12)), e.push(V(.44, .2, .42, 0, .98, 1.12));
-		for (let t of [-1, 1]) e.push(V(.09, .5, .13, t * .18, .62, .52, 0, t * .55, t * .16));
-		return e.push(V(.12, .34, .12, 0, .78, 1.13)), H(e);
+		]) e.push(q(.26, .18, .26, t, .8, .08));
+		e.push(q(1, .12, .24, 0, .92, .16)), e.push(q(.2, .15, 1.05, 0, .84, .55, 0, .12)), e.push(q(.44, .2, .42, 0, .98, 1.12));
+		for (let t of [-1, 1]) e.push(q(.09, .5, .13, t * .18, .62, .52, 0, t * .55, t * .16));
+		return e.push(q(.12, .34, .12, 0, .78, 1.13)), J(e);
 	}
 	buildBrackets() {
 		let t = [], n = this.bracketCluster(), r = [];
 		for (let e = -6.6; e <= 6.6; e += .68) r.push([
 			e,
 			6.05,
-			Y - .15
+			Qr - .15
 		]), r.push([
 			e,
 			6.05,
-			-Y + .15
+			-Qr + .15
 		]);
 		for (let e = -1.35; e <= 1.35; e += .78) r.push([
 			-6.35,
@@ -5010,76 +6137,76 @@ var J = .35, pr = 5.6, mr = [
 			let i = n.clone();
 			i.rotateY(e * r * Math.PI / 4), i.translate(e * 6.55, 6.1, r * 1.55), t.push(i);
 		}
-		let i = new e.Mesh(H(t), this.timberDark);
+		let i = new e.Mesh(J(t), this.timberDark);
 		i.castShadow = !0, i.receiveShadow = !0, this.group.add(i);
 		let a = [];
-		for (let [e, t, n] of r) a.push(V(.12, .1, .12, e, t + .98, n + (n > 0 ? 1.05 : -1.05)));
-		let o = new e.Mesh(H(a), this.gold);
+		for (let [e, t, n] of r) a.push(q(.12, .1, .12, e, t + .98, n + (n > 0 ? 1.05 : -1.05)));
+		let o = new e.Mesh(J(a), this.gold);
 		o.castShadow = !1, this.group.add(o);
 	}
 	panelWall(e, t, n, r, i) {
 		let a = [], o = Math.max(6, Math.round(e / .34));
 		for (let n = 0; n <= o; n++) {
 			let r = -e / 2 + e * n / o;
-			a.push(V(.26, t, .12, r, t / 2, 0));
+			a.push(q(.26, t, .12, r, t / 2, 0));
 		}
-		a.push(V(e, .22, .18, 0, t * .18, .02)), a.push(V(e, .26, .2, 0, t * .72, .02)), a.push(V(e, .24, .2, 0, t - .12, .02));
-		let s = H(a);
+		a.push(q(e, .22, .18, 0, t * .18, .02)), a.push(q(e, .26, .2, 0, t * .72, .02)), a.push(q(e, .24, .2, 0, t - .12, .02));
+		let s = J(a);
 		return s.translate(n, r, i), s;
 	}
 	buildWalls() {
 		let t = [], n = [[-6, -2.6], [2.6, 6]];
 		for (let [e, r] of n) {
 			let n = r - e - .55, i = (e + r) / 2;
-			for (let a of [-Y, Y]) {
-				let o = V(n, 4.95, .08, 0, 2.47, -.09);
-				o.translate(i, J + .02, a), t.push(o), t.push(this.panelWall(n, 4.95, i, J + .02, a));
+			for (let a of [-Qr, Qr]) {
+				let o = q(n, 4.95, .08, 0, 2.47, -.09);
+				o.translate(i, Q + .02, a), t.push(o), t.push(this.panelWall(n, 4.95, i, Q + .02, a));
 				let s = [];
 				for (let t of [
 					e + .3,
 					(e + r) / 2,
 					r - .3
-				]) s.push(V(.2, 4.95, .18, t, J + .02 + 2.47, a + (a > 0 ? .1 : -.1)));
+				]) s.push(q(.2, 4.95, .18, t, Q + .02 + 2.47, a + (a > 0 ? .1 : -.1)));
 				for (let e of [
 					1.4,
 					2.6,
 					3.9
-				]) s.push(V(n, .16, .16, i, J + .02 + e, a + (a > 0 ? .1 : -.1)));
-				t.push(H(s));
-				let c = [], l = J + .02 + 2.6;
-				for (let e = 0; e <= Math.round(n / .22); e++) c.push(V(.05, 2, .07, i - n / 2 + n * e / Math.round(n / .22), l + 2 / 2, a + (a > 0 ? .12 : -.12)));
-				for (let e = 0; e <= 5; e++) c.push(V(n, .05, .07, i, l + 2 * e / 5, a + (a > 0 ? .12 : -.12)));
-				t.push(H(c));
+				]) s.push(q(n, .16, .16, i, Q + .02 + e, a + (a > 0 ? .1 : -.1)));
+				t.push(J(s));
+				let c = [], l = Q + .02 + 2.6;
+				for (let e = 0; e <= Math.round(n / .22); e++) c.push(q(.05, 2, .07, i - n / 2 + n * e / Math.round(n / .22), l + 2 / 2, a + (a > 0 ? .12 : -.12)));
+				for (let e = 0; e <= 5; e++) c.push(q(n, .05, .07, i, l + 2 * e / 5, a + (a > 0 ? .12 : -.12)));
+				t.push(J(c));
 			}
 		}
 		for (let e of [-6, 6]) {
 			let n = [];
 			for (let e = 0; e <= 12; e++) {
 				let t = -1.9 + 3.8 * e / 12;
-				n.push(V(.12, 4.95, .28, 0, 2.47, t));
+				n.push(q(.12, 4.95, .28, 0, 2.47, t));
 			}
-			let r = H(n);
-			r.translate(e, J + .02, 0), t.push(r);
+			let r = J(n);
+			r.translate(e, Q + .02, 0), t.push(r);
 		}
-		let r = new e.Mesh(H(t), this.timberDark);
+		let r = new e.Mesh(J(t), this.timberDark);
 		r.castShadow = !0, r.receiveShadow = !0, this.group.add(r);
 		let i = [];
 		for (let [t, r] of n) {
 			let n = (t + r) / 2;
-			for (let t of [-Y, Y]) {
+			for (let t of [-Qr, Qr]) {
 				for (let r = 0; r < 4; r++) for (let a = 0; a < 3; a++) {
-					let o = n - .9 + a * .9, s = J + .9 + r * .85, c = new e.SphereGeometry(.045, 7, 5);
+					let o = n - .9 + a * .9, s = Q + .9 + r * .85, c = new e.SphereGeometry(.045, 7, 5);
 					c.scale(1, 1, .5), c.translate(o, s, t + (t > 0 ? .19 : -.19)), i.push(c);
 				}
 				let r = new e.TorusGeometry(.13, .022, 6, 12);
-				r.translate(n, J + 1.4, t + (t > 0 ? .2 : -.2)), i.push(r);
+				r.translate(n, Q + 1.4, t + (t > 0 ? .2 : -.2)), i.push(r);
 			}
 		}
-		let a = new e.Mesh(H(i), this.gold);
+		let a = new e.Mesh(J(i), this.gold);
 		a.castShadow = !1, this.group.add(a);
 		let o = [];
-		for (let e of [-1, 1]) o.push(V(6.4, 2.3, .34, e * 8.95, J + 1.15, -1.1)), o.push(V(6.6, .4, .46, e * 8.95, J + .2, -1.1));
-		let s = new e.Mesh(H(o), this.plaster);
+		for (let e of [-1, 1]) o.push(q(6.4, 2.3, .34, e * 8.95, Q + 1.15, -1.1)), o.push(q(6.6, .4, .46, e * 8.95, Q + .2, -1.1));
+		let s = new e.Mesh(J(o), this.plaster);
 		s.castShadow = !0, s.receiveShadow = !0, this.group.add(s);
 	}
 	buildRailings() {
@@ -5087,25 +6214,25 @@ var J = .35, pr = 5.6, mr = [
 			let i = Math.abs(n - e), a = Math.max(2, Math.round(i / 2.4));
 			for (let o = 0; o <= a; o++) {
 				let s = e + (n - e) * o / a;
-				if (t.push(V(.24, .95, .24, s, J + .475, r)), t.push(V(.34, .12, .34, s, J + .98, r)), o < a) {
+				if (t.push(q(.24, .95, .24, s, Q + .475, r)), t.push(q(.34, .12, .34, s, Q + .98, r)), o < a) {
 					let s = e + (n - e) * (o + .5) / a;
-					t.push(V(i / a, .16, .14, s, J + .74, r));
+					t.push(q(i / a, .16, .14, s, Q + .74, r));
 				}
 			}
 		};
 		n(-5.6, -2.9, 1.35), n(2.9, 5.6, 1.35);
-		let r = new e.Mesh(H(t), this.balustradeStone);
+		let r = new e.Mesh(J(t), this.balustradeStone);
 		r.name = "gate-stone-balustrades", r.castShadow = !0, r.receiveShadow = !0, this.group.add(r);
 	}
 	buildCeiling() {
 		let t = [];
-		for (let e = -6.2; e <= 6.2; e += .5) t.push(V(.11, .14, 4.2, e, 5.62, 0, 0, .06));
+		for (let e = -6.2; e <= 6.2; e += .5) t.push(q(.11, .14, 4.2, e, 5.62, 0, 0, .06));
 		for (let e of [
 			-1.2,
 			0,
 			1.2
 		]) {
-			let n = qn(.09, .09, 12.8, 8, 0, 5.72, e);
+			let n = Or(.09, .09, 12.8, 8, 0, 5.72, e);
 			n.rotateZ(Math.PI / 2), t.push(n);
 		}
 		for (let e of [
@@ -5113,12 +6240,12 @@ var J = .35, pr = 5.6, mr = [
 			-2.65,
 			2.65,
 			6.1
-		]) for (let n of [-1.95, 1.95]) t.push(V(.26, .3, .35, e, 5.62, n));
-		let n = new e.Mesh(H(t), this.timber);
+		]) for (let n of [-1.95, 1.95]) t.push(q(.26, .3, .35, e, 5.62, n));
+		let n = new e.Mesh(J(t), this.timber);
 		n.castShadow = !0, n.receiveShadow = !0, this.group.add(n);
 	}
 	buildPlaque() {
-		let t = new e.Group(), n = Ye("gate"), r = new e.Mesh(new e.BoxGeometry(4.5, 1.45, .16), _t()), i = new e.Mesh(new e.PlaneGeometry(4.2, 1.2), new e.MeshStandardMaterial({
+		let t = new e.Group(), n = We("gate"), r = new e.Mesh(new e.BoxGeometry(4.5, 1.45, .16), pt()), i = new e.Mesh(new e.PlaneGeometry(4.2, 1.2), new e.MeshStandardMaterial({
 			map: n,
 			roughness: .86,
 			metalness: .02,
@@ -5126,14 +6253,14 @@ var J = .35, pr = 5.6, mr = [
 		}));
 		i.position.z = .09, t.add(r, i);
 		let a = [];
-		for (let e of [-1, 1]) a.push(V(.06, 1, .06, e * 1.2, .95, 0)), a.push(V(.16, .06, .16, e * 1.2, 1.46, 0));
-		let o = new e.Mesh(H(a), this.gold);
-		t.add(o), t.position.set(0, 4.5, Y + .24), t.traverse((t) => {
+		for (let e of [-1, 1]) a.push(q(.06, 1, .06, e * 1.2, .95, 0)), a.push(q(.16, .06, .16, e * 1.2, 1.46, 0));
+		let o = new e.Mesh(J(a), this.gold);
+		t.add(o), t.position.set(0, 4.5, Qr + .24), t.traverse((t) => {
 			t instanceof e.Mesh && (t.castShadow = !0);
 		}), this.group.add(t);
 	}
 	buildIvy() {
-		let t = Xt(256, 256, (e) => {
+		let t = mn(256, 256, (e) => {
 			e.clearRect(0, 0, 256, 256);
 			let t = 98765, n = () => (t = t * 1664525 + 1013904223 >>> 0, t / 4294967296);
 			for (let t = 0; t < 14; t++) {
@@ -5155,20 +6282,20 @@ var J = .35, pr = 5.6, mr = [
 			roughness: 1
 		}), i = [], a = [], o = 24680, s = () => (o = o * 1664525 + 1013904223 >>> 0, o / 4294967296);
 		for (let t of [-1, 1]) for (let n = 0; n < 8; n++) {
-			let r = t * 8.95 - 2.65 + n * .75 + s() * .2, o = J + 2.52, c = .5 + s() * 1.2, l = new e.CylinderGeometry(.012, .016, c, 5);
+			let r = t * 8.95 - 2.65 + n * .75 + s() * .2, o = Q + 2.52, c = .5 + s() * 1.2, l = new e.CylinderGeometry(.012, .016, c, 5);
 			l.rotateZ((s() - .5) * .15), l.translate(r, o - c / 2, -.885), a.push(l);
 			for (let t = 0; t < 4; t++) {
 				let n = o - c * (.18 + t * .24), a = new e.PlaneGeometry(.28 + s() * .26, .2 + s() * .2);
 				a.rotateZ(s() * Math.PI * 2), a.translate(r + (s() - .5) * .2, n, -.875), i.push(a);
 			}
 		}
-		let c = new e.Mesh(H(a), r);
+		let c = new e.Mesh(J(a), r);
 		c.castShadow = !1, this.group.add(c);
-		let l = new e.Mesh(H(i), n);
+		let l = new e.Mesh(J(i), n);
 		l.castShadow = !1, this.group.add(l);
 	}
 	buildContactShadow() {
-		let t = Xt(512, 256, (e) => {
+		let t = mn(512, 256, (e) => {
 			let t = e.createRadialGradient(256, 128, 10, 256, 128, 250);
 			t.addColorStop(0, "rgba(0,0,0,0.5)"), t.addColorStop(.55, "rgba(0,0,0,0.22)"), t.addColorStop(1, "rgba(0,0,0,0)"), e.fillStyle = t, e.fillRect(0, 0, 512, 256);
 		}), n = new e.MeshBasicMaterial({
@@ -5177,7 +6304,7 @@ var J = .35, pr = 5.6, mr = [
 			depthWrite: !1,
 			opacity: .9
 		}), r = new e.Mesh(new e.PlaneGeometry(15, 7), n);
-		r.rotation.x = -Math.PI / 2, r.position.set(0, J + .012, .4), this.group.add(r);
+		r.rotation.x = -Math.PI / 2, r.position.set(0, Q + .012, .4), this.group.add(r);
 	}
 	buildWings() {
 		let t = new e.MeshStandardMaterial({
@@ -5187,7 +6314,7 @@ var J = .35, pr = 5.6, mr = [
 		}), n = new e.MeshStandardMaterial({
 			color: new e.Color("#241812"),
 			roughness: .95
-		}), r = J + 2.3;
+		}), r = Q + 2.3;
 		for (let i of [-1, 1]) {
 			let a = i * 8.95, o = new e.Mesh(new e.BoxGeometry(6.58, .18, .5), this.timberDark);
 			o.position.set(a, r + .015, -1.1), o.castShadow = !0, o.receiveShadow = !0, o.name = "gate-wing-roof-bearing", this.group.add(o);
@@ -5203,14 +6330,14 @@ var J = .35, pr = 5.6, mr = [
 				let i = new e.Mesh(new e.CylinderGeometry(.055, .055, .06, 8), t);
 				i.rotation.x = Math.PI / 2, i.position.set(a - 3.2 + n * .44, r + .02, -.17), this.group.add(i);
 			}
-			let l = -.7, u = J + .08, d = u - l, f = new e.Mesh(new e.BoxGeometry(7, d, .86), this.stone);
+			let l = -.7, u = Q + .08, d = u - l, f = new e.Mesh(new e.BoxGeometry(7, d, .86), this.stone);
 			f.position.set(a, (l + u) / 2, -1.1), f.castShadow = !0, f.receiveShadow = !0, f.name = "gate-wing-ground-footing", this.group.add(f);
 			let p = new e.Mesh(new e.BoxGeometry(7.12, .12, .96), this.stone);
-			p.position.set(a, J + .06, -1.1), p.receiveShadow = !0, this.group.add(p);
+			p.position.set(a, Q + .06, -1.1), p.receiveShadow = !0, this.group.add(p);
 			let m = new e.Mesh(new e.BoxGeometry(1.05, 2, .07), n);
-			m.position.set(a + i * .4, J + 1.2, -.91), this.group.add(m);
+			m.position.set(a + i * .4, Q + 1.2, -.91), this.group.add(m);
 			let h = new e.Mesh(new e.BoxGeometry(1.26, 2.2, .1), this.timberDark);
-			h.position.set(a + i * .4, J + 1.3, -.94), this.group.add(h);
+			h.position.set(a + i * .4, Q + 1.3, -.94), this.group.add(h);
 		}
 		let i = [{
 			cx: -22.575,
@@ -5220,16 +6347,16 @@ var J = .35, pr = 5.6, mr = [
 			len: 16.85
 		}], a = [], o = [], s = [], c = [];
 		for (let { cx: t, len: n } of i) {
-			a.push(V(n, 2.3, .34, t, J + 1.15, -1.1));
-			let i = -.7, l = J + .08;
-			o.push(V(n + .2, l - i, .86, t, (i + l) / 2, -1.1)), o.push(V(n + .32, .12, .96, t, J + .06, -1.1)), s.push(V(n + .18, .18, .5, t, r + .015, -1.1)), s.push(V(n + .4, .16, .1, t, r + .06, -.22));
+			a.push(q(n, 2.3, .34, t, Q + 1.15, -1.1));
+			let i = -.7, l = Q + .08;
+			o.push(q(n + .2, l - i, .86, t, (i + l) / 2, -1.1)), o.push(q(n + .32, .12, .96, t, Q + .06, -1.1)), s.push(q(n + .18, .18, .5, t, r + .015, -1.1)), s.push(q(n + .4, .16, .1, t, r + .06, -.22));
 			let u = Math.max(2, Math.ceil(n / 6.4));
 			for (let e = 0; e <= u; e++) {
 				let r = t - n / 2 + n * e / u;
-				s.push(V(.34, 2.38, .4, r, J + 1.19, -1.1));
+				s.push(q(.34, 2.38, .4, r, Q + 1.19, -1.1));
 			}
-			for (let e of [-1, 1]) c.push(V(n + .4, .1, .95, t, r + .2, -1.1 + e * .38, 0, e * .34));
-			c.push(V(n + .4, .14, .18, t, r + .36, -1.1));
+			for (let e of [-1, 1]) c.push(q(n + .4, .1, .95, t, r + .2, -1.1 + e * .38, 0, e * .34));
+			c.push(q(n + .4, .14, .18, t, r + .36, -1.1));
 			let d = Math.max(2, Math.floor(n / .44));
 			for (let i = 0; i <= d; i++) {
 				let a = new e.CylinderGeometry(.055, .055, .06, 8);
@@ -5237,17 +6364,17 @@ var J = .35, pr = 5.6, mr = [
 			}
 		}
 		let l = (t, n, r) => {
-			let i = new e.Mesh(H(t), n);
+			let i = new e.Mesh(J(t), n);
 			i.castShadow = !0, i.receiveShadow = !0, i.name = r, this.group.add(i);
 		};
 		l(a, this.plaster, "gate-wing-terrace-extension-plaster"), l(o, this.stone, "gate-wing-terrace-extension-footing"), l(s, this.timberDark, "gate-wing-terrace-extension-timber"), l(c, t, "gate-wing-terrace-extension-roof");
 	}
-}, gr = class {
+}, ei = class {
 	group = new e.Group();
 	gameMap;
 	constructor(t = {}) {
 		this.gameMap = !!t.gameMap, this.group.name = "ground", this.gameMap || this.buildBase(), this.buildPaving(), this.buildKerbs(), this.gameMap || this.buildMoss(), this.buildRocks(), this.group.traverse((t) => {
-			!(t instanceof e.Mesh) || Array.isArray(t.material) || t.material.name !== "granite-photogrammetry" || (t.geometry = F(t.geometry, 1.25));
+			!(t instanceof e.Mesh) || Array.isArray(t.material) || t.material.name !== "granite-photogrammetry" || (t.geometry = U(t.geometry, 1.25));
 		});
 	}
 	buildBase() {
@@ -5258,42 +6385,42 @@ var J = .35, pr = 5.6, mr = [
 		n.rotation.x = -Math.PI / 2, n.position.y = -.06, n.receiveShadow = !0, this.group.add(n);
 	}
 	buildPaving() {
-		let t = this.gameMap ? re.x1 - re.x0 : 64, n = this.gameMap ? re.z1 - re.z0 : 64, r = this.gameMap ? Qe(t, n) : ar(3.6, !0, 0, 0), i = new e.Mesh(new e.PlaneGeometry(t, n), r);
-		i.rotation.x = -Math.PI / 2, i.position.set(0, this.gameMap ? .025 : .015, this.gameMap ? (re.z0 + re.z1) / 2 - 40 : 8), i.receiveShadow = !0, i.name = "flagstone-path", this.group.add(i);
+		let t = this.gameMap ? A.x1 - A.x0 : 64, n = this.gameMap ? A.z1 - A.z0 : 64, r = this.gameMap ? qe(t, n) : Vr(3.6, !0, 0, 0), i = new e.Mesh(new e.PlaneGeometry(t, n), r);
+		i.rotation.x = -Math.PI / 2, i.position.set(0, this.gameMap ? .025 : .015, this.gameMap ? (A.z0 + A.z1) / 2 - 40 : 8), i.receiveShadow = !0, i.name = "flagstone-path", this.group.add(i);
 	}
 	buildKerbs() {
-		let t = new G("kerbs"), n = or(.06), r = [];
+		let t = new X("kerbs"), n = Hr(.06), r = [];
 		for (let e of [-1, 1]) for (let n = 5; n < 33; n += 2.1) {
-			let i = .12 + t.range(-.015, .025), a = V(.34, .22, 2, e * 3.55, i, n + 2 / 2);
+			let i = .12 + t.range(-.015, .025), a = q(.34, .22, 2, e * 3.55, i, n + 2 / 2);
 			a.scale(1, 1, .96), r.push(a);
 		}
-		let i = new e.Mesh(H(r), n);
+		let i = new e.Mesh(J(r), n);
 		i.castShadow = !0, i.receiveShadow = !0, i.name = "kerbstones", this.group.add(i);
 	}
 	buildRocks() {
-		let t = new G("ground-rocks"), n = [];
+		let t = new X("ground-rocks"), n = [];
 		for (let r = 0; r < 26; r++) {
 			let r = (t.chance(.5) ? -1 : 1) * t.range(3.6, 6.8), i = t.range(5, 28), a = t.range(.07, .26), o = new e.IcosahedronGeometry(a, 0);
-			o.scale(1.4, t.range(.45, .8), 1), o.rotateY(t.range(0, Math.PI * 2)), o.translate(r, a * .5, i), Jn(o, new e.Color().setHSL(.1 + t.range(-.02, .02), .04, .16 + t.range(0, .1))), n.push(o);
+			o.scale(1.4, t.range(.45, .8), 1), o.rotateY(t.range(0, Math.PI * 2)), o.translate(r, a * .5, i), kr(o, new e.Color().setHSL(.1 + t.range(-.02, .02), .04, .16 + t.range(0, .1))), n.push(o);
 		}
-		let r = or(.02), i = new e.Mesh(H(n), r);
+		let r = Hr(.02), i = new e.Mesh(J(n), r);
 		i.castShadow = !0, i.receiveShadow = !0, i.name = "path-rocks", this.group.add(i);
 	}
 	buildMoss() {
-		let t = new G("moss"), n = [];
+		let t = new X("moss"), n = [];
 		for (let r = 0; r < 190; r++) {
 			let i = t.chance(.5) ? -1 : 1, a = r < 45, o = a ? t.range(-3, 3) : i * t.range(3.1, 16) * (t.chance(.5) ? 1 : .4), s = t.range(4.8, 33), c = a ? t.range(.015, .06) : t.range(.1, .4), l = new e.IcosahedronGeometry(c, 0);
-			l.scale(1.6, .22, 1.6), l.translate(o, .035, s), Jn(l, new e.Color().setHSL(.23 + t.range(-.03, .03), .4, .11 + t.range(0, .05))), n.push(l);
+			l.scale(1.6, .22, 1.6), l.translate(o, .035, s), kr(l, new e.Color().setHSL(.23 + t.range(-.03, .03), .4, .11 + t.range(0, .05))), n.push(l);
 		}
 		let r = new e.MeshStandardMaterial({
 			color: 16777215,
 			roughness: 1,
 			vertexColors: !0,
 			envMapIntensity: .04
-		}), i = new e.Mesh(H(n), r);
+		}), i = new e.Mesh(J(n), r);
 		i.receiveShadow = !0, i.name = "moss-clumps", this.group.add(i);
 	}
-}, _r = {
+}, ti = {
 	sunDir: { value: new e.Vector3(.55, .3, -.78).normalize() },
 	sunColor: { value: new e.Color(1, .82, .62) },
 	hazeColor: { value: new e.Color(.18, .235, .28) },
@@ -5305,7 +6432,7 @@ var J = .35, pr = 5.6, mr = [
 	mistHeight: { value: 20 },
 	hazeFar: { value: 11e-6 },
 	time: { value: 0 }
-}, vr = 1024, yr = 4, X = vr / yr, Z = Math.PI * 2, br = {
+}, ni = 1024, ri = 4, $ = ni / ri, ii = Math.PI * 2, ai = {
 	camphor: [0, 0],
 	broad: [1, 0],
 	chestnut: [2, 0],
@@ -5319,17 +6446,17 @@ var J = .35, pr = 5.6, mr = [
 	dark: [2, 2],
 	fallen: [3, 2]
 };
-function xr(e, t) {
+function oi(e, t) {
 	return [
-		U(e[0] * t, 0, 255),
-		U(e[1] * t, 0, 255),
-		U(e[2] * t, 0, 255)
+		jr(e[0] * t, 0, 255),
+		jr(e[1] * t, 0, 255),
+		jr(e[2] * t, 0, 255)
 	];
 }
-function Sr(e, t = 1) {
-	return `rgba(${Math.round(U(e[0], 0, 255))},${Math.round(U(e[1], 0, 255))},${Math.round(U(e[2], 0, 255))},${t})`;
+function si(e, t = 1) {
+	return `rgba(${Math.round(jr(e[0], 0, 255))},${Math.round(jr(e[1], 0, 255))},${Math.round(jr(e[2], 0, 255))},${t})`;
 }
-function Cr(e, t, n, r) {
+function ci(e, t, n, r) {
 	if (e.beginPath(), e.moveTo(0, 0), r) {
 		for (let r = 1; r <= 8; r++) {
 			let i = r / 9, a = n * Math.sin(Math.PI * i ** .74);
@@ -5343,35 +6470,35 @@ function Cr(e, t, n, r) {
 	} else e.bezierCurveTo(t * .1, -n * .78, t * .54, -n * 1.02, t * .92, -n * .3), e.quadraticCurveTo(t * 1.03, -n * .05, t, 0), e.quadraticCurveTo(t * 1, n * .2, t * .86, n * .42), e.bezierCurveTo(t * .52, n * 1, t * .1, n * .72, 0, 0);
 	e.closePath();
 }
-function Q(e, t, n, r, i, a, o, s = {}) {
+function li(e, t, n, r, i, a, o, s = {}) {
 	e.save(), e.translate(t, n), e.rotate(a);
 	let c = e.createLinearGradient(0, 0, r, 0);
-	c.addColorStop(0, Sr(xr(o, .66))), c.addColorStop(.42, Sr(o)), c.addColorStop(1, Sr(xr(o, s.glow ?? 1.18))), e.fillStyle = c, Cr(e, r, i, s.serrated ?? !1), e.fill(), e.strokeStyle = Sr(xr(o, 1.62), .3), e.lineWidth = .9, e.stroke(), e.strokeStyle = Sr(xr(o, 1.55), .5), e.lineWidth = Math.max(.55, i * .045), e.beginPath(), e.moveTo(r * .03, 0), e.quadraticCurveTo(r * .5, -i * .07, r * .95, 0), e.stroke(), e.strokeStyle = Sr(xr(o, 1.75), .28), e.lineWidth = .55;
+	c.addColorStop(0, si(oi(o, .66))), c.addColorStop(.42, si(o)), c.addColorStop(1, si(oi(o, s.glow ?? 1.18))), e.fillStyle = c, ci(e, r, i, s.serrated ?? !1), e.fill(), e.strokeStyle = si(oi(o, 1.62), .3), e.lineWidth = .9, e.stroke(), e.strokeStyle = si(oi(o, 1.55), .5), e.lineWidth = Math.max(.55, i * .045), e.beginPath(), e.moveTo(r * .03, 0), e.quadraticCurveTo(r * .5, -i * .07, r * .95, 0), e.stroke(), e.strokeStyle = si(oi(o, 1.75), .28), e.lineWidth = .55;
 	for (let t = 1; t <= 4; t++) {
 		let n = .2 + t * .16, a = r * n, o = i * (1 - n * .52);
 		for (let t of [-1, 1]) e.beginPath(), e.moveTo(a, 0), e.quadraticCurveTo(a + r * .075, t * o * .42, a + r * .15, t * o * .64), e.stroke();
 	}
 	e.restore();
 }
-function wr(e, t, n) {
+function ui(e, t, n) {
 	for (let r = 0; r < n.branches; r++) {
 		let i = n.branches === 1 ? 0 : (r / (n.branches - 1) - .5) * 2, a = -Math.PI / 2 + i * t.range(.55, .95) + t.range(-.22, .22), o = n.reach * t.range(.62, 1), s = n.cx + Math.cos(a) * o, c = n.cy + Math.sin(a) * o, l = (n.cx + s) * .5 + t.range(-8, 8), u = (n.cy + c) * .5 + t.range(-4, 9);
 		e.strokeStyle = "rgba(56,44,28,0.95)", e.lineWidth = t.range(1.15, 2.2), e.beginPath(), e.moveTo(n.cx, n.cy), e.quadraticCurveTo(l, u, s, c), e.stroke();
 		for (let r = 0; r < n.perBranch; r++) {
 			if (t.chance(n.sparse ?? .05)) continue;
-			let i = .16 + r / n.perBranch * .9, o = W(n.cx, s, i) + (.5 - i) * 5, l = W(n.cy, c, i) + Math.sin(i * Math.PI) * (n.droop ?? 0), u = a + (r % 2 == 0 ? -1 : 1) * t.range(.5, 1.12) + t.range(-.18, .18);
-			Q(e, o, l, t.range(n.len[0], n.len[1]) * (1.02 - i * .16), t.range(n.wid[0], n.wid[1]), u, n.palette[t.int(0, n.palette.length - 1)], {
+			let i = .16 + r / n.perBranch * .9, o = Y(n.cx, s, i) + (.5 - i) * 5, l = Y(n.cy, c, i) + Math.sin(i * Math.PI) * (n.droop ?? 0), u = a + (r % 2 == 0 ? -1 : 1) * t.range(.5, 1.12) + t.range(-.18, .18);
+			li(e, o, l, t.range(n.len[0], n.len[1]) * (1.02 - i * .16), t.range(n.wid[0], n.wid[1]), u, n.palette[t.int(0, n.palette.length - 1)], {
 				serrated: n.serrated,
 				glow: n.glow
 			});
 		}
-		Q(e, s, c, t.range(n.len[0], n.len[1]) * .82, t.range(n.wid[0], n.wid[1]) * .9, a + t.range(-.3, .3), n.palette[t.int(0, n.palette.length - 1)], {
+		li(e, s, c, t.range(n.len[0], n.len[1]) * .82, t.range(n.wid[0], n.wid[1]) * .9, a + t.range(-.3, .3), n.palette[t.int(0, n.palette.length - 1)], {
 			serrated: n.serrated,
 			glow: n.glow
 		});
 	}
 }
-var Tr = [
+var di = [
 	[
 		44,
 		68,
@@ -5397,7 +6524,7 @@ var Tr = [
 		108,
 		51
 	]
-], Er = [
+], fi = [
 	[
 		56,
 		74,
@@ -5418,7 +6545,7 @@ var Tr = [
 		102,
 		53
 	]
-], Dr = [
+], pi = [
 	[
 		88,
 		112,
@@ -5439,7 +6566,7 @@ var Tr = [
 		144,
 		72
 	]
-], Or = [
+], mi = [
 	[
 		58,
 		84,
@@ -5460,7 +6587,7 @@ var Tr = [
 		118,
 		56
 	]
-], kr = [
+], hi = [
 	[
 		42,
 		70,
@@ -5481,7 +6608,7 @@ var Tr = [
 		100,
 		48
 	]
-], Ar = [
+], gi = [
 	[
 		18,
 		28,
@@ -5497,7 +6624,7 @@ var Tr = [
 		42,
 		23
 	]
-], jr = [
+], _i = [
 	[
 		50,
 		80,
@@ -5513,7 +6640,7 @@ var Tr = [
 		102,
 		49
 	]
-], Mr = [
+], vi = [
 	[
 		92,
 		66,
@@ -5550,137 +6677,137 @@ var Tr = [
 		42
 	]
 ];
-function Nr(e, t) {
-	for (let n = 0; n < 26; n++) Q(e, X * .5 + t.range(-42, 42), X * .58 + t.range(-38, 38), t.range(26, 44), t.range(9, 15), t.range(-Math.PI, Math.PI), [
+function yi(e, t) {
+	for (let n = 0; n < 26; n++) li(e, $ * .5 + t.range(-42, 42), $ * .58 + t.range(-38, 38), t.range(26, 44), t.range(9, 15), t.range(-Math.PI, Math.PI), [
 		26,
 		42,
 		22
 	]);
-	wr(e, t, {
-		cx: X * .5,
-		cy: X * .66,
+	ui(e, t, {
+		cx: $ * .5,
+		cy: $ * .66,
 		branches: 5,
 		reach: 108,
 		perBranch: 9,
 		len: [38, 60],
 		wid: [13, 19],
-		palette: Tr,
+		palette: di,
 		droop: 6
 	});
-	for (let n = 0; n < 7; n++) Q(e, X * .5 + t.range(-70, 70), X * .46 + t.range(-58, 26), t.range(26, 38), t.range(9, 13), t.range(-Math.PI, Math.PI), Dr[t.int(0, Dr.length - 1)], { glow: 1.25 });
+	for (let n = 0; n < 7; n++) li(e, $ * .5 + t.range(-70, 70), $ * .46 + t.range(-58, 26), t.range(26, 38), t.range(9, 13), t.range(-Math.PI, Math.PI), pi[t.int(0, pi.length - 1)], { glow: 1.25 });
 }
-function Pr(e, t) {
-	for (let n = 0; n < 14; n++) Q(e, X * .5 + t.range(-40, 40), X * .6 + t.range(-34, 34), t.range(30, 48), t.range(16, 24), t.range(-Math.PI, Math.PI), [
+function bi(e, t) {
+	for (let n = 0; n < 14; n++) li(e, $ * .5 + t.range(-40, 40), $ * .6 + t.range(-34, 34), t.range(30, 48), t.range(16, 24), t.range(-Math.PI, Math.PI), [
 		44,
 		54,
 		30
 	]);
-	wr(e, t, {
-		cx: X * .52,
-		cy: X * .64,
+	ui(e, t, {
+		cx: $ * .52,
+		cy: $ * .64,
 		branches: 3,
 		reach: 104,
 		perBranch: 8,
 		len: [42, 66],
 		wid: [18, 27],
-		palette: Er,
+		palette: fi,
 		droop: 9
 	});
 }
-function Fr(e, t) {
-	for (let n = 0; n < 13; n++) Q(e, X * .5 + t.range(-44, 44), X * .6 + t.range(-36, 36), t.range(32, 52), t.range(9, 13), t.range(-Math.PI, Math.PI), [
+function xi(e, t) {
+	for (let n = 0; n < 13; n++) li(e, $ * .5 + t.range(-44, 44), $ * .6 + t.range(-36, 36), t.range(32, 52), t.range(9, 13), t.range(-Math.PI, Math.PI), [
 		34,
 		44,
 		24
 	], { serrated: !0 });
-	wr(e, t, {
-		cx: X * .5,
-		cy: X * .68,
+	ui(e, t, {
+		cx: $ * .5,
+		cy: $ * .68,
 		branches: 4,
 		reach: 110,
 		perBranch: 9,
 		len: [44, 70],
 		wid: [10, 15],
-		palette: Er,
+		palette: fi,
 		serrated: !0,
 		droop: 4
 	});
 }
-function Ir(e, t) {
+function Si(e, t) {
 	for (let n = 0; n < 3; n++) {
-		let r = X * (.32 + n * .18) + t.range(-10, 10), i = X - 8, a = r + t.range(-70, 70), o = t.range(44, 110), s = (r + a) * .5 + t.range(-24, 24), c = (i + o) * .5 + 12;
+		let r = $ * (.32 + n * .18) + t.range(-10, 10), i = $ - 8, a = r + t.range(-70, 70), o = t.range(44, 110), s = (r + a) * .5 + t.range(-24, 24), c = (i + o) * .5 + 12;
 		e.strokeStyle = "rgba(62,50,32,0.9)", e.lineWidth = 1.7, e.beginPath(), e.moveTo(r, i), e.quadraticCurveTo(s, c, a, o), e.stroke();
 		for (let n = 2; n <= 11; n++) {
 			let l = n / 12, u = 1 - l, d = u * u * r + 2 * u * l * s + l * l * a, f = u * u * i + 2 * u * l * c + l * l * o, p = 2 * u * (s - r) + 2 * l * (a - s), m = 2 * u * (c - i) + 2 * l * (o - c), h = Math.atan2(m, p);
-			for (let n of [-1, 1]) Q(e, d, f, t.range(18, 30) * (1.1 - l * .35), t.range(5, 8), h + n * t.range(.95, 1.25), Tr[t.int(0, Tr.length - 1)]);
+			for (let n of [-1, 1]) li(e, d, f, t.range(18, 30) * (1.1 - l * .35), t.range(5, 8), h + n * t.range(.95, 1.25), di[t.int(0, di.length - 1)]);
 		}
-		Q(e, a, o, t.range(22, 32), t.range(6, 9), Math.atan2(o - c, a - s), Tr[4]);
+		li(e, a, o, t.range(22, 32), t.range(6, 9), Math.atan2(o - c, a - s), di[4]);
 	}
 }
-function Lr(e, t) {
-	wr(e, t, {
-		cx: X * .5,
-		cy: X * .64,
+function Ci(e, t) {
+	ui(e, t, {
+		cx: $ * .5,
+		cy: $ * .64,
 		branches: 3,
 		reach: 96,
 		perBranch: 6,
 		len: [32, 50],
 		wid: [13, 19],
-		palette: Dr,
+		palette: pi,
 		sparse: .16,
 		glow: 1.28
 	});
-	for (let n = 0; n < 5; n++) Q(e, X * .5 + t.range(-54, 54), X * .52 + t.range(-48, 18), t.range(22, 34), t.range(10, 14), t.range(-Math.PI, Math.PI), [
+	for (let n = 0; n < 5; n++) li(e, $ * .5 + t.range(-54, 54), $ * .52 + t.range(-48, 18), t.range(22, 34), t.range(10, 14), t.range(-Math.PI, Math.PI), [
 		150,
 		158,
 		92
 	], { glow: 1.1 });
 }
-function Rr(e, t, n) {
+function wi(e, t, n) {
 	let r = n ? 5 : 4;
 	for (let i = 0; i < r; i++) {
-		let r = X * t.range(.25, .75), i = X * t.range(.28, .72);
+		let r = $ * t.range(.25, .75), i = $ * t.range(.28, .72);
 		e.strokeStyle = "rgba(80,92,44,0.75)", e.lineWidth = .9, e.beginPath(), e.moveTo(r, i), e.lineTo(r + t.range(-16, 16), i + t.range(-16, 16)), e.stroke();
 		let a = n ? 12 : 11;
 		for (let o = 0; o < a; o++) {
 			let a = t.range(-Math.PI, Math.PI);
-			Q(e, r + t.range(-16, 16), i + t.range(-16, 16), t.range(n ? 34 : 46, n ? 58 : 82), t.range(n ? 5 : 7, n ? 8 : 11), a, Or[t.int(0, Or.length - 1)], { glow: 1.25 });
+			li(e, r + t.range(-16, 16), i + t.range(-16, 16), t.range(n ? 34 : 46, n ? 58 : 82), t.range(n ? 5 : 7, n ? 8 : 11), a, mi[t.int(0, mi.length - 1)], { glow: 1.25 });
 		}
 	}
 }
-function zr(e, t) {
-	for (let n = 0; n < 30; n++) Q(e, X * .5 + t.range(-58, 58), X * .55 + t.range(-48, 48), t.range(18, 32), t.range(8, 12), t.range(-Math.PI, Math.PI), [
+function Ti(e, t) {
+	for (let n = 0; n < 30; n++) li(e, $ * .5 + t.range(-58, 58), $ * .55 + t.range(-48, 48), t.range(18, 32), t.range(8, 12), t.range(-Math.PI, Math.PI), [
 		32,
 		52,
 		27
 	]);
-	wr(e, t, {
-		cx: X * .5,
-		cy: X * .62,
+	ui(e, t, {
+		cx: $ * .5,
+		cy: $ * .62,
 		branches: 3,
 		reach: 96,
 		perBranch: 16,
 		len: [20, 34],
 		wid: [8, 12],
-		palette: kr,
+		palette: hi,
 		sparse: .06,
 		droop: 4
 	});
 }
-function Br(e, t) {
+function Ei(e, t) {
 	for (let n = 0; n < 4; n++) {
-		let n = X * t.range(.34, .66), r = X - 6, i = n + t.range(-84, 84), a = t.range(26, 96), o = (n + i) * .5 + t.range(-16, 16), s = (r + a) * .5 + t.range(4, 20);
+		let n = $ * t.range(.34, .66), r = $ - 6, i = n + t.range(-84, 84), a = t.range(26, 96), o = (n + i) * .5 + t.range(-16, 16), s = (r + a) * .5 + t.range(4, 20);
 		e.strokeStyle = "rgba(58,82,38,0.95)", e.lineWidth = 1.8, e.beginPath(), e.moveTo(n, r), e.quadraticCurveTo(o, s, i, a), e.stroke();
 		for (let c = 3; c <= 13; c++) {
 			let l = c / 14, u = 1 - l, d = u * u * n + 2 * u * l * o + l * l * i, f = u * u * r + 2 * u * l * s + l * l * a, p = 2 * u * (o - n) + 2 * l * (i - o), m = 2 * u * (s - r) + 2 * l * (a - s), h = Math.atan2(m, p);
-			for (let n of [-1, 1]) Q(e, d, f, t.range(12, 22) * (1.15 - l * .5), t.range(3.2, 5), h + n * t.range(1, 1.3), jr[t.int(0, jr.length - 1)]);
+			for (let n of [-1, 1]) li(e, d, f, t.range(12, 22) * (1.15 - l * .5), t.range(3.2, 5), h + n * t.range(1, 1.3), _i[t.int(0, _i.length - 1)]);
 		}
 	}
 }
-function Vr(e, t) {
+function Di(e, t) {
 	for (let n = 0; n < 26; n++) {
-		let r = X * .5 + t.range(-88, 88), i = -Math.PI / 2 + t.range(-.62, .62), a = t.range(120, 232), o = t.range(-.35, .35);
-		e.strokeStyle = Sr(n % 7 == 0 ? [
+		let r = $ * .5 + t.range(-88, 88), i = -Math.PI / 2 + t.range(-.62, .62), a = t.range(120, 232), o = t.range(-.35, .35);
+		e.strokeStyle = si(n % 7 == 0 ? [
 			130,
 			138,
 			74
@@ -5692,107 +6819,107 @@ function Vr(e, t) {
 			70,
 			96,
 			52
-		], .96), e.lineWidth = t.range(1.4, 3.2), e.beginPath(), e.moveTo(r, X + 4), e.quadraticCurveTo(r + Math.cos(i) * a * .42, X + Math.sin(i) * a * .62, r + Math.cos(i) * a * .78 + o * a, X + Math.sin(i) * a), e.stroke();
+		], .96), e.lineWidth = t.range(1.4, 3.2), e.beginPath(), e.moveTo(r, $ + 4), e.quadraticCurveTo(r + Math.cos(i) * a * .42, $ + Math.sin(i) * a * .62, r + Math.cos(i) * a * .78 + o * a, $ + Math.sin(i) * a), e.stroke();
 	}
 	for (let n = 0; n < 3; n++) {
-		let n = X * .5 + t.range(-52, 52), r = t.range(36, 78);
-		e.strokeStyle = "rgba(120,116,66,0.85)", e.lineWidth = 1.2, e.beginPath(), e.moveTo(n, X), e.quadraticCurveTo(n + t.range(-18, 18), X * .55, n + t.range(-26, 26), r), e.stroke();
-		for (let i = 0; i < 7; i++) e.fillStyle = `rgba(${128 + t.int(0, 30)},${118 + t.int(0, 24)},${60 + t.int(0, 20)},0.9)`, e.beginPath(), e.ellipse(n + t.range(-7, 7), r + i * 5, 2.2, 4.2, t.range(-.3, .3), 0, Z), e.fill();
+		let n = $ * .5 + t.range(-52, 52), r = t.range(36, 78);
+		e.strokeStyle = "rgba(120,116,66,0.85)", e.lineWidth = 1.2, e.beginPath(), e.moveTo(n, $), e.quadraticCurveTo(n + t.range(-18, 18), $ * .55, n + t.range(-26, 26), r), e.stroke();
+		for (let i = 0; i < 7; i++) e.fillStyle = `rgba(${128 + t.int(0, 30)},${118 + t.int(0, 24)},${60 + t.int(0, 20)},0.9)`, e.beginPath(), e.ellipse(n + t.range(-7, 7), r + i * 5, 2.2, 4.2, t.range(-.3, .3), 0, ii), e.fill();
 	}
 }
-function Hr(e, t) {
-	for (let n = 0; n < 56; n++) Q(e, X * .5 + t.range(-74, 74), X * .5 + t.range(-70, 70), t.range(15, 30), t.range(7, 11), t.range(-Math.PI, Math.PI), Ar[t.int(0, Ar.length - 1)], { glow: 1.1 });
-	wr(e, t, {
-		cx: X * .5,
-		cy: X * .56,
+function Oi(e, t) {
+	for (let n = 0; n < 56; n++) li(e, $ * .5 + t.range(-74, 74), $ * .5 + t.range(-70, 70), t.range(15, 30), t.range(7, 11), t.range(-Math.PI, Math.PI), gi[t.int(0, gi.length - 1)], { glow: 1.1 });
+	ui(e, t, {
+		cx: $ * .5,
+		cy: $ * .56,
 		branches: 3,
 		reach: 86,
 		perBranch: 14,
 		len: [18, 30],
 		wid: [8, 12],
-		palette: Ar,
+		palette: gi,
 		sparse: .08,
 		glow: 1.15
 	});
 }
-function Ur(e, t) {
-	for (let n = 0; n < 26; n++) Q(e, t.range(16, X - 16), t.range(16, X - 16), t.range(20, 38), t.range(8, 14), t.range(-Math.PI, Math.PI), Mr[t.int(0, Mr.length - 1)], { serrated: t.chance(.4) });
+function ki(e, t) {
+	for (let n = 0; n < 26; n++) li(e, t.range(16, $ - 16), t.range(16, $ - 16), t.range(20, 38), t.range(8, 14), t.range(-Math.PI, Math.PI), vi[t.int(0, vi.length - 1)], { serrated: t.chance(.4) });
 	for (let n = 0; n < 3; n++) {
-		let n = t.range(40, X - 40), r = t.range(40, X - 40);
+		let n = t.range(40, $ - 40), r = t.range(40, $ - 40);
 		e.strokeStyle = "rgba(72,58,36,0.9)", e.lineWidth = 1.1, e.beginPath(), e.moveTo(n, r), e.lineTo(n + t.range(-34, 34), r + t.range(-34, 34)), e.stroke();
 	}
 }
-function Wr() {
-	let e = Xt(vr, vr, (e) => {
+function Ai() {
+	let e = mn(ni, ni, (e) => {
 		let t = (t, n) => {
-			let [r, i] = br[t];
-			e.save(), e.translate(r * X, i * X), e.beginPath(), e.rect(0, 0, X, X), e.clip(), n(e, new G(`lingyin-veg-atlas-${t}`)), e.restore();
+			let [r, i] = ai[t];
+			e.save(), e.translate(r * $, i * $), e.beginPath(), e.rect(0, 0, $, $), e.clip(), n(e, new X(`lingyin-veg-atlas-${t}`)), e.restore();
 		};
-		t("camphor", Nr), t("broad", Pr), t("chestnut", Fr), t("pinnate", Ir), t("young", Lr), t("bamboo", (e, t) => Rr(e, t, !1)), t("bambooSmall", (e, t) => Rr(e, t, !0)), t("shrub", zr), t("fern", Br), t("grass", Vr), t("dark", Hr), t("fallen", Ur);
+		t("camphor", yi), t("broad", bi), t("chestnut", xi), t("pinnate", Si), t("young", Ci), t("bamboo", (e, t) => wi(e, t, !1)), t("bambooSmall", (e, t) => wi(e, t, !0)), t("shrub", Ti), t("fern", Ei), t("grass", Di), t("dark", Oi), t("fallen", ki);
 	});
 	return e.name = "lingyin-veg-leaf-atlas", e.anisotropy = 16, e.needsUpdate = !0, e;
 }
-var Gr = "\n#ifdef USE_INSTANCING\n  float vgPhase = instanceMatrix[3][0] * 0.61 + instanceMatrix[3][2] * 0.83 + instanceMatrix[3][1] * 0.27;\n  float vgSlow = sin(uTime * 0.52 + vgPhase);\n  float vgFast = sin(uTime * 1.87 + vgPhase * 1.93 + transformed.y * 1.7);\n  float vgGust = 0.55 + 0.45 * sin(uTime * 0.23 + vgPhase * 0.31);\n  float vgSway = (vgSlow * 0.05 + vgFast * 0.012) * vgGust;\n  float vgLift = 0.35 + max(transformed.y, 0.0) * 0.22;\n  transformed.x += vgSway * vgLift;\n  transformed.z += vgSway * 0.45 * vgLift;\n#endif\n", Kr = "\n#ifdef USE_INSTANCING\n  float vgPhase = instanceMatrix[3][0] * 0.41 + instanceMatrix[3][2] * 0.73;\n  float vgSway = sin(uTime * 0.63 + vgPhase) * 0.014 + sin(uTime * 1.71 + vgPhase * 1.37) * 0.004;\n  float vgBend = transformed.y * transformed.y;\n  transformed.x += vgSway * vgBend;\n  transformed.z += vgSway * 0.45 * vgBend;\n#endif\n";
-function qr(e, t) {
+var ji = "\n#ifdef USE_INSTANCING\n  float vgPhase = instanceMatrix[3][0] * 0.61 + instanceMatrix[3][2] * 0.83 + instanceMatrix[3][1] * 0.27;\n  float vgSlow = sin(uTime * 0.52 + vgPhase);\n  float vgFast = sin(uTime * 1.87 + vgPhase * 1.93 + transformed.y * 1.7);\n  float vgGust = 0.55 + 0.45 * sin(uTime * 0.23 + vgPhase * 0.31);\n  float vgSway = (vgSlow * 0.05 + vgFast * 0.012) * vgGust;\n  float vgLift = 0.35 + max(transformed.y, 0.0) * 0.22;\n  transformed.x += vgSway * vgLift;\n  transformed.z += vgSway * 0.45 * vgLift;\n#endif\n", Mi = "\n#ifdef USE_INSTANCING\n  float vgPhase = instanceMatrix[3][0] * 0.41 + instanceMatrix[3][2] * 0.73;\n  float vgSway = sin(uTime * 0.63 + vgPhase) * 0.014 + sin(uTime * 1.71 + vgPhase * 1.37) * 0.004;\n  float vgBend = transformed.y * transformed.y;\n  transformed.x += vgSway * vgBend;\n  transformed.z += vgSway * 0.45 * vgBend;\n#endif\n";
+function Ni(e, t) {
 	return t < -2.4 ? 3.8 : Math.abs(e) < 8.5 && t < 6 ? 10.4 : Math.abs(e) < 10 && t < 10 ? 9 : 7.2;
 }
-function Jr(t) {
+function Pi(t) {
 	let n = t.getAttribute("position").count, r = new Float32Array(n * 3).fill(1);
 	return t.setAttribute("color", new e.BufferAttribute(r, 3)), t;
 }
-function Yr(e) {
+function Fi(e) {
 	let n = t(e, !1);
 	if (!n) throw Error("vegetation: geometry merge failed");
 	return n;
 }
-function Xr(t, n, r) {
-	let [i, a] = br[t], o = new e.PlaneGeometry(n, r, 1, 1), s = o.getAttribute("uv"), c = 2 / vr, l = i / yr + c, u = (i + 1) / yr - c, d = 1 - (a + 1) / yr + c, f = 1 - a / yr - c;
-	for (let e = 0; e < s.count; e++) s.setXY(e, W(l, u, s.getX(e)), W(d, f, s.getY(e)));
-	return s.needsUpdate = !0, Jr(o), o;
+function Ii(t, n, r) {
+	let [i, a] = ai[t], o = new e.PlaneGeometry(n, r, 1, 1), s = o.getAttribute("uv"), c = 2 / ni, l = i / ri + c, u = (i + 1) / ri - c, d = 1 - (a + 1) / ri + c, f = 1 - a / ri - c;
+	for (let e = 0; e < s.count; e++) s.setXY(e, Y(l, u, s.getX(e)), Y(d, f, s.getY(e)));
+	return s.needsUpdate = !0, Pi(o), o;
 }
-var Zr = /* @__PURE__ */ new Map();
-function Qr(e, t) {
-	let n = `${e}:${t}`, r = Zr.get(n);
+var Li = /* @__PURE__ */ new Map();
+function Ri(e, t) {
+	let n = `${e}:${t}`, r = Li.get(n);
 	if (r) return r;
 	let i;
 	if (t === "canopy") {
-		let t = Xr(e, 1, 1), n = Xr(e, .94, .88);
+		let t = Ii(e, 1, 1), n = Ii(e, .94, .88);
 		n.rotateY(1.05), n.rotateX(.14), n.translate(.04, -.03, .03);
-		let r = Xr(e, .8, .72);
-		r.rotateY(-.62), r.rotateX(1.06), r.translate(-.03, .15, 0), i = Yr([
+		let r = Ii(e, .8, .72);
+		r.rotateY(-.62), r.rotateX(1.06), r.translate(-.03, .15, 0), i = Fi([
 			t,
 			n,
 			r
 		]);
 	} else if (t === "spray") {
-		let t = Xr(e, 1, .82), n = Xr(e, .9, .72);
-		n.rotateY(1.16), n.rotateX(-.12), n.translate(.02, .04, .02), i = Yr([t, n]);
+		let t = Ii(e, 1, .82), n = Ii(e, .9, .72);
+		n.rotateY(1.16), n.rotateX(-.12), n.translate(.02, .04, .02), i = Fi([t, n]);
 	} else if (t === "tuft") {
 		let t = [];
 		for (let n = 0; n < 3; n++) {
-			let r = Xr(e, .72, 1);
+			let r = Ii(e, .72, 1);
 			r.translate(0, .5, 0), r.rotateY(n / 3 * Math.PI + .3), r.rotateX(.05), t.push(r);
 		}
-		i = Yr(t);
+		i = Fi(t);
 	} else if (t === "fern") {
 		let t = [];
 		for (let n = 0; n < 5; n++) {
-			let r = Xr(e, .72, 1);
-			r.translate(0, .5, 0), r.rotateY(n / 5 * Z + .2), r.rotateX(.18), t.push(r);
+			let r = Ii(e, .72, 1);
+			r.translate(0, .5, 0), r.rotateY(n / 5 * ii + .2), r.rotateX(.18), t.push(r);
 		}
-		i = Yr(t);
+		i = Fi(t);
 	} else {
-		let t = Xr(e, 1, 1);
+		let t = Ii(e, 1, 1);
 		t.rotateX(-Math.PI / 2), i = t;
 	}
-	return i.computeBoundingSphere(), Zr.set(n, i), i;
+	return i.computeBoundingSphere(), Li.set(n, i), i;
 }
-function $r(t, n, r = .08) {
+function zi(t, n, r = .08) {
 	let i = [], a = [], o = [], s = t.length, c = new e.Vector3(), l = new e.Vector3(), u = new e.Vector3(), d = new e.Vector3(), f = new e.Vector3(), p = new e.Vector3(), m = new e.Vector3(0, 1, 0), h = new e.Vector3(1, 0, 0);
 	for (let e = 0; e < s; e++) {
 		l.copy(t[Math.max(0, e - 1)].center), u.copy(t[Math.min(s - 1, e + 1)].center), c.subVectors(u, l).normalize(), d.copy(Math.abs(c.y) > .9 ? h : m), f.crossVectors(d, c).normalize(), p.crossVectors(c, f).normalize();
 		for (let o = 0; o < n; o++) {
-			let c = o / n * Z, l = 1 + r * tr(c * 1.9 + e * .37, e * 1.7 + o * .11), u = Math.max(.012, t[e].radius * l), d = Math.cos(c) * u, m = Math.sin(c) * u;
+			let c = o / n * ii, l = 1 + r * Lr(c * 1.9 + e * .37, e * 1.7 + o * .11), u = Math.max(.012, t[e].radius * l), d = Math.cos(c) * u, m = Math.sin(c) * u;
 			i.push(t[e].center.x + f.x * d + p.x * m, t[e].center.y + f.y * d + p.y * m, t[e].center.z + f.z * d + p.z * m), a.push(o / n, e / (s - 1));
 		}
 	}
@@ -5803,42 +6930,42 @@ function $r(t, n, r = .08) {
 	let g = new e.BufferGeometry();
 	return g.setAttribute("position", new e.Float32BufferAttribute(i, 3)), g.setAttribute("uv", new e.Float32BufferAttribute(a, 2)), g.setIndex(o), g.computeVertexNormals(), g;
 }
-function ei(t, n) {
+function Bi(t, n) {
 	return new e.CatmullRomCurve3(t, !1, "catmullrom", .5).getPoints(n);
 }
-function ti(t) {
+function Vi(t) {
 	let n = new e.IcosahedronGeometry(1, t), r = n.getAttribute("position");
 	for (let e = 0; e < r.count; e++) {
-		let t = r.getX(e), n = r.getY(e), i = r.getZ(e), a = 1 + .17 * nr(t * 1.4 + i * .6 + 4.7, n * 1.6 - i * .9);
+		let t = r.getX(e), n = r.getY(e), i = r.getZ(e), a = 1 + .17 * Rr(t * 1.4 + i * .6 + 4.7, n * 1.6 - i * .9);
 		r.setXYZ(e, t * a, n * a * .9, i * a);
 	}
-	return n.computeVertexNormals(), Jr(n), n;
+	return n.computeVertexNormals(), Pi(n), n;
 }
-function ni() {
-	let t = new G("lingyin-veg-shrub-core"), n = [];
+function Hi() {
+	let t = new X("lingyin-veg-shrub-core"), n = [];
 	for (let r = 0; r < 3; r++) {
 		let i = new e.IcosahedronGeometry(r === 0 ? 1 : .62, +(r === 0)), a = i.getAttribute("position");
 		for (let e = 0; e < a.count; e++) {
-			let t = a.getX(e), n = a.getY(e), i = a.getZ(e), o = 1 + .15 * nr(t * 2.1 + r * 3.3, i * 2.4 - n * .7);
+			let t = a.getX(e), n = a.getY(e), i = a.getZ(e), o = 1 + .15 * Rr(t * 2.1 + r * 3.3, i * 2.4 - n * .7);
 			a.setXYZ(e, t * o, n * o, i * o);
 		}
-		i.computeVertexNormals(), i.scale(1.2, .72, 1.1), i.translate(t.range(-.5, .5), .52 + t.range(-.08, .22), t.range(-.5, .5)), Jr(i), n.push(i);
+		i.computeVertexNormals(), i.scale(1.2, .72, 1.1), i.translate(t.range(-.5, .5), .52 + t.range(-.08, .22), t.range(-.5, .5)), Pi(i), n.push(i);
 	}
-	return Yr(n);
+	return Fi(n);
 }
-function ri() {
+function Ui() {
 	let t = new e.CylinderGeometry(.03, .058, .56, 5, 1, !0);
 	t.translate(0, .28, 0);
 	let n = new e.CylinderGeometry(.017, .032, .47, 5, 1, !0);
 	n.translate(0, .765, 0);
 	let r = new e.CylinderGeometry(.012, .024, .32, 4, 1, !0);
-	return r.rotateZ(.72), r.translate(.1, .74, .02), Yr([
+	return r.rotateZ(.72), r.translate(.1, .74, .02), Fi([
 		t,
 		n,
 		r
 	]);
 }
-var ii = [
+var Wi = [
 	.14,
 	.29,
 	.44,
@@ -5846,12 +6973,12 @@ var ii = [
 	.74,
 	.89
 ];
-function ai(t) {
+function Gi(t) {
 	let n = t ? 6 : 5, r = new Set([0, 1]);
-	for (let e of ii) t ? (r.add(e - .075), r.add(e - .014), r.add(e - .004), r.add(e + .004), r.add(e + .014), r.add(e + .033), r.add(e + .075)) : (r.add(e - .06), r.add(e + .01), r.add(e + .06));
-	let i = $r([...r].filter((e) => e >= 0 && e <= 1).sort((e, t) => e - t).map((t) => {
+	for (let e of Wi) t ? (r.add(e - .075), r.add(e - .014), r.add(e - .004), r.add(e + .004), r.add(e + .014), r.add(e + .033), r.add(e + .075)) : (r.add(e - .06), r.add(e + .01), r.add(e + .06));
+	let i = zi([...r].filter((e) => e >= 0 && e <= 1).sort((e, t) => e - t).map((t) => {
 		let n = .052 * (1 - .43 * t);
-		for (let e of ii) {
+		for (let e of Wi) {
 			let r = Math.abs(t - e);
 			r < .012 ? n += .017 : r < .04 && (n += .008 * (1 - (r - .012) / .028));
 		}
@@ -5863,53 +6990,53 @@ function ai(t) {
 	}), n, t ? .035 : .02), a = i.getAttribute("position"), o = new Float32Array(a.count * 3);
 	for (let e = 0; e < a.count; e++) {
 		let t = a.getY(e), n = .9 + .1 * Math.sin(t * 41);
-		for (let e of ii) {
+		for (let e of Wi) {
 			let r = t - e;
 			Math.abs(r) < .011 ? n *= .55 : Math.abs(r) < .035 && (n *= .86), r > .012 && r < .034 && (n = Math.min(1.16, n * 1.2));
 		}
-		n *= W(.86, 1.06, t), o[e * 3] = n, o[e * 3 + 1] = n * 1.02, o[e * 3 + 2] = n * .9;
+		n *= Y(.86, 1.06, t), o[e * 3] = n, o[e * 3 + 1] = n * 1.02, o[e * 3 + 2] = n * .9;
 	}
 	return i.setAttribute("color", new e.BufferAttribute(o, 3)), i;
 }
-function oi(t, n) {
+function Ki(t, n) {
 	let r = new e.Vector3(t.base[0], 0, t.base[1]), i = [];
 	for (let n = 0; n <= 5; n++) {
-		let a = n / 5, o = tr(a * 2.4 + 3.1, 8.7) * .62 * Math.sin(a * Math.PI), s = nr(a * 2.8 - 4.4, 2.3) * .62 * Math.sin(a * Math.PI);
+		let a = n / 5, o = Lr(a * 2.4 + 3.1, 8.7) * .62 * Math.sin(a * Math.PI), s = Rr(a * 2.8 - 4.4, 2.3) * .62 * Math.sin(a * Math.PI);
 		i.push(new e.Vector3(r.x + t.lean[0] * a * a + o, t.height * a, r.z + t.lean[1] * a * a + s));
 	}
-	let a = ei(i, 16), o = [$r(a.map((e, n) => {
-		let r = n / (a.length - 1), i = t.radius * (1.06 - .88 * r ** .72) * (1 + .08 * tr(r * 6.3 + 1.7, t.height * .31));
+	let a = Bi(i, 16), o = [zi(a.map((e, n) => {
+		let r = n / (a.length - 1), i = t.radius * (1.06 - .88 * r ** .72) * (1 + .08 * Lr(r * 6.3 + 1.7, t.height * .31));
 		return {
 			center: e.clone(),
 			radius: Math.max(.055, i)
 		};
 	}), 10, .09)];
 	for (let i = 0; i < 5; i++) {
-		let a = i / 5 * Z + n.range(-.3, .3), s = new e.Vector3(Math.cos(a), 0, Math.sin(a)), c = r.clone().add(new e.Vector3(s.x * t.radius * .35, t.radius * 1.2, s.z * t.radius * .35)), l = r.clone().addScaledVector(s, t.radius * 1.5 + n.range(0, .25));
+		let a = i / 5 * ii + n.range(-.3, .3), s = new e.Vector3(Math.cos(a), 0, Math.sin(a)), c = r.clone().add(new e.Vector3(s.x * t.radius * .35, t.radius * 1.2, s.z * t.radius * .35)), l = r.clone().addScaledVector(s, t.radius * 1.5 + n.range(0, .25));
 		l.y = t.radius * .36;
 		let u = r.clone().addScaledVector(s, t.radius * 2.8 + n.range(.1, .55));
 		u.y = .02;
-		let d = ei([
+		let d = Bi([
 			c,
 			l,
 			u
 		], 4), f = d.map((e, n) => ({
 			center: e,
-			radius: Math.max(.035, W(t.radius * .3, .045, n / (d.length - 1)))
+			radius: Math.max(.035, Y(t.radius * .3, .045, n / (d.length - 1)))
 		}));
-		o.push($r(f, 6, .14));
+		o.push(zi(f, 6, .14));
 	}
 	let s = [], c = new e.Vector3(...t.crown);
 	for (let r = 0; r < t.branches; r++) {
-		let i = W(.4, .88, (r + n.range(.15, .85)) / t.branches), l = a[U(Math.round(i * (a.length - 1)), 1, a.length - 2)].clone(), u = r / t.branches * Z + n.range(-.55, .55), d = new e.Vector3(Math.cos(u), 0, Math.sin(u)), f = new e.Vector3(c.x, l.y + n.range(.8, 1.9), c.z).sub(l).normalize(), p = d.clone().multiplyScalar(.55).addScaledVector(f, .8).normalize(), m = n.range(2.8, 5.1) * (1.15 - i * .32), h = l.clone().addScaledVector(d, t.radius * .3), g = h.clone().addScaledVector(p, m * .46).add(new e.Vector3(n.range(-.4, .4), n.range(.35, 1.1), n.range(-.4, .4))), _ = h.clone().addScaledVector(p, m).add(new e.Vector3(n.range(-.45, .45), n.range(.8, 2), n.range(-.45, .45))), v = ei([
+		let i = Y(.4, .88, (r + n.range(.15, .85)) / t.branches), l = a[jr(Math.round(i * (a.length - 1)), 1, a.length - 2)].clone(), u = r / t.branches * ii + n.range(-.55, .55), d = new e.Vector3(Math.cos(u), 0, Math.sin(u)), f = new e.Vector3(c.x, l.y + n.range(.8, 1.9), c.z).sub(l).normalize(), p = d.clone().multiplyScalar(.55).addScaledVector(f, .8).normalize(), m = n.range(2.8, 5.1) * (1.15 - i * .32), h = l.clone().addScaledVector(d, t.radius * .3), g = h.clone().addScaledVector(p, m * .46).add(new e.Vector3(n.range(-.4, .4), n.range(.35, 1.1), n.range(-.4, .4))), _ = h.clone().addScaledVector(p, m).add(new e.Vector3(n.range(-.45, .45), n.range(.8, 2), n.range(-.45, .45))), v = Bi([
 			h,
 			g,
 			_
 		], 7), y = .07 + t.radius * .22 * (1 - i * .4), b = v.map((e, t) => ({
 			center: e,
-			radius: Math.max(.028, W(y, .032, (t / (v.length - 1)) ** .82))
+			radius: Math.max(.028, Y(y, .032, (t / (v.length - 1)) ** .82))
 		}));
-		o.push($r(b, 7, .1)), s.push({
+		o.push(zi(b, 7, .1)), s.push({
 			p: _.clone(),
 			dir: p.clone(),
 			weight: 1.1
@@ -5918,31 +7045,31 @@ function oi(t, n) {
 			dir: p.clone(),
 			weight: .9
 		});
-		let x = v[4].clone(), S = p.clone().add(new e.Vector3(n.range(-.7, .7), n.range(.35, .9), n.range(-.7, .7))).normalize(), C = x.clone().addScaledVector(S, n.range(1.3, 2.3)), w = ei([
+		let x = v[4].clone(), S = p.clone().add(new e.Vector3(n.range(-.7, .7), n.range(.35, .9), n.range(-.7, .7))).normalize(), C = x.clone().addScaledVector(S, n.range(1.3, 2.3)), w = Bi([
 			x,
 			x.clone().lerp(C, .55).add(new e.Vector3(0, .3, 0)),
 			C
 		], 4), T = w.map((e, t) => ({
 			center: e,
-			radius: Math.max(.02, W(y * .42, .022, t / (w.length - 1)))
+			radius: Math.max(.02, Y(y * .42, .022, t / (w.length - 1)))
 		}));
-		o.push($r(T, 5, .12)), s.push({
+		o.push(zi(T, 5, .12)), s.push({
 			p: C,
 			dir: S,
 			weight: .78
 		});
 	}
 	let l = (t, r, a) => {
-		let c = new e.CatmullRomCurve3(i, !1, "catmullrom", .5).getPointAt(r), l = ei([
+		let c = new e.CatmullRomCurve3(i, !1, "catmullrom", .5).getPointAt(r), l = Bi([
 			c,
 			c.clone().lerp(t, .5).add(new e.Vector3(0, .8 + n.range(0, .9), 0)),
 			c.clone().lerp(t, .78).add(new e.Vector3(0, .25, 0)),
 			t
 		], 9), u = l.map((e, t) => ({
 			center: e,
-			radius: Math.max(.026, W(a, .028, t / (l.length - 1)))
+			radius: Math.max(.026, Y(a, .028, t / (l.length - 1)))
 		}));
-		o.push($r(u, 7, .08));
+		o.push(zi(u, 7, .08));
 		for (let e of [
 			3,
 			6,
@@ -5969,20 +7096,20 @@ function oi(t, n) {
 		}
 	];
 	return {
-		trunk: Yr(o),
+		trunk: Fi(o),
 		anchors: s,
 		lobes: f
 	};
 }
-function $(t, n) {
+function qi(t, n) {
 	let r = new e.Euler();
 	if (n) {
 		let e = Math.atan2(n.x, n.z) + t.range(-.85, .85);
 		r.set(t.range(-.8, .8), e, t.range(-.75, .75), "YXZ");
-	} else r.set(t.range(-1.25, 1.25), t.range(0, Z), t.range(-1.15, 1.15), "YXZ");
+	} else r.set(t.range(-1.25, 1.25), t.range(0, ii), t.range(-1.15, 1.15), "YXZ");
 	return new e.Quaternion().setFromEuler(r);
 }
-function si(t, n, r) {
+function Ji(t, n, r) {
 	let i = [
 		.1,
 		.2,
@@ -5991,10 +7118,10 @@ function si(t, n, r) {
 		.38,
 		.56,
 		.2
-	], o = U(t, 0, 1), s = n.chance(.16) ? 1.1 : 1, c = W(i[0], a[0], o) * s + n.range(-.045, .045), l = W(i[1], a[1], o) + n.range(-.04, .04), u = W(i[2], a[2], o) * (s > 1 ? .94 : 1) + n.range(-.035, .035), d = r ? .6 : 1;
-	return new e.Color().setRGB(U(c * d, 0, 2), U(l * d, 0, 2), U(u * d, 0, 2));
+	], o = jr(t, 0, 1), s = n.chance(.16) ? 1.1 : 1, c = Y(i[0], a[0], o) * s + n.range(-.045, .045), l = Y(i[1], a[1], o) + n.range(-.04, .04), u = Y(i[2], a[2], o) * (s > 1 ? .94 : 1) + n.range(-.035, .035), d = r ? .6 : 1;
+	return new e.Color().setRGB(jr(c * d, 0, 2), jr(l * d, 0, 2), jr(u * d, 0, 2));
 }
-var ci = class {
+var Yi = class {
 	group = new e.Group();
 	atlas;
 	leafMat;
@@ -6005,7 +7132,7 @@ var ci = class {
 	depthMat;
 	buckets = /* @__PURE__ */ new Map();
 	constructor(t = {}) {
-		this.group.name = "vegetation", this.atlas = On("gate-atlas") ?? Wr(), this.leafMat = Jt({
+		this.group.name = "vegetation", this.atlas = lr("gate-atlas") ?? Ai(), this.leafMat = fn({
 			name: "lingyin-leaf-card",
 			params: {
 				color: 16777215,
@@ -6018,16 +7145,16 @@ var ci = class {
 				vertexColors: !0
 			},
 			uniforms: {
-				uTime: _r.time,
-				uSunDir: _r.sunDir
+				uTime: ti.time,
+				uSunDir: ti.sunDir
 			},
 			vertexHead: "uniform float uTime;",
 			head: "uniform vec3 uSunDir;",
-			vertexPre: Gr,
+			vertexPre: ji,
 			color: "\n        float vgHigh = smoothstep(1.5, 11.0, cgP.y);\n        diffuseColor.rgb *= mix(0.70, 1.05, vgHigh);\n        diffuseColor.rgb *= 0.93 + 0.14 * cgNoise2(cgP.xz * 0.35 + cgP.y * 0.17);\n        diffuseColor.rgb *= mix(vec3(1.0), vec3(1.06, 1.035, 0.86), smoothstep(7.0, 12.0, cgP.y) * 0.7);\n      ",
 			roughness: "\n        roughnessFactor = clamp(roughnessFactor * (0.86 + 0.24 * cgNoise2(cgP.xz * 2.0)), 0.5, 1.0);\n      ",
 			emissive: "\n        vec3 vgView = normalize(cameraPosition - cgP);\n        float vgBack = pow(max(dot(-vgView, uSunDir), 0.0), 2.6);\n        float vgThin = 0.55 + 0.45 * cgNoise2(cgO.xy * 5.0 + 17.0);\n        float vgAO = 0.35 + 0.65 * smoothstep(0.0, 9.0, cgP.y);\n        totalEmissiveRadiance += vec3(0.30, 0.38, 0.12) * vgBack * vgThin * vgAO * 0.9;\n      "
-		}), this.barkMat = ot() ?? Jt({
+		}), this.barkMat = nt() ?? fn({
 			name: "lingyin-bark",
 			params: {
 				color: 16777215,
@@ -6037,7 +7164,7 @@ var ci = class {
 			color: "\n        float barkRidge = cgRidge2(vec2((cgP.x + cgP.z) * 6.0, cgP.y * 0.55));\n        float barkFine = cgFbm2(vec2((cgP.x - cgP.z) * 24.0, cgP.y * 5.5));\n        float barkLichen = smoothstep(0.55, 0.92, cgNoise2(vec2(cgP.y * 2.2, (cgP.x + cgP.z) * 7.0)) * 0.5 + 0.5);\n        float barkMoss = smoothstep(0.35, 0.85, cgFbm2(vec2(cgP.x * 1.3 + 5.0, cgP.z * 1.5)) * 0.5 + 0.5);\n        barkMoss *= 1.0 - smoothstep(0.4, 3.4, cgP.y + barkFine * 0.4);\n        vec3 bark = mix(vec3(0.105, 0.08, 0.058), vec3(0.30, 0.245, 0.175), smoothstep(0.25, 0.95, barkRidge));\n        bark *= 0.72 + 0.4 * barkFine;\n        bark = mix(bark, vec3(0.33, 0.34, 0.27), barkLichen * 0.22);\n        bark = mix(bark, vec3(0.14, 0.21, 0.08), barkMoss * 0.72);\n        diffuseColor.rgb *= bark;\n      ",
 			normal: "\n        float e = 0.22;\n        float h0 = cgRidge2(vec2((cgP.x + cgP.z) * 6.0, cgP.y * 0.55));\n        float hx = cgRidge2(vec2((cgP.x + cgP.z + e) * 6.0, cgP.y * 0.55));\n        float hy = cgRidge2(vec2((cgP.x + cgP.z) * 6.0, (cgP.y + e) * 0.55));\n        float hz = cgRidge2(vec2((cgP.x - cgP.z + e) * 6.0, cgP.y * 0.55));\n        cgBump = vec3(hx - h0, hy - h0, hz - h0) * 2.4;\n      ",
 			roughness: "\n        roughnessFactor = clamp(0.82 + 0.18 * cgNoise2(cgP.xz * 9.0 + cgP.y), 0.55, 1.0);\n      "
-		}), this.massMat = Jt({
+		}), this.massMat = fn({
 			name: "lingyin-canopy-mass",
 			params: {
 				color: 16777215,
@@ -6047,7 +7174,7 @@ var ci = class {
 				vertexColors: !0
 			},
 			color: "\n        float vgN = cgFbm3(cgP * 0.65);\n        vec3 vgMass = mix(vec3(0.065, 0.10, 0.05), vec3(0.16, 0.22, 0.105), smoothstep(0.15, 0.85, vgN));\n        vgMass *= 0.68 + 0.52 * smoothstep(0.0, 9.0, cgP.y);\n        diffuseColor.rgb *= vgMass;\n      "
-		}), this.bambooMat = Jt({
+		}), this.bambooMat = fn({
 			name: "lingyin-bamboo-culm",
 			params: {
 				color: 16777215,
@@ -6055,12 +7182,12 @@ var ci = class {
 				metalness: 0,
 				vertexColors: !0
 			},
-			uniforms: { uTime: _r.time },
+			uniforms: { uTime: ti.time },
 			vertexHead: "uniform float uTime;",
-			vertexPre: Kr,
+			vertexPre: Mi,
 			color: "\n        float bStripe = cgNoise2(vec2((cgP.x + cgP.z) * 18.0, cgP.y * 3.4));\n        float bGrime = cgFbm2(vec2(cgP.x * 2.6 + cgP.z * 1.8, cgP.y * 0.9));\n        vec3 bCol = mix(vec3(0.045, 0.075, 0.028), vec3(0.13, 0.17, 0.052), smoothstep(0.25, 0.9, bStripe * 0.5 + 0.5));\n        bCol *= 0.78 + 0.36 * bGrime;\n        float bPowder = smoothstep(0.7, 0.95, cgNoise2(vec2(cgP.y * 1.3, (cgP.x + cgP.z) * 2.0)) * 0.5 + 0.5);\n        bCol = mix(bCol, vec3(0.34, 0.36, 0.27), bPowder * 0.22);\n        diffuseColor.rgb *= bCol;\n      ",
 			roughness: "\n        roughnessFactor = clamp(0.5 + 0.22 * cgNoise2(cgP.xz * 8.0 + cgP.y), 0.35, 0.95);\n      "
-		}), this.coreMat = Jt({
+		}), this.coreMat = fn({
 			name: "lingyin-shrub-core",
 			params: {
 				color: 16777215,
@@ -6080,11 +7207,11 @@ var ci = class {
 			side: e.DoubleSide
 		});
 		return t.onBeforeCompile = (e) => {
-			e.uniforms.uTime = _r.time, e.vertexShader = e.vertexShader.replace("#include <common>", "#include <common>\nuniform float uTime;").replace("#include <begin_vertex>", `#include <begin_vertex>\n${Gr}`);
+			e.uniforms.uTime = ti.time, e.vertexShader = e.vertexShader.replace("#include <common>", "#include <common>\nuniform float uTime;").replace("#include <begin_vertex>", `#include <begin_vertex>\n${ji}`);
 		}, t.customProgramCacheKey = () => "lingyin-veg-card-depth", t;
 	}
 	update(e) {
-		_r.time.value = e;
+		ti.time.value = e;
 	}
 	isPlatform(e, t, n) {
 		return Math.abs(e) < 8 + n && t > -3.8 - n && t < 4 + n;
@@ -6110,8 +7237,8 @@ var ci = class {
 	addCanopyCard(t, n, r, i) {
 		let a = t.value(), o;
 		o = a < .32 ? "camphor" : a < .46 ? "broad" : a < .6 ? "chestnut" : a < .72 ? "pinnate" : a < .86 ? "young" : "camphor";
-		let s = U(.26 + .54 * Xn(4.5, 11.5, n.y) + .22 * tr(n.x * .35 + 3.1, n.z * .35 - 1.7) + (t.value() - .5) * .18, 0, 1), c = $(t, i), l = new e.Vector3(Math.min(1.1, r * .62 * t.range(.9, 1.15)), Math.min(1, r * .62 * t.range(.68, .94)), Math.min(1.1, r * .62 * t.range(.9, 1.15)));
-		this.pushCard("canopy", "canopy", o, n, c, l, si(s, t, !1));
+		let s = jr(.26 + .54 * Mr(4.5, 11.5, n.y) + .22 * Lr(n.x * .35 + 3.1, n.z * .35 - 1.7) + (t.value() - .5) * .18, 0, 1), c = qi(t, i), l = new e.Vector3(Math.min(1.1, r * .62 * t.range(.9, 1.15)), Math.min(1, r * .62 * t.range(.68, .94)), Math.min(1.1, r * .62 * t.range(.9, 1.15)));
+		this.pushCard("canopy", "canopy", o, n, c, l, Ji(s, t, !1));
 	}
 	addBlobInstances(t, n, r, i) {
 		if (!t.length) return;
@@ -6229,31 +7356,31 @@ var ci = class {
 			}
 		], n = [], r = [];
 		for (let i of t) {
-			let t = new G(i.seed), a = oi(i, t);
+			let t = new X(i.seed), a = Ki(i, t);
 			n.push(a.trunk);
 			for (let n of a.anchors) {
 				let r = Math.round(t.range(7, 11) * n.weight);
 				for (let i = 0; i < r; i++) {
 					let r = n.p.clone().add(new e.Vector3(t.gauss(), t.gauss() * .7, t.gauss()).multiplyScalar(.55 + n.weight * .42));
-					r.y < qr(r.x, r.z) || this.addCanopyCard(t, r, t.range(.9, 1.7) * (.82 + n.weight * .2), t.chance(.5) ? n.dir : void 0);
+					r.y < Ni(r.x, r.z) || this.addCanopyCard(t, r, t.range(.9, 1.7) * (.82 + n.weight * .2), t.chance(.5) ? n.dir : void 0);
 				}
 			}
 			for (let n of a.lobes) {
 				for (let r = 0; r < 380; r++) {
-					let r = t.range(-1, 1), i = t.range(0, Z), a = Math.sqrt(1 - r * r), o = t.value() ** .4, s = new e.Vector3(a * Math.cos(i), r, a * Math.sin(i)), c = n.center.clone().add(new e.Vector3(s.x * n.radii.x * o, s.y * n.radii.y * o, s.z * n.radii.z * o));
-					if (c.y < qr(c.x, c.z)) continue;
-					let l = W(.85, 1.9, Xn(.5, 1, o) * t.range(.72, 1)) * t.range(.85, 1.15);
+					let r = t.range(-1, 1), i = t.range(0, ii), a = Math.sqrt(1 - r * r), o = t.value() ** .4, s = new e.Vector3(a * Math.cos(i), r, a * Math.sin(i)), c = n.center.clone().add(new e.Vector3(s.x * n.radii.x * o, s.y * n.radii.y * o, s.z * n.radii.z * o));
+					if (c.y < Ni(c.x, c.z)) continue;
+					let l = Y(.85, 1.9, Mr(.5, 1, o) * t.range(.72, 1)) * t.range(.85, 1.15);
 					this.addCanopyCard(t, c, l, s);
 				}
 				for (let r = 0; r < 26; r++) {
-					let r = t.range(-.35, .95), i = t.range(0, Z), a = Math.sqrt(Math.max(0, 1 - r * r)), o = new e.Vector3(a * Math.cos(i), r, a * Math.sin(i)), s = n.center.clone().add(new e.Vector3(o.x * n.radii.x, o.y * n.radii.y, o.z * n.radii.z).multiplyScalar(t.range(.92, 1.1)));
-					s.y < qr(s.x, s.z) || this.addCanopyCard(t, s, t.range(1.2, 2), o);
+					let r = t.range(-.35, .95), i = t.range(0, ii), a = Math.sqrt(Math.max(0, 1 - r * r)), o = new e.Vector3(a * Math.cos(i), r, a * Math.sin(i)), s = n.center.clone().add(new e.Vector3(o.x * n.radii.x, o.y * n.radii.y, o.z * n.radii.z).multiplyScalar(t.range(.92, 1.1)));
+					s.y < Ni(s.x, s.z) || this.addCanopyCard(t, s, t.range(1.2, 2), o);
 				}
 				for (let i = 0; i < 4; i++) {
 					let i = n.center.clone().add(new e.Vector3(t.range(-.32, .32) * n.radii.x, t.range(-.28, .28) * n.radii.y, t.range(-.32, .32) * n.radii.z));
 					r.push({
 						pos: i,
-						quat: $(t),
+						quat: qi(t),
 						scale: new e.Vector3(n.radii.x * t.range(.26, .42), n.radii.y * t.range(.28, .46), n.radii.z * t.range(.26, .42)),
 						color: new e.Color().setRGB(t.range(.3, .44), t.range(.42, .56), t.range(.27, .38))
 					});
@@ -6291,7 +7418,7 @@ var ci = class {
 					let o = new e.Vector3(r * n, i, a), s = t.int(7, 10);
 					for (let n = 0; n < s; n++) {
 						let n = o.clone().add(new e.Vector3(t.range(-1.15, 1.15), t.range(-.65, .95), t.range(-.95, .95)));
-						n.y < qr(n.x, n.z) || this.addCanopyCard(t, n, t.range(1.7, 2.9));
+						n.y < Ni(n.x, n.z) || this.addCanopyCard(t, n, t.range(1.7, 2.9));
 					}
 				}
 				let r = [
@@ -6334,18 +7461,18 @@ var ci = class {
 					let r = new e.Vector3(i * n, a, o), s = t.int(7, 10);
 					for (let n = 0; n < s; n++) {
 						let n = r.clone().add(new e.Vector3(t.range(-.95, .95), t.range(-.55, .7), t.range(-.8, .8)));
-						n.y < qr(n.x, n.z) || this.addCanopyCard(t, n, t.range(1.6, 2.6));
+						n.y < Ni(n.x, n.z) || this.addCanopyCard(t, n, t.range(1.6, 2.6));
 					}
 				}
 			}
 		}
-		let i = Yr(n);
-		this.barkMat.name === "bark-photogrammetry" && (i = nn(F(i, 2.4), "bark"));
+		let i = Fi(n);
+		this.barkMat.name === "bark-photogrammetry" && (i = bn(U(i, 2.4), "bark"));
 		let a = new e.Mesh(i, this.barkMat);
 		a.name = "framing-trunks", a.castShadow = !0, a.receiveShadow = !0, this.group.add(a);
 	}
 	addBamboo() {
-		let t = new G("lingyin-veg-bamboo"), n = [], r = 0, i = (r, i, a, o, s, c, l) => {
+		let t = new X("lingyin-veg-bamboo"), n = [], r = 0, i = (r, i, a, o, s, c, l) => {
 			let u = s.clone().normalize(), d = new e.Vector3(-u.z, 0, u.x).normalize(), f = new e.Quaternion().setFromAxisAngle(d, o), p = new e.Matrix4().compose(new e.Vector3(r, 0, i), f, new e.Vector3(c, a, c)), m = [
 				[
 					.62,
@@ -6376,13 +7503,13 @@ var ci = class {
 			let h = t.int(4, 6);
 			for (let n = 0; n < h; n++) {
 				let n = new e.Vector3(0, t.range(.62, 1), 0).applyMatrix4(p).add(new e.Vector3(t.range(-1.15, 1.15), t.range(-.55, .5), t.range(-1.15, 1.15))), r = t.chance(.62) ? "bamboo" : "bambooSmall", i = t.range(1.05, 1.95), a = t.range(.72, 1.14);
-				this.pushCard("bamboo", "spray", r, n, $(t), new e.Vector3(i, i * t.range(.55, .8), i), new e.Color().setRGB(a * .92, a * 1.02, a * .7));
+				this.pushCard("bamboo", "spray", r, n, qi(t), new e.Vector3(i, i * t.range(.55, .8), i), new e.Color().setRGB(a * .92, a * 1.02, a * .7));
 			}
 		};
 		for (; n.length < 108 && r < 7e3;) {
 			r++;
 			let a = n.length >= 96, o = a ? t.range(-9.4, -8.4) : t.range(-15, -9), s = a ? t.range(5.2, 7.8) : t.range(-2, 9);
-			this.isPlatform(o, s, .15) || this.isPath(o, s, .3) || this.nearFramingTrunk(o, s, 1.3) || nr(o * .35 + 10.3, s * .35 - 3.1) < -.18 && t.chance(.45) || i(o, s, t.range(6, 10) * (a ? .94 : 1), a ? t.range(.3, .46) : t.range(.01, .09), a ? new e.Vector3(1, 0, t.range(-.3, .3)) : new e.Vector3(t.range(-1, 1), 0, t.range(-1, 1)), t.range(.72, 1.05) * (a ? 1.12 : 1), a || n.length < 24 && s > 2.5);
+			this.isPlatform(o, s, .15) || this.isPath(o, s, .3) || this.nearFramingTrunk(o, s, 1.3) || Rr(o * .35 + 10.3, s * .35 - 3.1) < -.18 && t.chance(.45) || i(o, s, t.range(6, 10) * (a ? .94 : 1), a ? t.range(.3, .46) : t.range(.01, .09), a ? new e.Vector3(1, 0, t.range(-.3, .3)) : new e.Vector3(t.range(-1, 1), 0, t.range(-1, 1)), t.range(.72, 1.05) * (a ? 1.12 : 1), a || n.length < 24 && s > 2.5);
 		}
 		let a = [
 			[
@@ -6427,13 +7554,13 @@ var ci = class {
 		}
 		for (let n = 0; n < 26; n++) {
 			let n = t.range(-5.35, -4.05), r = t.range(6.2, 8.4), i = t.range(4, 6.1), a = t.range(1.2, 2.1), o = t.range(.6, 1.05);
-			this.pushCard("bamboo", "spray", t.chance(.6) ? "bamboo" : "bambooSmall", new e.Vector3(n, i, r), $(t), new e.Vector3(a, a * .55, a), new e.Color().setRGB(o * .9, o * 1.02, o * .68));
+			this.pushCard("bamboo", "spray", t.chance(.6) ? "bamboo" : "bambooSmall", new e.Vector3(n, i, r), qi(t), new e.Vector3(a, a * .55, a), new e.Color().setRGB(o * .9, o * 1.02, o * .68));
 		}
 		for (let n = 0; n < 85; n++) {
 			let n = t.range(-15.2, -8.9), r = t.range(-2, 9), i = t.range(3.4, 9.2), a = t.range(1.9, 3.2), o = t.range(.5, .85);
-			this.pushCard("bamboo", "spray", t.chance(.6) ? "bamboo" : "bambooSmall", new e.Vector3(n, i, r), $(t), new e.Vector3(a, a * .55, a), new e.Color().setRGB(o * .92, o * 1.02, o * .7));
+			this.pushCard("bamboo", "spray", t.chance(.6) ? "bamboo" : "bambooSmall", new e.Vector3(n, i, r), qi(t), new e.Vector3(a, a * .55, a), new e.Color().setRGB(o * .92, o * 1.02, o * .7));
 		}
-		let o = ai(!0), s = ai(!1), c = n.filter((e) => e.near), l = n.filter((e) => !e.near), u = (t, n, r, i) => {
+		let o = Gi(!0), s = Gi(!1), c = n.filter((e) => e.near), l = n.filter((e) => !e.near), u = (t, n, r, i) => {
 			if (!t.length) return;
 			let a = new e.InstancedMesh(n, this.bambooMat, t.length);
 			for (let e = 0; e < t.length; e++) a.setMatrixAt(e, t[e].matrix), a.setColorAt(e, t[e].color);
@@ -6442,18 +7569,18 @@ var ci = class {
 		u(c, o, !0, "bamboo-near"), u(l, s, !1, "bamboo-far");
 	}
 	addShrubs() {
-		let t = new G("lingyin-veg-shrubs"), n = [], r = [], i = 0;
+		let t = new X("lingyin-veg-shrubs"), n = [], r = [], i = 0;
 		for (; r.length < 138 && i < 8e3;) {
 			i++;
 			let e = t.chance(.5) ? -1 : 1, n, a, o, s = r.length;
-			s < 44 ? (n = e * t.range(8.25, 10.6), a = t.range(-2.3, 3.7), o = t.range(.8, 1.35)) : s < 86 ? (n = e * t.range(8.2, 12.6), a = t.range(3.9, 10.4), o = t.range(.7, 1.25)) : s < 112 ? (n = e * t.range(10.5, 14.5), a = t.range(-2, 10.5), o = t.range(.85, 1.45)) : s < 128 ? (n = e * t.range(5.4, 7.6), a = t.range(4.6, 9.8), o = t.range(.5, .9)) : (n = e * t.range(8.2, 11), a = t.range(-3.4, -1.8), o = t.range(.75, 1.2)), !this.isPlatform(n, a, .35) && (this.isPath(n, a, .45) || this.nearFramingTrunk(n, a, 1.5) || nr(n * .6 + 2, a * .6 - 8) < -.35 && t.chance(.5) || r.push({
+			s < 44 ? (n = e * t.range(8.25, 10.6), a = t.range(-2.3, 3.7), o = t.range(.8, 1.35)) : s < 86 ? (n = e * t.range(8.2, 12.6), a = t.range(3.9, 10.4), o = t.range(.7, 1.25)) : s < 112 ? (n = e * t.range(10.5, 14.5), a = t.range(-2, 10.5), o = t.range(.85, 1.45)) : s < 128 ? (n = e * t.range(5.4, 7.6), a = t.range(4.6, 9.8), o = t.range(.5, .9)) : (n = e * t.range(8.2, 11), a = t.range(-3.4, -1.8), o = t.range(.75, 1.2)), !this.isPlatform(n, a, .35) && (this.isPath(n, a, .45) || this.nearFramingTrunk(n, a, 1.5) || Rr(n * .6 + 2, a * .6 - 8) < -.35 && t.chance(.5) || r.push({
 				x: n,
 				z: a,
 				scale: o
 			}));
 		}
 		for (let i of r) {
-			let r = new e.Quaternion().setFromEuler(new e.Euler(0, t.range(0, Z), 0)), a = new e.Vector3(i.scale * t.range(.16, .26), i.scale * t.range(.12, .2), i.scale * t.range(.16, .26)), o = t.range(.55, 1.15);
+			let r = new e.Quaternion().setFromEuler(new e.Euler(0, t.range(0, ii), 0)), a = new e.Vector3(i.scale * t.range(.16, .26), i.scale * t.range(.12, .2), i.scale * t.range(.16, .26)), o = t.range(.55, 1.15);
 			n.push({
 				pos: new e.Vector3(i.x, 0, i.z),
 				quat: r,
@@ -6462,13 +7589,13 @@ var ci = class {
 			});
 			let s = t.int(14, 20), c = i.scale * t.range(.85, 1.2);
 			for (let n = 0; n < s; n++) {
-				let n = t.range(0, Z), r = t.range(.25, .95) * i.scale, a = new e.Vector3(i.x + Math.cos(n) * r, t.range(.3, 1.05) * c, i.z + Math.sin(n) * r);
+				let n = t.range(0, ii), r = t.range(.25, .95) * i.scale, a = new e.Vector3(i.x + Math.cos(n) * r, t.range(.3, 1.05) * c, i.z + Math.sin(n) * r);
 				if (this.isPath(a.x, a.z, .05) || this.isPlatform(a.x, a.z, .15)) continue;
 				let o = t.range(.3, .62) * i.scale, s = t.range(.34, .8);
-				this.pushCard("shrub", "spray", t.chance(.7) ? "shrub" : "camphor", a, $(t), new e.Vector3(o, o * t.range(.68, .95), o), new e.Color().setRGB(s * .88, s, s * .76));
+				this.pushCard("shrub", "spray", t.chance(.7) ? "shrub" : "camphor", a, qi(t), new e.Vector3(o, o * t.range(.68, .95), o), new e.Color().setRGB(s * .88, s, s * .76));
 			}
 		}
-		let a = new e.InstancedMesh(ni(), this.coreMat, n.length);
+		let a = new e.InstancedMesh(Hi(), this.coreMat, n.length);
 		for (let t = 0; t < n.length; t++) {
 			let r = n[t];
 			a.setMatrixAt(t, new e.Matrix4().compose(r.pos, r.quat, r.scale)), a.setColorAt(t, r.color);
@@ -6476,13 +7603,13 @@ var ci = class {
 		a.instanceMatrix.needsUpdate = !0, a.instanceColor && (a.instanceColor.needsUpdate = !0), a.castShadow = !0, a.receiveShadow = !0, a.name = "shrub-cores", a.computeBoundingSphere(), this.group.add(a);
 	}
 	addUnderstory() {
-		let t = new G("lingyin-veg-understory"), n = 0, r = 0;
+		let t = new X("lingyin-veg-understory"), n = 0, r = 0;
 		for (; n < 260 && r < 7e3;) {
 			r++;
 			let i = t.chance(.72), a = t.chance(.5) ? -1 : 1, o = i ? a * t.range(3.3, 5.4) : a * t.range(8.1, 10.8), s = i ? t.range(4, 26) : t.range(-3.4, 3.6);
 			if (this.isPlatform(o, s, .05) || this.isPath(o, s, .05)) continue;
 			let c = t.range(.5, 1.05), l = t.range(.45, 1);
-			this.pushCard("under", "tuft", "grass", new e.Vector3(o, 0, s), new e.Quaternion().setFromEuler(new e.Euler(0, t.range(0, Z), 0)), new e.Vector3(c, c * t.range(.45, .8), c), new e.Color().setRGB(l * .92, l, l * .62)), n++;
+			this.pushCard("under", "tuft", "grass", new e.Vector3(o, 0, s), new e.Quaternion().setFromEuler(new e.Euler(0, t.range(0, ii), 0)), new e.Vector3(c, c * t.range(.45, .8), c), new e.Color().setRGB(l * .92, l, l * .62)), n++;
 		}
 		let i = 0;
 		for (r = 0; i < 110 && r < 5e3;) {
@@ -6490,12 +7617,12 @@ var ci = class {
 			let n = (t.chance(.5) ? -1 : 1) * t.range(3.5, 6.6), a = t.range(4.2, 15.5);
 			if (this.isPlatform(n, a, .1) || this.isPath(n, a, .05)) continue;
 			let o = t.range(.75, 1.45), s = t.range(.42, .95);
-			this.pushCard("under", "fern", "fern", new e.Vector3(n, 0, a), new e.Quaternion().setFromEuler(new e.Euler(0, t.range(0, Z), 0)), new e.Vector3(o, o * t.range(.6, 1), o), new e.Color().setRGB(s * .86, s, s * .68)), i++;
+			this.pushCard("under", "fern", "fern", new e.Vector3(n, 0, a), new e.Quaternion().setFromEuler(new e.Euler(0, t.range(0, ii), 0)), new e.Vector3(o, o * t.range(.6, 1), o), new e.Color().setRGB(s * .86, s, s * .68)), i++;
 		}
 	}
 	addBackgroundForest() {
-		let t = new G("lingyin-veg-background"), n = [], r = [], i = [], a = (i, a, o, s, c) => {
-			let l = t.range(.7, 1.4) * s, u = t.range(0, Z), d = new e.Matrix4().compose(new e.Vector3(i, 0, a), new e.Quaternion().setFromEuler(new e.Euler(0, u, 0)), new e.Vector3(l, o, l)), f = t.range(.55, .9);
+		let t = new X("lingyin-veg-background"), n = [], r = [], i = [], a = (i, a, o, s, c) => {
+			let l = t.range(.7, 1.4) * s, u = t.range(0, ii), d = new e.Matrix4().compose(new e.Vector3(i, 0, a), new e.Quaternion().setFromEuler(new e.Euler(0, u, 0)), new e.Vector3(l, o, l)), f = t.range(.55, .9);
 			n.push({
 				matrix: d,
 				color: new e.Color().setRGB(f, f, f)
@@ -6505,7 +7632,7 @@ var ci = class {
 				let n = p.clone().add(new e.Vector3(t.range(-m * .55, m * .55), t.range(-m * .3, m * .4), t.range(-m * .55, m * .55))), i = t.range(.3, .52);
 				r.push({
 					pos: n,
-					quat: $(t),
+					quat: qi(t),
 					scale: new e.Vector3(m * t.range(.7, 1.25), m * t.range(.55, .9), m * t.range(.7, 1.25)),
 					color: new e.Color().setRGB(i * .78, i, i * .72)
 				});
@@ -6513,10 +7640,10 @@ var ci = class {
 			if (!c) return;
 			let g = t.int(14, 20);
 			for (let n = 0; n < g; n++) {
-				let n = t.range(0, Z), r = m * t.range(.3, 1), i = new e.Vector3(p.x + Math.cos(n) * r, p.y + t.range(-m * .6, m * .75), p.z + Math.sin(n) * r);
+				let n = t.range(0, ii), r = m * t.range(.3, 1), i = new e.Vector3(p.x + Math.cos(n) * r, p.y + t.range(-m * .6, m * .75), p.z + Math.sin(n) * r);
 				if (i.y < 3.2) continue;
 				let a = Math.min(4.2, m * t.range(.65, 1.15)), o = t.range(.42, .8);
-				this.pushCard("bg", "canopy", t.chance(.5) ? "camphor" : "chestnut", i, $(t), new e.Vector3(a, a * t.range(.7, .95), a), new e.Color().setRGB(o * .82, o, o * .8));
+				this.pushCard("bg", "canopy", t.chance(.5) ? "camphor" : "chestnut", i, qi(t), new e.Vector3(a, a * t.range(.7, .95), a), new e.Color().setRGB(o * .82, o, o * .8));
 			}
 		}, o = 0, s = 0;
 		for (; s < 62 && o < 4e3;) {
@@ -6535,7 +7662,7 @@ var ci = class {
 			let a = t.range(1, 2.2);
 			r.push({
 				pos: new e.Vector3(n, t.range(.4, 2), i),
-				quat: $(t),
+				quat: qi(t),
 				scale: new e.Vector3(a, a * t.range(.45, .75), a),
 				color: new e.Color().setRGB(.2, .3, .2)
 			});
@@ -6544,7 +7671,7 @@ var ci = class {
 			let n = t.range(-42, 42), r = t.range(-38, -24), a = t.range(2.2, 4.2);
 			i.push({
 				pos: new e.Vector3(n, t.range(3, 12), r),
-				quat: $(t),
+				quat: qi(t),
 				scale: new e.Vector3(a, a * t.range(.6, .95), a),
 				color: new e.Color().setRGB(t.range(.16, .28), t.range(.24, .4), t.range(.18, .3))
 			});
@@ -6553,19 +7680,19 @@ var ci = class {
 			let n = t.chance(.5) ? -1 : 1, r = t.range(4, 8);
 			i.push({
 				pos: new e.Vector3(n * t.range(22, 40), t.range(2, 10), t.range(-18, 18)),
-				quat: $(t),
+				quat: qi(t),
 				scale: new e.Vector3(r, r * t.range(.55, .9), r),
 				color: new e.Color().setRGB(.18, .28, .2)
 			});
 		}
-		let c = ri();
-		this.barkMat.name === "bark-photogrammetry" && (c = nn(F(c, 2.4), "bark"));
+		let c = Ui();
+		this.barkMat.name === "bark-photogrammetry" && (c = bn(U(c, 2.4), "bark"));
 		let l = new e.InstancedMesh(c, this.barkMat, n.length);
 		for (let e = 0; e < n.length; e++) l.setMatrixAt(e, n[e].matrix), l.setColorAt(e, n[e].color);
 		l.instanceMatrix.needsUpdate = !0, l.instanceColor && (l.instanceColor.needsUpdate = !0), l.castShadow = !1, l.receiveShadow = !0, l.name = "background-trunks", l.computeBoundingSphere(), this.group.add(l), this.addBlobInstances;
 	}
 	addCanopyCeiling() {
-		let t = new G("lingyin-canopy-ceiling");
+		let t = new X("lingyin-canopy-ceiling");
 		for (let n = 0; n < 90; n++) {
 			let n = t.range(-13, 13), r = t.range(1.5, 14), i = t.range(9.8, 12.8), a = new e.Vector3(n, i, r);
 			this.addCanopyCard(t, a, t.range(1, 2));
@@ -6594,37 +7721,37 @@ var ci = class {
 		], o = -.02, s = 1.11, c = 1.03, l = 3.33;
 		for (let u of a) {
 			let a = u.x1 - u.x0, d = u.z1 - u.z0, f = Math.hypot(a, d), p = (u.x0 + u.x1) / 2, m = (u.z0 + u.z1) / 2, h = Math.atan2(a, d), g = Math.cos(h), _ = -Math.sin(h);
-			t.push(M(.86, s - o, f + .25, p, (o + s) / 2, m, h)), n.push(M(.34, l - c, f - .08, p, (c + l) / 2, m, h)), i.push(M(.5, .18, f + .22, p, l + .015, m, h));
-			for (let e of [-1, 1]) i.push(M(.1, .16, f + .48, p + e * g * .88, l + .06, m + e * _ * .88, h));
+			t.push(B(.86, s - o, f + .25, p, (o + s) / 2, m, h)), n.push(B(.34, l - c, f - .08, p, (c + l) / 2, m, h)), i.push(B(.5, .18, f + .22, p, l + .015, m, h));
+			for (let e of [-1, 1]) i.push(B(.1, .16, f + .48, p + e * g * .88, l + .06, m + e * _ * .88, h));
 			for (let t of [-1, 1]) {
 				let n = new e.BoxGeometry(.95, .1, f + .5);
 				n.rotateZ(t * .34), n.rotateY(h), n.translate(p + g * t * .38, l + .2, m + _ * t * .38), r.push(n);
 			}
-			r.push(M(.18, .14, f + .52, p, l + .36, m, h));
+			r.push(B(.18, .14, f + .52, p, l + .36, m, h));
 			let v = Math.max(2, Math.ceil(f / 6.4));
 			for (let e = 0; e <= v; e++) {
 				let t = e / v;
-				i.push(M(.46, l - c + .12, .46, u.x0 + a * t, (c + l) / 2, u.z0 + d * t, h));
+				i.push(B(.46, l - c + .12, .46, u.x0 + a * t, (c + l) / 2, u.z0 + d * t, h));
 			}
 		}
 		let u = (t, n, r, i) => {
-			let a = new e.Mesh(F(P(t), i), n);
+			let a = new e.Mesh(U(H(t), i), n);
 			a.castShadow = !0, a.receiveShadow = !0, a.name = r, this.group.add(a);
 		};
-		u(t, or(.12), "forecourt-boundary-stone-base", 1.25), u(n, $t(), "forecourt-boundary-plaster", 1.8), u(r, new e.MeshStandardMaterial({
+		u(t, Hr(.12), "forecourt-boundary-stone-base", 1.25), u(n, _n(), "forecourt-boundary-plaster", 1.8), u(r, new e.MeshStandardMaterial({
 			color: new e.Color("#2c322d"),
 			roughness: .95,
 			metalness: 0
-		}), "forecourt-boundary-roof-cap", .72), u(i, Qt(1), "forecourt-boundary-timber-posts", .7);
+		}), "forecourt-boundary-roof-cap", .72), u(i, gn(1), "forecourt-boundary-timber-posts", .7);
 	}
 	addGroundDetails(t = !1) {
-		let n = new G("lingyin-veg-ground"), r = 0, i = 0;
+		let n = new X("lingyin-veg-ground"), r = 0, i = 0;
 		for (; r < 130 && i < 3e3;) {
 			i++;
 			let t = (n.chance(.5) ? -1 : 1) * n.range(3.35, 7.6), a = n.range(4, 13.5);
 			if (this.isPlatform(t, a, 0)) continue;
 			let o = n.range(.55, 1.15), s = n.range(.55, 1.15);
-			this.pushCard("ground", "scatter", "fallen", new e.Vector3(t, n.range(.015, .04), a), new e.Quaternion().setFromEuler(new e.Euler(-Math.PI / 2 + n.range(-.12, .12), n.range(0, Z), 0, "YXZ")), new e.Vector3(o * n.range(.85, 1.2), o, o), new e.Color().setRGB(s, s * .94, s * .86)), r++;
+			this.pushCard("ground", "scatter", "fallen", new e.Vector3(t, n.range(.015, .04), a), new e.Quaternion().setFromEuler(new e.Euler(-Math.PI / 2 + n.range(-.12, .12), n.range(0, ii), 0, "YXZ")), new e.Vector3(o * n.range(.85, 1.2), o, o), new e.Color().setRGB(s, s * .94, s * .86)), r++;
 		}
 		if (t) return;
 		let a = [];
@@ -6638,12 +7765,12 @@ var ci = class {
 			let o = n.range(.22, .55);
 			a.push({
 				pos: new e.Vector3(r, .02, i),
-				quat: $(n),
+				quat: qi(n),
 				scale: new e.Vector3(o * n.range(1.1, 1.7), o * .45, o * n.range(1.1, 1.7)),
 				color: new e.Color().setRGB(n.range(1.1, 1.55), n.range(1.35, 1.9), n.range(.7, 1))
 			});
 		}
-		let o = new e.InstancedMesh(ti(0), this.coreMat, a.length);
+		let o = new e.InstancedMesh(Vi(0), this.coreMat, a.length);
 		for (let t = 0; t < a.length; t++) {
 			let n = a[t];
 			o.setMatrixAt(t, new e.Matrix4().compose(n.pos, n.quat, n.scale)), o.setColorAt(t, n.color);
@@ -6653,46 +7780,46 @@ var ci = class {
 	flushCards() {
 		for (let t of this.buckets.values()) {
 			if (!t.matrices.length) continue;
-			let n = Qr(t.cell, t.shape), r = new e.InstancedMesh(n, this.leafMat, t.matrices.length);
+			let n = Ri(t.cell, t.shape), r = new e.InstancedMesh(n, this.leafMat, t.matrices.length);
 			for (let e = 0; e < t.matrices.length; e++) r.setMatrixAt(e, t.matrices[e]), r.setColorAt(e, t.colors[e]);
 			r.instanceMatrix.needsUpdate = !0, r.instanceColor && (r.instanceColor.needsUpdate = !0);
 			let i = t.layer === "canopy" || t.layer === "bamboo";
 			r.castShadow = i, r.receiveShadow = !0, i && (r.customDepthMaterial = this.depthMat), r.name = `veg-cards-${t.layer}-${t.cell}`, r.computeBoundingSphere(), this.group.add(r);
 		}
 	}
-}, li = "\nattribute float aDepth;\nattribute float aFlow;\nvarying float vDepth;\nvarying float vFlow;\nvarying vec2 vUvW;\nvoid main(){\n  vDepth = aDepth;\n  vFlow = aFlow;\n  vUvW = uv;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}\n", ui = class {
+}, Xi = "\nattribute float aDepth;\nattribute float aFlow;\nvarying float vDepth;\nvarying float vFlow;\nvarying vec2 vUvW;\nvoid main(){\n  vDepth = aDepth;\n  vFlow = aFlow;\n  vUvW = uv;\n  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);\n}\n", Zi = class {
 	group = new e.Group();
 	material;
 	waterfall;
 	fallMat;
 	constructor() {
 		this.group.name = "water", this.material = this.makeWaterMaterial();
-		let n = [], r = le.filter(([e, t]) => we(e, t, 1)), i = [], a = [], o = [], s = [], c = [], l = r.length, u = 0;
+		let n = [], r = le.filter(([e, t]) => ye(e, t, 1)), i = [], a = [], o = [], s = [], c = [], l = r.length, u = 0;
 		for (let e = 0; e < l; e++) {
-			let [t, n] = r[e], f = r[Math.max(0, e - 1)], p = r[Math.min(l - 1, e + 1)], m = p[0] - f[0], h = p[1] - f[1], g = Math.hypot(m, h) || 1;
+			let [t, n] = r[e], d = r[Math.max(0, e - 1)], f = r[Math.min(l - 1, e + 1)], m = f[0] - d[0], h = f[1] - d[1], g = Math.hypot(m, h) || 1;
 			m /= g, h /= g;
 			let _ = -h, v = m;
 			e > 0 && (u += Math.hypot(t - r[e - 1][0], n - r[e - 1][1]));
-			let y = de(t, n).t, b = fe(y) * .54, x = pe(y);
+			let y = M(t, n).t, b = N(y) * .54, x = P(y);
 			for (let e of [-1, 1]) {
-				let r = t + _ * b * e, c = n + v * b * e, l = x - A(r, c);
-				i.push(r, x + .015, c), a.push(e < 0 ? 0 : 1, u / 4.5), o.push(d(l, 0, 4)), s.push(.7 + y * .6);
+				let r = t + _ * b * e, c = n + v * b * e, l = x - L(r, c);
+				i.push(r, x + .015, c), a.push(e < 0 ? 0 : 1, u / 4.5), o.push(p(l, 0, 4)), s.push(.7 + y * .6);
 			}
 			if (e < l - 1) {
 				let t = e * 2;
 				c.push(t, t + 2, t + 1, t + 1, t + 2, t + 3);
 			}
 		}
-		let f = new e.BufferGeometry();
-		f.setAttribute("position", new e.Float32BufferAttribute(i, 3)), f.setAttribute("uv", new e.Float32BufferAttribute(a, 2)), f.setAttribute("aDepth", new e.Float32BufferAttribute(o, 1)), f.setAttribute("aFlow", new e.Float32BufferAttribute(s, 1)), f.setIndex(c), f.computeVertexNormals(), n.push(f);
-		let p = new e.CircleGeometry(O.pond.r, 64, 0, Math.PI * 2);
-		p.rotateX(-Math.PI / 2);
-		let m = p.getAttribute("position"), h = [], g = [];
+		let d = new e.BufferGeometry();
+		d.setAttribute("position", new e.Float32BufferAttribute(i, 3)), d.setAttribute("uv", new e.Float32BufferAttribute(a, 2)), d.setAttribute("aDepth", new e.Float32BufferAttribute(o, 1)), d.setAttribute("aFlow", new e.Float32BufferAttribute(s, 1)), d.setIndex(c), d.computeVertexNormals(), n.push(d);
+		let f = new e.CircleGeometry(j.pond.r, 64, 0, Math.PI * 2);
+		f.rotateX(-Math.PI / 2);
+		let m = f.getAttribute("position"), h = [], g = [];
 		for (let e = 0; e < m.count; e++) {
-			let t = m.getX(e) + O.pond.x, n = m.getZ(e) + O.pond.z;
-			m.setX(e, t), m.setZ(e, n), m.setY(e, ge), h.push(d(ge - A(t, n), 0, 4)), g.push(.28);
+			let t = m.getX(e) + j.pond.x, n = m.getZ(e) + j.pond.z;
+			m.setX(e, t), m.setZ(e, n), m.setY(e, I), h.push(p(I - L(t, n), 0, 4)), g.push(.28);
 		}
-		p.setAttribute("aDepth", new e.Float32BufferAttribute(h, 1)), p.setAttribute("aFlow", new e.Float32BufferAttribute(g, 1)), p.computeVertexNormals(), n.push(p);
+		f.setAttribute("aDepth", new e.Float32BufferAttribute(h, 1)), f.setAttribute("aFlow", new e.Float32BufferAttribute(g, 1)), f.computeVertexNormals(), n.push(f);
 		let _ = t(n.map((t) => (t.getAttribute("uv") || t.setAttribute("uv", new e.BufferAttribute(new Float32Array(t.getAttribute("position").count * 2), 2)), t)), !1);
 		if (!_) throw Error("water merge failed");
 		let v = new e.Mesh(_, this.material);
@@ -6713,7 +7840,7 @@ var ci = class {
 		S.setAttribute("position", new e.Float32BufferAttribute(y, 3)), S.setAttribute("uv", new e.Float32BufferAttribute(b, 2)), S.setIndex(x), S.computeVertexNormals(), this.waterfall = new e.Mesh(S, this.fallMat), this.waterfall.name = "waterfall", this.waterfall.renderOrder = 4, this.group.add(this.waterfall);
 	}
 	makeWaterMaterial() {
-		return o({
+		return s({
 			name: "water",
 			params: {
 				color: 16777215,
@@ -6736,7 +7863,7 @@ var ci = class {
 	makeFallMaterial() {
 		return new e.ShaderMaterial({
 			uniforms: { uTime: n.time },
-			vertexShader: li,
+			vertexShader: Xi,
 			fragmentShader: "\n        uniform float uTime;\n        varying float vDepth;\n        varying float vFlow;\n        varying vec2 vUvW;\n        float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }\n        float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h12(i),h12(i+vec2(1,0)),f.x), mix(h12(i+vec2(0,1)),h12(i+vec2(1,1)),f.x), f.y); }\n        void main(){\n          float t = uTime;\n          float streak = n2(vec2(vUvW.x * 8.0, vUvW.y * 2.0 - t * 1.8));\n          streak *= n2(vec2(vUvW.x * 22.0 + 3.0, vUvW.y * 4.0 - t * 3.1));\n          float edge = smoothstep(0.0, 0.18, vUvW.x) * smoothstep(1.0, 0.82, vUvW.x);\n          float top = smoothstep(0.0, 0.08, vUvW.y);\n          float a = edge * top * (0.55 + streak * 0.65);\n          vec3 c = mix(vec3(0.55,0.68,0.68), vec3(0.95,0.97,0.94), streak);\n          gl_FragColor = vec4(c, clamp(a, 0.0, 0.9));\n        }\n      ",
 			transparent: !0,
 			depthWrite: !1,
@@ -6749,12 +7876,12 @@ var ci = class {
 };
 //#endregion
 //#region src/world/mist.ts
-function di(t) {
+function Qi(t) {
 	let n = document.createElement("canvas");
 	n.width = 256, n.height = 256;
 	let r = n.getContext("2d");
 	if (!r) throw Error("no 2d");
-	let i = new h(t), a = r.createRadialGradient(256 / 2, 256 / 2, 2, 256 / 2, 256 / 2, 256 / 2);
+	let i = new _(t), a = r.createRadialGradient(256 / 2, 256 / 2, 2, 256 / 2, 256 / 2, 256 / 2);
 	a.addColorStop(0, "rgba(255,255,255,0.9)"), a.addColorStop(.35, "rgba(255,255,255,0.4)"), a.addColorStop(.7, "rgba(255,255,255,0.12)"), a.addColorStop(1, "rgba(255,255,255,0)"), r.fillStyle = a, r.fillRect(0, 0, 256, 256), r.globalCompositeOperation = "destination-out";
 	for (let e = 0; e < 70; e++) {
 		let e = i.range(36, 220), t = i.range(36, 220), n = i.range(8, 38), a = r.createRadialGradient(e, t, 0, e, t, n);
@@ -6763,8 +7890,8 @@ function di(t) {
 	let o = new e.CanvasTexture(n);
 	return o.colorSpace = e.SRGBColorSpace, o;
 }
-var fi = "\nattribute vec3 aPos;\nattribute vec2 aScale;\nattribute float aRot;\nattribute float aAlpha;\nvarying vec2 vUv;\nvarying float vAlpha;\n", pi = `
-${fi}
+var $i = "\nattribute vec3 aPos;\nattribute vec2 aScale;\nattribute float aRot;\nattribute float aAlpha;\nvarying vec2 vUv;\nvarying float vAlpha;\n", ea = `
+${$i}
 void main(){
   float c = cos(aRot), s = sin(aRot);
   vec2 p = mat2(c, -s, s, c) * position.xy;
@@ -6773,8 +7900,8 @@ void main(){
   vAlpha = aAlpha;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
-`, mi = `
-${fi}
+`, ta = `
+${$i}
 uniform vec3 uRight;
 uniform vec3 uUp;
 void main(){
@@ -6785,9 +7912,9 @@ void main(){
   vAlpha = aAlpha;
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
-`, hi = "\nuniform sampler2D uMap;\nuniform vec3 uTint;\nvarying vec2 vUv;\nvarying float vAlpha;\nvoid main(){\n  float a = texture2D(uMap, vUv).a;\n  if (a < 0.002) discard;\n  gl_FragColor = vec4(uTint, a * vAlpha);\n}\n", gi = class {
+`, na = "\nuniform sampler2D uMap;\nuniform vec3 uTint;\nvarying vec2 vUv;\nvarying float vAlpha;\nvoid main(){\n  float a = texture2D(uMap, vUv).a;\n  if (a < 0.002) discard;\n  gl_FragColor = vec4(uTint, a * vAlpha);\n}\n", ra = class {
 	group = new e.Group();
-	tex = di("mist");
+	tex = Qi("mist");
 	banks = [];
 	puffs = [];
 	ground;
@@ -6800,7 +7927,7 @@ void main(){
 	};
 	constructor(t) {
 		this.group.name = "mist";
-		let n = new h("mist");
+		let n = new _("mist");
 		for (let e = 0; e < 12; e++) this.banks.push({
 			x: n.chance(.5) ? n.range(-150, -70) : n.range(60, 130),
 			y: n.range(1.5, 6),
@@ -6810,6 +7937,142 @@ void main(){
 			speed: n.range(.03, .1),
 			opacity: n.range(.03, .07)
 		});
+		for (let [e, t, r, i, a] of [
+			[
+				-56,
+				14.6,
+				62,
+				26,
+				.07
+			],
+			[
+				-49,
+				11.4,
+				43,
+				30,
+				.058
+			],
+			[
+				-43,
+				9.2,
+				20,
+				27,
+				.05
+			],
+			[
+				-38,
+				7.4,
+				-12,
+				22,
+				.045
+			],
+			[
+				-63,
+				17,
+				51,
+				32,
+				.06
+			],
+			[
+				-33,
+				6.2,
+				30,
+				20,
+				.04
+			],
+			[
+				-20,
+				5.6,
+				30,
+				34,
+				.075
+			],
+			[
+				-4,
+				5.2,
+				8,
+				30,
+				.06
+			],
+			[
+				-30,
+				7,
+				34,
+				30,
+				.07
+			],
+			[
+				-14,
+				6.4,
+				-6,
+				28,
+				.055
+			],
+			[
+				10,
+				5.4,
+				26,
+				32,
+				.065
+			],
+			[
+				-44,
+				8.4,
+				12,
+				26,
+				.06
+			],
+			[
+				-40,
+				7.6,
+				-22,
+				28,
+				.055
+			],
+			[
+				-55,
+				10.2,
+				52,
+				22,
+				.07
+			],
+			[
+				-18,
+				7.8,
+				24,
+				42,
+				.1
+			],
+			[
+				-2,
+				7.4,
+				4,
+				38,
+				.085
+			],
+			[
+				-26,
+				8.4,
+				42,
+				34,
+				.09
+			],
+			[
+				12,
+				7.2,
+				18,
+				36,
+				.08
+			]
+		]) this.banks.push({
+			x: e,
+			y: t,
+			z: r,
+			s: i,
+			phase: n.range(0, 6.28),
+			speed: n.range(.02, .06),
+			opacity: a
+		});
 		for (let t = 0; t < 14; t++) this.puffs.push({
 			origin: new e.Vector3(44 + n.range(-3.5, 3.5), n.range(3.8, 8), -50 + n.range(-2.5, 2.5)),
 			scale: n.range(3, 8),
@@ -6817,6 +8080,15 @@ void main(){
 			speed: n.range(.4, 1),
 			kind: "spray",
 			seed: n.range(0, 1)
+		});
+		for (let t = 0; t < 16; t++) this.puffs.push({
+			origin: new e.Vector3(n.range(-32, 16), n.range(5.6, 9.4), n.range(-22, 44)),
+			scale: n.range(16, 30),
+			phase: n.range(0, 6.28),
+			speed: n.range(.012, .03),
+			kind: "cloud",
+			seed: n.range(0, 1),
+			opacity: n.range(.045, .085)
 		});
 		for (let e = 0; e < 34; e++) this.puffs.push({
 			origin: t.clone(),
@@ -6826,11 +8098,11 @@ void main(){
 			kind: "smoke",
 			seed: n.range(0, 1)
 		});
-		this.uniforms.uMap.value = this.tex, this.ground = this.makeLayer(this.banks.length, pi), this.billboard = this.makeLayer(this.puffs.length, mi);
+		this.uniforms.uMap.value = this.tex, this.ground = this.makeLayer(this.banks.length, ea), this.billboard = this.makeLayer(this.puffs.length, ta);
 		let r = new e.Mesh(this.ground.geo, new e.ShaderMaterial({
 			uniforms: this.uniforms,
-			vertexShader: pi,
-			fragmentShader: hi,
+			vertexShader: ea,
+			fragmentShader: na,
 			transparent: !0,
 			depthWrite: !1,
 			side: e.DoubleSide
@@ -6838,8 +8110,8 @@ void main(){
 		r.frustumCulled = !1, r.renderOrder = 18, this.group.add(r);
 		let i = new e.Mesh(this.billboard.geo, new e.ShaderMaterial({
 			uniforms: this.uniforms,
-			vertexShader: mi,
-			fragmentShader: hi,
+			vertexShader: ta,
+			fragmentShader: na,
 			transparent: !0,
 			depthWrite: !1,
 			side: e.DoubleSide
@@ -6870,6 +8142,7 @@ void main(){
 		for (let e = 0; e < this.puffs.length; e++) {
 			let n = this.puffs[e], r = t * n.speed + n.phase, i = n.origin.x, a = n.origin.y, o = n.origin.z, s = n.scale, c = n.scale, l = 0, u = 0;
 			if (n.kind === "spray") i += Math.sin(r * 2.3) * .8, a += Math.sin(r * 1.7) * .5, l = .14 * (.7 + .3 * Math.sin(r * 2.1)), s = n.scale * (.9 + .1 * Math.sin(r)), c = n.scale * .8, u = n.seed * 3;
+			else if (n.kind === "cloud") i = n.origin.x + Math.sin(r * .42) * 9, o = n.origin.z + Math.cos(r * .31) * 7, a = n.origin.y + Math.sin(r * .5) * .35, s = n.scale * (1 + .05 * Math.sin(r)), c = n.scale * .52, l = (n.opacity ?? .06) * (.78 + .22 * Math.sin(r * 1.3)), u = n.phase * .2 + t * .002;
 			else {
 				let e = (t * n.speed + n.phase) % 1;
 				a = n.origin.y + e * 8, i = n.origin.x + e * e * 2.2 + Math.sin(e * 5) * .4, o = n.origin.z + e * e * .8;
@@ -6882,4 +8155,4 @@ void main(){
 	}
 };
 //#endregion
-export { n as ATMO, Gn as Details, hr as ForestGate, ci as GateFramingTrees, gr as GateGround, Dt as HillsideTrail, Ut as LingyinMasterplanBlockout, gi as Mist, u as Sky, un as Temple, Ne as Terrain, Wn as Vegetation, O as WORLD, ui as Water, vt as buddhaMaterial, Wt as createApprovedLingyinLandscape, mn as createMainHallInterior, xn as createSmallHallInteriors, A as heightAt, wn as mainHallStatueSolids, Fn as preloadFoliagePhotos, Dn as preloadRuntimeTextures, Je as preloadTempleTextures, je as preloadTerrainTextures };
+export { n as ATMO, Er as Details, $r as ForestGate, Yi as GateFramingTrees, ei as GateGround, Ct as HillsideTrail, sn as LingyinMasterplanBlockout, ra as Mist, d as Sky, Dn as Temple, De as Terrain, Tr as Vegetation, j as WORLD, Zi as Water, mt as buddhaMaterial, cn as createApprovedLingyinLandscape, Yn as createMainHallInterior, nr as createSmallHallInteriors, L as heightAt, ar as mainHallStatueSolids, gr as preloadFoliagePhotos, cr as preloadRuntimeTextures, Ue as preloadTempleTextures, Te as preloadTerrainTextures };

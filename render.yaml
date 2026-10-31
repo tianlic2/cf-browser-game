@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: crossfire-friend-room
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run multiplayer:server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22

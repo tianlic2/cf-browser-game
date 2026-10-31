@@ -44,6 +44,6 @@ assert.equal(surface.generateMipmaps,true);
 assert.equal(surface.minFilter,THREE.LinearMipmapLinearFilter);
 assert.equal(surface.anisotropy,16);
 assert.equal(surface.colorSpace,THREE.SRGBColorSpace);
-for(const name of ['classic_map','blacktown_map','survivor_map','prison_map'])
+for(const name of ['classic_map','blacktown_map'])
   assert.match(await read('scripts/'+name+'.js'),/configureMapTexture\(/);
 console.log('PASS: atlas lightmaps cannot bleed through mip levels; map albedo keeps trilinear/anisotropic filtering.');

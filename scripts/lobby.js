@@ -39,7 +39,7 @@ const KEYBINDS = [
   { keys: ["4"], label: "循环切换手雷 / 闪光弹 / 烟雾弹" },
   { keys: ["Q"], label: "切回上一把武器（与当前武器往返切换）" },
   { keys: ["Esc"], label: "游戏菜单：暂停 / 结束对局 / 刷新位置" },
-  { keys: ["B"], label: "背包：悬停编号预览，点击或 1 / 2 / 3 / 4 确认并关闭" },
+  { keys: ["B"], label: "背包：悬停编号预览，点击或 1–8 确认并关闭" },
   { keys: ["G"], label: "丢弃当前武器" },
   { keys: ["Tab"], label: "按住查看战绩" },
   { keys: ["Enter"], label: "聊天（再按一次发送）" },

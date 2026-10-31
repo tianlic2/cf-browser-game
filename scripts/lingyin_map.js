@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { makeGLTFLoader } from './gltf.js';
-import { ATMO, Sky, Terrain, HillsideTrail, Temple, ForestGate, GateGround, GateFramingTrees, createMainHallInterior, createSmallHallInteriors, mainHallStatueSolids, createApprovedLingyinLandscape, preloadTempleTextures, preloadRuntimeTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Mist } from './lingyin_world.js?v=85';
-import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=static-solids-1';
+import { ATMO, Sky, Terrain, HillsideTrail, Temple, ForestGate, GateGround, GateFramingTrees, createMainHallInterior, createSmallHallInteriors, mainHallStatueSolids, createApprovedLingyinLandscape, preloadTempleTextures, preloadRuntimeTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Mist } from './lingyin_world.js?v=new-map-3';
+import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=new-map-3';
+import { COURT_COVER } from './lingyin_court_cover.js?v=1';
+import { createLingyinWell } from './lingyin_well.js?v=1';
 import { triangulatedWalkSurface } from './lingyin_walk_surface.js?v=2';
 
 // The imported procedural scene has its own editable visual sources. Keep
@@ -88,6 +90,22 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
     texture.colorSpace=THREE.SRGBColorSpace;
     texture.anisotropy=8;
   }
+  // Reuse the loaded hall stone image, avoiding extra downloads. The visible
+  // screen and its bullet/movement proxy share COURT_COVER dimensions.
+  const stoneCoverMaterial = new THREE.MeshStandardMaterial({map:stoneFloor,color:0xc4c1b6,roughness:.92});
+  const coverGroup = new THREE.Group(); coverGroup.name = 'courtyard-stone-cover';
+  for (const c of COURT_COVER) {
+    const addStone = (w,h,d,x,y,z) => {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stoneCoverMaterial);
+      mesh.position.set(c.x+x,LINGYIN_PLATFORM_Y+y,c.z+z);
+      mesh.receiveShadow = true;
+      coverGroup.add(mesh);
+    };
+    addStone(c.hx*2,.18,c.hz*2,0,.09,0);
+    addStone(c.hx*2-.12,c.h-.36,c.hz*2-.12,0,c.h/2,0);
+    addStone(c.hx*2,.18,c.hz*2,0,c.h-.09,0);
+  }
+  world.add(coverGroup);
   redLacquer.wrapS=redLacquer.wrapT=THREE.RepeatWrapping;
   redRoof.wrapS=redRoof.wrapT=THREE.RepeatWrapping;
   redRoof.repeat.set(.2,.2);
@@ -109,6 +127,9 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
   const vegetation = await attach(Vegetation,.82);
   const details = await attach(Details,.93);
   const mist = await attach(Mist,.97,details.smokeOrigin);
+  const well=createLingyinWell(world,stoneCoverMaterial);
+  well.position.y=LINGYIN_PLATFORM_Y;
+  world.add(well);
   const landscape=options.editor?null:createApprovedLingyinLandscape(world);
   layout.colliders.push(...mainHallStatueSolids(world));
   if(landscape)layout.setLandscapeData(landscape,
@@ -166,6 +187,16 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
     });
     // Surface indexing copied the coordinates; this geometry is CPU-only.
     landscape.walkGeometry.dispose();
+  }
+  // Bullet surfaces follow the five visible bridge slabs and the entry steps.
+  // Character/NPC footing comes from the same top heights in lingyin_layout.
+  for(const [x,top] of [[30.9,.34],[33.45,.52],[36,.66],[38.55,.52],[41.1,.34]]){
+    const slab=new THREE.Mesh(new THREE.BoxGeometry(x===41.1?3.45:2.55,.28,8.2),invisible);
+    slab.name='east-bridge-deck';slab.position.set(x,top-.14,28);slab.visible=false;proxies.add(slab);
+  }
+  for(let i=0;i<3;i++){
+    const top=.11+i*.11,step=new THREE.Mesh(new THREE.BoxGeometry(.72,.18,8.2),invisible);
+    step.name='east-bridge-step';step.position.set(28.38+i*.72,top-.09,28);step.visible=false;proxies.add(step);
   }
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(63,92),invisible);
   floor.rotation.x = -Math.PI/2;

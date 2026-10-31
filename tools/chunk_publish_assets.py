@@ -53,4 +53,3 @@ def chunk_ironbeast() -> None:
 if __name__ == "__main__":
     chunk_ironbeast()
     chunk_map("blacktown")
-    chunk_map("survivor")

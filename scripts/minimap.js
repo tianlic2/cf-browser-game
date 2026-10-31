@@ -141,6 +141,8 @@ export class Minimap {
     this._layout = [];
     this._bounds = null;
     this._base = null;      // 离屏底图
+    this._sourceOverview = null;
+    this._sourceImage = null;
     this._w = 0; this._h = 0; this._dpr = 1;
     this._visT = 0;         // 可见性节流计时
     this._vis = [];         // 与 view.enemies 同序的可见性缓存
@@ -192,10 +194,35 @@ export class Minimap {
     this._bake();
   }
 
+  // Source overview support is opt-in per map.  The image is drawn once into
+  // the offscreen base; live markers still use the same cheap 2D pass.
+  setSourceOverview(config) {
+    this._sourceOverview = config ? { ...config } : null;
+    this._sourceImage = null;
+    this._base = null;
+    if (!config?.url || typeof Image === "undefined") { this._bake(); return; }
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => { this._sourceImage = image; this._base = null; this._bake(); };
+    image.onerror = () => { this._sourceImage = null; this._base = null; this._bake(); };
+    image.src = config.url;
+  }
+
   // 世界 → CSS 像素。少一维的 `sy` 也要暴露给测试，所以单独给一个。
   // Uniform metres-to-pixels scale; all deck corners fit inside the circular frame.
   // Sharing this transform with _box prevents stretched cover or drifting enemy dots.
   toPx(wx, wz) {
+    const overview = this._sourceOverview;
+    if (overview && this._sourceImage && this._w > 0) {
+      const metres = overview.metresPerSourceUnit || .0254;
+      const sourceX = wx / metres;
+      const sourceY = -wz / metres;
+      const width = overview.width || this._sourceImage.naturalWidth || 1024;
+      const height = overview.height || this._sourceImage.naturalHeight || 1024;
+      const u = ((sourceX - overview.posX) / overview.scale) / width;
+      const v = ((overview.posY - sourceY) / overview.scale) / height;
+      return { sx: u * this._w, sy: v * this._h };
+    }
     const b = this._bounds;
     if (!b || this._w <= 0) return { sx: 0, sy: 0 };
     const radius = Math.min(this._w, this._h) / 2 - this._opts.pad;
@@ -224,23 +251,28 @@ export class Minimap {
     const radius = Math.min(this._w, this._h) / 2 - 2;
     g.save();
     g.beginPath(); g.arc(this._w / 2, this._h / 2, radius, 0, Math.PI * 2); g.clip();
-    g.fillStyle = MM_COLOR.bg; g.fillRect(0, 0, this._w, this._h);
-    const deck = this._box({ x: 0, z: 0, hx: this._bounds.hw, hz: this._bounds.hl });
-    g.fillStyle = MM_COLOR.deck; g.fillRect(deck.x, deck.y, deck.w, deck.h);
+    if (this._sourceImage) {
+      g.fillStyle = "#080b0c"; g.fillRect(0, 0, this._w, this._h);
+      g.drawImage(this._sourceImage, 0, 0, this._w, this._h);
+      g.fillStyle = "rgba(9,16,17,.18)"; g.fillRect(0, 0, this._w, this._h);
+    } else {
+      g.fillStyle = MM_COLOR.bg; g.fillRect(0, 0, this._w, this._h);
+      const deck = this._box({ x: 0, z: 0, hx: this._bounds.hw, hz: this._bounds.hl });
+      g.fillStyle = MM_COLOR.deck; g.fillRect(deck.x, deck.y, deck.w, deck.h);
 
-    for (const kind of MM_ORDER) {
-      if (kind === "deck") continue;
-      g.fillStyle = MM_COLOR[kind] || MM_COLOR.container;
-      for (let i = 0; i < this._layout.length; i++) {
-        const e = this._layout[i];
-        if (e.kind !== kind) continue;
-        const r = this._box(e);
-        g.fillRect(r.x, r.y, r.w, r.h);
-        if (kind === "container") {
-          // 集装箱是本图的主要地标，给一道描边让彼此分得开（不然 2×2 相邻格糊成一块）
-          g.strokeStyle = MM_COLOR.containerEdge;
-          g.lineWidth = 1;
-          g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      for (const kind of MM_ORDER) {
+        if (kind === "deck") continue;
+        g.fillStyle = MM_COLOR[kind] || MM_COLOR.container;
+        for (let i = 0; i < this._layout.length; i++) {
+          const e = this._layout[i];
+          if (e.kind !== kind) continue;
+          const r = this._box(e);
+          g.fillRect(r.x, r.y, r.w, r.h);
+          if (kind === "container") {
+            g.strokeStyle = MM_COLOR.containerEdge;
+            g.lineWidth = 1;
+            g.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+          }
         }
       }
     }
@@ -348,6 +380,11 @@ export class Minimap {
       drawn: this._stat.drawn,
       visible: this._stat.visible,
       bounds: this._bounds ? { hw: this._bounds.hw, hl: this._bounds.hl } : null,
+      sourceOverview: this._sourceOverview ? {
+        loaded: !!this._sourceImage, url: this._sourceOverview.url,
+        posX: this._sourceOverview.posX, posY: this._sourceOverview.posY,
+        scale: this._sourceOverview.scale,
+      } : null,
     };
   }
 

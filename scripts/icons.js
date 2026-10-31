@@ -17,8 +17,12 @@
 export const ICON_KIND = {
   ak: "rifle",
   m4: "rifle",
+  scar: "rifle",
+  akgold: "rifle",
+  kn57: "rifle",
   awm: "sniper",
   barrett: "sniper",
+  m200: "sniper",
   pistol: "pistol",
   deagle: "pistol",
   knife: "melee",

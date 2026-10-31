@@ -124,6 +124,33 @@ body {
 }
 
 /* 生化模式“千伤”阶段徽章：原创矢量盾牌，不依赖外部图片素材。 */
+.bio-damage-panel {
+  position: absolute; right: 1.5%; top: 25%; width: 148px;
+  padding: 4px; color: #fce2a4; text-align: right;
+  font: 700 11px/1.3 Arial, sans-serif;
+  text-shadow: 0 1px 3px #000;
+}
+.bio-damage-pips { display: flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.bio-medal { position:relative; display:inline-grid; place-items:center; width:52px; height:52px;
+  filter:drop-shadow(0 2px 2px #000) drop-shadow(0 0 3px #e8b24b88); }
+.bio-medal svg { position:absolute; inset:0; width:100%; height:100%; }
+.bio-medal .medal-rays { fill:#353a40; stroke:#e8d9ab; stroke-width:2; stroke-linejoin:round; }
+.bio-medal .medal-core { fill:#323433; stroke:#b9c7c7; stroke-width:3; }
+.bio-medal .medal-bar { fill:#a96819; stroke:#ffdb75; stroke-width:2; }
+.bio-medal.gold .medal-rays { fill:#b87917; stroke:#ffdf75; }
+.bio-medal.gold .medal-core { fill:#b87318; stroke:#ffdf75; }
+.bio-medal b { position:relative; color:#fff1a0; font:900 17px/1 Arial,sans-serif;
+  letter-spacing:-1px; -webkit-text-stroke:.5px #4d2a0a; text-shadow:0 2px 1px #321a08; }
+.bio-damage-score { color: #eee7d6; font-variant-numeric: tabular-nums; }
+.bio-damage-fly { position:absolute; left:50%; top:49%;
+  animation:bioDamageFly .68s ease-in forwards; }
+.bio-damage-fly .bio-medal { width:70px; height:70px; }
+@keyframes bioDamageFly {
+  0% { opacity:0; transform:translate(-50%,-50%) scale(1.3); }
+  15% { opacity:1; transform:translate(-50%,-50%) scale(1); }
+  100% { left:96%; top:27%; opacity:0; transform:translate(-50%,-50%) scale(.65); }
+}
+@media (max-width:700px) { .bio-damage-panel { width:125px; right:1%; font-size:10px; } .bio-medal { width:42px; height:42px; } .bio-medal b { font-size:14px; } }
 .fx-layer .bio-damage-award {
   position: absolute;
   left: 50%;
@@ -197,35 +224,85 @@ body {
   to { transform: rotate(120deg) scale(1.38); opacity: 0; }
 }
 
-/* ===== 狙击镜（AWM）=====
-   整块黑场里抠出一个正圆镜筒，圆内是细十字 + 密位刻度。
-   --tube 是镜筒半径；二级变倍（.scope.x2）自动收窄成更长的焦距。 */
+/* ===== 狙击镜 =====
+   CF 风格的大直径目镜。镜外仍保留战场画面，只做降亮和低饱和处理；
+   外圈金属镜身与粗外段分划负责把镜内、镜外清楚分开。 */
 .scope {
-  --tube: 31vh;
+  --tube: min(45vh, 45vw);
   position: fixed;
   inset: 0;
   z-index: 6;
   pointer-events: none;
+  isolation: isolate;
 }
-.scope.x2 { --tube: 21vh; }
+.scope.x2 { --tube: min(44vh, 44vw); }
 .scope.hidden { display: none; }
 
-/* 用超大 spread 的 box-shadow 把圆外一次性涂黑 —— 比 radial-gradient 的边缘干净得多，
-   而且 overflow:hidden 会把圆内的十字线精确裁到圆周上。 */
+/* 镜外不再涂黑。透明的冷灰层让外围仍能辨认墙体、地面与运动目标，
+   圆周附近逐渐变暗，避免镜内外亮度完全相同而失去目镜边界。 */
+.scope::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(circle at 50% 50%,
+    transparent 0 calc(var(--tube) + 1.8vh),
+    rgba(25, 29, 31, .20) calc(var(--tube) + 4vh),
+    rgba(197, 202, 198, .32) 74%,
+    rgba(224, 226, 220, .43) 100%);
+}
+
+/* 镜身侧面的调节座。保持轻量 CSS 图形，不增加纹理下载或额外渲染通道。 */
+.scope .sc-housing {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: calc(var(--tube) * 2);
+  height: calc(var(--tube) * 2);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  filter: drop-shadow(0 1.2vh 1.4vh rgba(0, 0, 0, .42));
+}
+.scope .sc-housing::before,
+.scope .sc-housing::after {
+  content: "";
+  position: absolute;
+  top: 35%;
+  width: clamp(30px, 7.2vh, 78px);
+  height: 30%;
+  border: .45vh solid #25282a;
+  border-radius: 18% 30% 30% 18%;
+  background: linear-gradient(90deg,
+    #282b2e 0 12%, #a9aaa1 13% 24%, #ece8d8 25% 39%,
+    #807d70 40% 55%, #dad8cb 56% 73%, #3a3c3d 74% 100%);
+  box-shadow: inset 0 0 0 .35vh rgba(255,255,255,.24),
+    inset 0 0 1.2vh rgba(0,0,0,.7), 0 .4vh .8vh rgba(0,0,0,.45);
+}
+.scope .sc-housing::before { right: calc(100% + 1.2vh); }
+.scope .sc-housing::after {
+  left: calc(100% + 1.2vh);
+  transform: scaleX(-1);
+}
+
 .scope .sc-tube {
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 2;
   width: calc(var(--tube) * 2);
   height: calc(var(--tube) * 2);
   margin: calc(var(--tube) * -1) 0 0 calc(var(--tube) * -1);
   border-radius: 50%;
   overflow: hidden;
-  /* 圆外纯黑：镜筒之外不该看见任何东西（HUD 因为层级更高仍然可见） */
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 0 0 1.1vh #000,
-    0 0 0 200vmax #000;
+    inset 0 0 0 .22vh rgba(252, 244, 205, .45),
+    0 0 0 .55vh #111416,
+    0 0 0 1.05vh #c29b38,
+    0 0 0 1.45vh #efe3a9,
+    0 0 0 1.95vh #292c2d,
+    0 0 0 2.25vh rgba(220, 220, 207, .82),
+    0 0 1.8vh 2.5vh rgba(0, 0, 0, .46);
 }
 /* 镜筒暗角：越靠边越暗，模拟目镜边缘的光学衰减 */
 .scope .sc-vig {
@@ -233,16 +310,17 @@ body {
   inset: 0;
   background: radial-gradient(
     circle at 50% 50%,
-    rgba(0, 0, 0, 0) 0 58%,
-    rgba(0, 0, 0, 0.42) 84%,
-    rgba(0, 0, 0, 0.82) 100%
+    rgba(0, 0, 0, 0) 0 68%,
+    rgba(0, 0, 0, 0.18) 88%,
+    rgba(0, 0, 0, 0.52) 100%
   );
 }
-/* 十字分划。用 ::before / ::after 挂密位刻度，宽度按 --tube 走，两级变倍下自动跟着变。 */
+/* 中央保持细线，靠近镜缘的四段加粗，避免背景复杂时分划消失。 */
 .scope .sc-h,
 .scope .sc-v {
   position: absolute;
-  background: rgba(12, 14, 16, 0.82);
+  background: rgba(8, 10, 11, .92);
+  filter: drop-shadow(0 0 .5px rgba(255,255,255,.28));
 }
 .scope .sc-h {
   left: 0;
@@ -256,62 +334,40 @@ body {
   left: 50%;
   width: 1px;
 }
-/* 密位刻度：每根轴 6 个短齿，对称排布 */
 .scope .sc-h::before,
 .scope .sc-h::after {
   content: "";
   position: absolute;
-  top: -3.5px;
-  width: 1px;
-  height: 8px;
-  background: rgba(12, 14, 16, 0.7);
+  top: -1.5px;
+  width: 44.5%;
+  height: 4px;
+  background: rgba(5, 7, 8, .96);
 }
-.scope .sc-h::before {
-  left: 50%;
-  margin-left: calc(var(--tube) * -0.62);
-  box-shadow:
-    calc(var(--tube) * 0.19) 0 0 rgba(12, 14, 16, 0.7),
-    calc(var(--tube) * 0.38) 0 0 rgba(12, 14, 16, 0.7);
-}
-.scope .sc-h::after {
-  right: 50%;
-  margin-right: calc(var(--tube) * -0.62);
-  box-shadow:
-    calc(var(--tube) * -0.19) 0 0 rgba(12, 14, 16, 0.7),
-    calc(var(--tube) * -0.38) 0 0 rgba(12, 14, 16, 0.7);
-}
+.scope .sc-h::before { left: 0; }
+.scope .sc-h::after { right: 0; }
 .scope .sc-v::before,
 .scope .sc-v::after {
   content: "";
   position: absolute;
-  left: -3.5px;
-  width: 8px;
-  height: 1px;
-  background: rgba(12, 14, 16, 0.7);
+  left: -1.5px;
+  width: 4px;
+  height: 44.5%;
+  background: rgba(5, 7, 8, .96);
 }
-.scope .sc-v::before {
-  top: 50%;
-  margin-top: calc(var(--tube) * -0.62);
-  box-shadow:
-    0 calc(var(--tube) * 0.19) 0 rgba(12, 14, 16, 0.7),
-    0 calc(var(--tube) * 0.38) 0 rgba(12, 14, 16, 0.7);
-}
-.scope .sc-v::after {
-  bottom: 50%;
-  margin-bottom: calc(var(--tube) * -0.62);
-  box-shadow:
-    0 calc(var(--tube) * -0.19) 0 rgba(12, 14, 16, 0.7),
-    0 calc(var(--tube) * -0.38) 0 rgba(12, 14, 16, 0.7);
-}
+.scope .sc-v::before { top: 0; }
+.scope .sc-v::after { bottom: 0; }
 .scope .sc-dot {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 3px;
-  height: 3px;
-  margin: -1.5px 0 0 -1.5px;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
   border-radius: 50%;
-  background: rgba(12, 14, 16, 0.92);
+  border: 1px solid rgba(70, 0, 0, .88);
+  background: #ef2424;
+  box-shadow: 0 0 0 1px rgba(255, 218, 190, .72),
+    0 0 5px rgba(255, 28, 28, .88);
 }
 
 /* ===== HUD ===== */
@@ -748,15 +804,17 @@ body {
 
 /* 击杀军徽统一放在同一方框；六档素材按透明区内的实际图形高度校准。 */
 .killicon {
-  position: absolute; left: 50%; top: 64%; width: 138px; height: 138px;
+  position: absolute; left: 50%; top: 64%; width: 162px; height: 162px;
   transform: translateX(-50%); opacity: 0; pointer-events: none;
   filter: drop-shadow(0 2px 2px rgba(0,0,0,.9));
 }
 .ki-medal { display: block; width: 100%; height: 100%; }
+.ki-new-medal { display: block; width: 100%; height: 100%; object-fit: contain; }
 .ki-streak-medal {
   display: block; width: 100%; height: 100%; object-fit: contain;
   transform: scale(var(--ki-medal-scale)); transform-origin: center;
 }
+.ki-streak-medal.ki-new-medal { transform: none; }
 .ki-streak-medal.tier-1 { --ki-medal-scale: 1.268; }
 .ki-streak-medal.tier-2 { --ki-medal-scale: 1.358; }
 .ki-streak-medal.tier-3 { --ki-medal-scale: 1.164; }
@@ -772,11 +830,11 @@ body {
 .killicon.show { animation: killIconAnim 1.15s ease-out forwards; }
 @keyframes killIconAnim {
   0% { opacity: 1; transform: translateX(-50%) scale(1.42); }
-  6% { opacity: 1; transform: translateX(calc(-50% + 8px)) translateY(-5px) rotate(-3.2deg) scale(1.35); }
-  13% { opacity: 1; transform: translateX(calc(-50% - 8px)) translateY(5px) rotate(3.5deg) scale(1.27); }
-  20% { opacity: 1; transform: translateX(calc(-50% + 6px)) translateY(-3px) rotate(-2.5deg) scale(1.18); }
-  28% { opacity: 1; transform: translateX(calc(-50% - 4px)) translateY(3px) rotate(1.8deg) scale(1.10); }
-  36% { opacity: 1; transform: translateX(calc(-50% + 2px)) translateY(-1px) rotate(-.8deg) scale(1.04); }
+  6% { opacity: 1; transform: translateX(calc(-50% + 12px)) translateY(-7px) rotate(-5deg) scale(1.35); }
+  13% { opacity: 1; transform: translateX(calc(-50% - 12px)) translateY(7px) rotate(5.4deg) scale(1.27); }
+  20% { opacity: 1; transform: translateX(calc(-50% + 9px)) translateY(-5px) rotate(-3.8deg) scale(1.18); }
+  28% { opacity: 1; transform: translateX(calc(-50% - 6px)) translateY(4px) rotate(2.7deg) scale(1.10); }
+  36% { opacity: 1; transform: translateX(calc(-50% + 3px)) translateY(-2px) rotate(-1.2deg) scale(1.04); }
   44%, 76% { opacity: 1; transform: translateX(-50%) scale(1); }
   100% { opacity: 0; transform: translateX(-50%) scale(1); }
 }
@@ -2425,7 +2483,7 @@ body {
 }
 
 @media (max-height: 600px) {
-  .killicon { top: 60%; width: 112px; height: 112px; }
+  .killicon { top: 60%; width: 130px; height: 130px; }
   .streak { top: calc(60% + 112px); font-size: 16px; }
   .sk-timer { top: calc(60% + 136px); padding: 2px 6px; }
 }
@@ -2653,9 +2711,6 @@ body {
   background: linear-gradient(112deg, #293431, #121b1d 72%);
   box-shadow: inset 0 1px #89948744;
 }
-#menu .room-map-option[data-map="prison"] {
-  background: linear-gradient(112deg, #4c5659, #20272b 72%);
-}
 #menu .room-map-option.active {
   border-color: #e1bd6c; color: #f6eac3;
   box-shadow: inset 0 0 0 1px #c39b4e77, 0 0 9px #d2ae5430;
@@ -2699,6 +2754,18 @@ body {
 #menu .room-chat-compose input::placeholder { color: #71898c; }
 #menu .room-chat-compose button { color: #c7d8c5; background: linear-gradient(#435b5e,#223637); border: 1px solid #7c9187; border-radius: 2px; padding: 3px 10px; font-size: 11px; cursor: pointer; }
 #menu .lobby-pane:not([data-pane="play"]) { padding: 22px; min-height: 441px; box-sizing: border-box; background: #111b17cf; }
+.online-room{margin-top:10px;padding:9px;border:1px solid #667466;background:#0b1415cc;box-shadow:inset 0 0 16px #0008}
+.online-room header{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;color:#d9dfc8;font-size:11px;letter-spacing:1px}
+.online-room header span{color:#f2c25b;font:700 13px/1 Consolas,monospace;letter-spacing:2px}
+.online-room label{display:grid;gap:3px;color:#87968e;font-size:9px;letter-spacing:1px}
+.online-room input{box-sizing:border-box;width:100%;min-width:0;padding:6px 7px;border:1px solid #52645d;background:#071013;color:#dce7dd;font:11px/1.2 Consolas,monospace;outline:none}
+.online-room input:focus{border-color:#b8c58d;box-shadow:0 0 0 1px #b8c58d44}
+.online-room-join,.online-room-actions{display:flex;gap:6px;margin-top:6px}
+.online-room-join input{flex:1;text-transform:uppercase;letter-spacing:3px}
+.online-room button{padding:6px 9px;border:1px solid #77836d;background:linear-gradient(#425349,#1c2924);color:#d7dfcd;font:700 10px/1 Arial,"Microsoft YaHei",sans-serif;cursor:pointer}
+.online-room button:hover:not(:disabled){filter:brightness(1.25)}
+.online-room button:disabled{opacity:.4;cursor:default}
+.online-room-actions button{flex:1}
 #menu .lp-h2 { color: #e0dfbb; }
 #menu .lp-desc, #menu .lv-hint { color: #a3b4aa; }
 #menu .lv-tr.lv-th { background: #43554488; color: #c5d1b9; }
@@ -2813,6 +2880,19 @@ body.bio-mutant .hud-bottom-right .hud-ammo-row,body.bio-mutant .hud-bottom-righ
 .bio-countdown-track i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#a84131,#ffd29b);box-shadow:0 0 9px #f75737}
 .bio-countdown.urgent{border-color:#ff674c;box-shadow:0 8px 32px #000b,0 0 28px #9d2c24a0;animation:bioCountdownPulse 1s ease-in-out infinite}
 @keyframes bioCountdownPulse{50%{filter:brightness(1.28)}}
+.zone13-presentation{position:absolute;inset:0;z-index:18;display:none;pointer-events:none;overflow:hidden}
+.zone13-presentation.active{display:block}
+.zone13-presentation img{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;opacity:0;visibility:hidden;transition:opacity .12s linear}
+.zone13-presentation img.visible{opacity:1;visibility:visible}
+.zone13-presentation [data-zone13-power]{z-index:1}
+.zone13-presentation [data-zone13-eye]{z-index:2;mix-blend-mode:screen;opacity:0}
+.zone13-presentation [data-zone13-eye].visible{opacity:.68}
+.zone13-presentation [data-zone13-flash]{z-index:3;animation:none}
+.zone13-presentation [data-zone13-flash].visible{animation:zone13InfectionFlash 1.15s ease-out both}
+.zone13-presentation [data-zone13-victory]{z-index:4;animation:none}
+.zone13-presentation [data-zone13-victory].visible{animation:zone13Victory 2.8s ease-out both}
+@keyframes zone13InfectionFlash{0%{opacity:.95;filter:brightness(1.6)}35%{opacity:.72}100%{opacity:0}}
+@keyframes zone13Victory{0%{opacity:0;transform:scale(1.12)}14%,72%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(.98)}}
 .bio-health-layer{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
 .training-panel{position:absolute;z-index:6;top:118px;right:18px;width:min(310px,31vw);box-sizing:border-box;padding:11px 12px 10px;color:#d8e9e3;background:linear-gradient(145deg,rgba(13,29,31,.94),rgba(7,14,17,.9));border:1px solid #658b89;box-shadow:0 7px 24px #000a,inset 0 0 24px #3c8f8830;font:12px/1.35 Arial,"Microsoft YaHei","PingFang SC",sans-serif;pointer-events:none}
 .training-panel.hidden{display:none}
@@ -3117,4 +3197,17 @@ body.training-playing .roundbar{border-color:#4d8d85;box-shadow:0 0 13px #3fa89b
   .hud-chat-action { left: 8px; bottom: 96px; }
   .hud-backpack-action span, .hud-chat-action span { display: none; }
   .hud .roundbar { width: min(76vw,360px); height: 42px; }
+}
+body.bio-low-health #viewport {
+  animation: bioLowHealthPulse .56s steps(2, end) infinite;
+}
+.bio-health.low {
+  animation: bioHealthWarning .56s steps(2, end) infinite;
+}
+@keyframes bioLowHealthPulse {
+  0% { box-shadow: inset 0 0 58px 15px rgba(160, 0, 0, .08); }
+  100% { box-shadow: inset 0 0 95px 28px rgba(220, 0, 0, .34); }
+}
+@keyframes bioHealthWarning {
+  50% { filter: brightness(1.9) saturate(1.8); opacity: .48; }
 }

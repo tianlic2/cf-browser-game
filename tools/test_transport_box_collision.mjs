@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { intersectsBrush, canMoveThroughBrushes, brushHorizontalEscape } from '../scripts/brush_collision.js';
+import { intersectsBrush, canMoveThroughBrushes, brushHorizontalEscape,
+  brushClusterEscape } from '../scripts/brush_collision.js';
 
 const mainSource = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
 assert.match(mainSource, /const staticStepHeight = player\.onGround \?[\s\S]*? : 0;/,
@@ -15,6 +16,15 @@ for (const c of map.colliders) {
   c.x = -c.x;
   for (const plane of c.planes || []) plane[0] = -plane[0];
 }
+
+const adjacent = [
+  { x: 0, z: 0, y0: 0, h: 1.1, hx: .6, hz: .6 },
+  { x: 1.2, z: 0, y0: 0, h: 1.1, hx: .6, hz: .6 },
+];
+const clusterEscape = brushClusterEscape(adjacent, .6, 0, 0, .45, 0, 1.78);
+assert.ok(clusterEscape, 'an actor caught between adjacent crates receives a cluster escape');
+assert.ok(adjacent.every(c => !intersectsBrush(c, clusterEscape.x, clusterEscape.z,
+  0, .45, 0, 1.78, adjacent)), 'cluster recovery clears every adjacent crate at once');
 
 const radius = .45;
 const height = 1.78;

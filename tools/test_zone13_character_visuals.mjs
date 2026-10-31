@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const source = fs.readFileSync(path.join(root, 'preview/zone13_character_visuals.js'), 'utf8');
+assert.match(source, /loadFoxSoldier/);
+assert.match(source, /new FoxSoldierRig\(null\)/);
+assert.match(source, /ClassicView\.load\('ak\/view'\)/);
+assert.match(source, /camera\.add\(playerView\.root\)/);
+assert.match(source, /firePlayerWeapon/);
+assert.doesNotMatch(source, /assets\/bio\/zombie/);
+assert.match(source, /cf_bio_candidates\/zone13\/runtime-character\/nanoghost/);
+for (const clip of ['idle', 'walk', 'death']) assert.match(source, new RegExp(`\\b${clip}\\b`));
+assert.match(source, /loadNanoGhostSource/);
+assert.match(source, /zone13-downloaded-nanoghost/);
+assert.match(source, /agent\.dead/);
+assert.match(source, /runtime-character\/ghost-view/);
+assert.match(source, /zone13-downloaded-ghost-first-person/);
+assert.match(source, /playZombieMelee/);
+for (const clip of ['light_hit', 'light_miss', 'light_backstab', 'heavy_hit1', 'heavy_miss1', 'heavy_backstab']) assert.match(source, new RegExp(clip));
+console.log('zone13 character visuals ok: existing Fox/AK plus downloaded Nano Ghost body and native first-person zombie attack rig');

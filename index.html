@@ -14,7 +14,7 @@
     <!-- 路径一律用「相对当前文档」的写法：本地 http.server 与 GitHub Pages 的项目页
          （tianlic2.github.io/cf-browser-game/）两种根目录深度都能跑。写成 /styles/… 这种
          绝对路径在项目页上会去根域找，整站 404。 -->
-    <link rel="stylesheet" href="./styles/game.css?v=modern-shell-nickname-editor-1" />
+    <link rel="stylesheet" href="./styles/game.css?v=kill-impact-2" />
     <link rel="stylesheet" href="./styles/boot.css?v=deferred-map-loading-1" />
     <link rel="preload" as="image" href="./assets/ui/headshot_solo.png" />
     <link rel="preload" as="image" href="./assets/ui/streak_eagle.png" />
@@ -91,8 +91,16 @@
       <div class="killburst" id="killBurst"></div>
     </div>
 
+    <div id="zone13Presentation" class="zone13-presentation" aria-hidden="true">
+      <img data-zone13-power alt="">
+      <img data-zone13-eye alt="">
+      <img data-zone13-flash alt="">
+      <img data-zone13-victory alt="">
+    </div>
+
     <!-- 狙击镜（巴雷特右键开镜；再按一次升到二级变倍） -->
     <div id="scope" class="scope hidden">
+      <div class="sc-housing" aria-hidden="true"></div>
       <div class="sc-tube">
         <div class="sc-vig"></div>
         <div class="sc-h"></div>
@@ -228,7 +236,7 @@
         <div class="hud-match-details" aria-hidden="true"><div id="ammoFill"></div></div>
       </div>
 
-      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1/2/3/4/5 确认并收起） -->
+      <!-- 背包面板（B 开合；悬停编号预览，点击或数字键 1–8 确认并收起） -->
       <div id="backpack" class="backpack hidden">
         <div class="bp-heading"><span class="bp-heading-icon" aria-hidden="true">▰</span><span>更换背包</span><span class="bp-title">选择背包</span></div>
         <div id="bpList" class="bp-list" role="group" aria-label="选择背包编号"></div>
@@ -417,11 +425,9 @@
             <div class="room-map-select" id="mapSelect" aria-label="选择对战地图">
               <span class="room-map-caption">对战地图 <small>SELECT MAP</small></span>
               <button type="button" class="room-map-option active" data-map="transport" aria-pressed="true"><b>运输船</b><small>集装箱货轮 · 经典对抗</small></button>
-              <button type="button" class="room-map-option" data-map="prison" aria-pressed="false"><b>守望之城</b><small>源地图尺寸 · 狙击与近战</small></button>
-              <button type="button" class="room-map-option" data-map="survivor" aria-pressed="false"><b>雪地求生</b><small>极地基地 · 团队竞技</small></button>
               <button type="button" class="room-map-option" data-map="blacktown" aria-pressed="false"><b>黑色城镇</b><small>巷战城区 · 团队竞技</small></button>
               <button type="button" class="room-map-option" data-map="lingyin" aria-pressed="false"><b>灵隐寺</b><small>古寺庭院 · 团队竞技</small></button>
-              <button type="button" class="room-map-option" data-map="bio" aria-pressed="false"><b>黑色城镇（生化）</b><small>雨夜感染 · 废墟防守</small></button>
+              <button type="button" class="room-map-option" data-map="bio" aria-pressed="false"><b>13号地区</b><small>封锁街区 · 多点防守</small></button>
             </div>
             <div class="bio-mode-select" id="modeSelect" aria-label="选择游戏模式">
               <button type="button" class="active" data-mode="tdm" aria-pressed="true">团队竞技</button>
@@ -433,8 +439,14 @@
               <aside class="modern-room-side">
                 <header><span>PLAYER LIST</span><b>房间成员</b></header>
                 <div class="modern-player-card"><span class="modern-avatar">R</span><div><b id="modernPlayerName">新兵</b><small>房主 · 准备</small></div><button id="renameNicknameCardBtn" class="modern-rename" type="button">修改昵称</button></div>
-                <p>当前为本地单人房间。真人联机将在后端阶段接入；本地电脑不占真人席位。</p>
-                <div class="modern-room-state"><span>服务器</span><b>LOCAL</b><span>状态</span><b class="is-ready">READY</b></div>
+                <p id="onlineRoomHint">本地单人模式可直接开始；也可以创建公网房间邀请一位好友。</p>
+                <div class="modern-room-state"><span>服务器</span><b id="onlineServerLabel">LOCAL</b><span>状态</span><b id="onlineRoomStatus" class="is-ready">READY</b></div>
+                <section class="online-room" aria-label="公网好友房间">
+                  <header><b>公网 1V1</b><span id="onlineRoomCode">未连接</span></header>
+                  <label>房间服务器<input id="onlineServerUrl" type="url" spellcheck="false" placeholder="wss://服务器/ws"></label>
+                  <div class="online-room-join"><input id="onlineJoinCode" maxlength="6" autocomplete="off" spellcheck="false" placeholder="输入 6 位房间码"><button id="onlineJoinBtn" type="button">加入</button></div>
+                  <div class="online-room-actions"><button id="onlineCreateBtn" type="button">创建房间</button><button id="onlineLeaveBtn" type="button" disabled>离开</button></div>
+                </section>
               </aside>
             </div>
             <div class="room-actions">
@@ -550,6 +562,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-  <script type="module" src="./scripts/main.js?v=lingyin-static-solids-1"></script>
+  <script type="module" src="./scripts/main.js?v=public-deploy-1"></script>
   </body>
 </html>

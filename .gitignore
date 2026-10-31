@@ -1,4 +1,5 @@
 node_modules
+/node_modules/
 dist
 .DS_Store
 *.swp
@@ -29,8 +30,6 @@ counter-strike-in-browser-main/
 /assets/classic/m4_ironbeast/view.bin
 /assets/classic/blacktown/map.bin
 /assets/classic/blacktown/map.json
-/assets/classic/survivor/map.bin
-/assets/classic/survivor/map.json
 
 # ---- 非站点资源（本地留档，不上传到 GitHub Pages）----
 # 站点是从仓库根目录发布的，凡是不被 `index.html` / `scripts/*.js` 引用的东西
@@ -68,6 +67,13 @@ counter-strike-in-browser-main/
 !/assets/local/fox_npc/face.png
 !/assets/local/fox_npc/ddfcd20.png
 /assets/preview/
+# BaiHu is approved for local gameplay, not public redistribution.
+/assets/local/scar_light/
+# User-approved local gameplay imports; no public redistribution permission.
+/assets/local/m200/
+/assets/local/akgold/
+/assets/local/kn57/
+/assets/local/cf_bio_candidates/
 /Unity/
 /人物动作/
 /角色/
@@ -82,6 +88,15 @@ counter-strike-in-browser-main/
 !/preview/lingyin-editor.html
 !/preview/lingyin-editor.css
 !/preview/lingyin-editor.js
+!/preview/zone13-graybox.html
+!/preview/zone13-graybox.css
+!/preview/zone13-graybox.js
+!/preview/zone13_walkmesh.js
+!/preview/zone13_interactions.js
+!/preview/zone13_round.js
+!/preview/zone13_agents.js
+!/preview/zone13_combat.js
+!/preview/zone13_character_visuals.js
 /styles/main.css
 # 大厅背景音乐的**原始 wav**：1.25 MB，11025 Hz 立体声。站点上放的是转码后的
 # `audio/ui/lobby_theme.m4a`（233 KB），原文件本地留档、不入库。

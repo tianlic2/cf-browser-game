@@ -26,17 +26,16 @@ const selectMode = main.slice(main.indexOf('function selectMode(id) {'),
 assert.ok(mapMeta && mapRule && selectMode.startsWith('function selectMode'),
   'map catalog, availability rule and mode selection are present');
 const sandbox = vm.createContext({ state: 'lobby', mapLoading: false,
-  updateMapChoiceUi() {}, buildMenuMatch() {}, lobby: null });
+  PUBLIC_DEPLOY: false,
+  updateMapChoiceUi() {}, buildMenuMatch() {}, lobby: null, multiplayer: { active: () => false } });
 vm.runInContext(`${mapMeta}\nlet selectedMapId = 'transport';\nlet lastArenaMapId = 'transport';
-  let selectedModeId = 'tdm';\n${mapRule}\n${selectMode}`, sandbox);
-const arenaMaps = ['transport', 'prison', 'survivor', 'blacktown', 'lingyin'];
+  let selectedModeId = 'tdm'; const bioMatch = () => selectedModeId === 'bio';\n${mapRule}\n${selectMode}`, sandbox);
+const arenaMaps = ['transport', 'blacktown', 'lingyin', 'bio'];
 for (const mode of ['tdm', 'training']) {
   for (const map of arenaMaps) {
     assert.equal(vm.runInContext(`mapAvailableForMode('${map}', '${mode}')`, sandbox), true,
       `${mode} can select ${map}`);
   }
-  assert.equal(vm.runInContext(`mapAvailableForMode('bio', '${mode}')`, sandbox), false,
-    `${mode} cannot select the bio-only map`);
 }
 assert.equal(vm.runInContext(`mapAvailableForMode('bio', 'bio')`, sandbox), true);
 assert.equal(vm.runInContext(`mapAvailableForMode('transport', 'bio')`, sandbox), false);

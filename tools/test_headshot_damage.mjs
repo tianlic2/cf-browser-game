@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-const damageModuleSource = readFileSync(new URL('../scripts/headshot_damage.js', import.meta.url), 'utf8');
+const tuningModuleSource = readFileSync(new URL('../scripts/weapon_tuning.js', import.meta.url), 'utf8')
+  .replace('export const WEAPON_TUNING', 'const WEAPON_TUNING');
+const damageModuleSource = readFileSync(new URL('../scripts/headshot_damage.js', import.meta.url), 'utf8')
+  .replace(/import \{ WEAPON_TUNING \} from '[^']+';/, tuningModuleSource);
 const damageModuleUrl = `data:text/javascript;base64,${Buffer.from(damageModuleSource).toString('base64')}`;
 const {
   HEADSHOT_DAMAGE_AVERAGES,
@@ -11,7 +14,8 @@ const {
   rollBodyshotDamage,
 } = await import(damageModuleUrl);
 
-const expected = { ak: 140, m4: 104, barrett: 750, deagle: 120 };
+const expected = { ak: 140, m4: 104, ironbeast: 104, scar: 104, m200: 500,
+  akgold: 130, kn57: 1000, barrett: 750, deagle: 120 };
 assert.deepEqual({ ...HEADSHOT_DAMAGE_AVERAGES }, expected, 'configured averages');
 assert.equal(HEADSHOT_DAMAGE_MIN_FACTOR, .9, 'minimum factor');
 assert.equal(HEADSHOT_DAMAGE_MAX_FACTOR, 1.1, 'maximum factor');
@@ -54,7 +58,7 @@ assert.equal(rollBodyshotDamage('ak', .5), null,
 
 const main = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
 const fire = main.slice(main.indexOf('function fire()'), main.indexOf('// 黄金爆头'));
-assert.match(main, /import \{ rollHeadshotDamage, rollBodyshotDamage \} from "\.\/headshot_damage\.js\?v=barrett-body-random-1";/,
+assert.match(main, /import \{ rollHeadshotDamage, rollBodyshotDamage \} from "\.\/headshot_damage\.js\?v=approved-20261029";/,
   'game imports the shared headshot and Barrett body rollers');
 assert.match(main, /function bodyshotDamage\(def, dist, randomValue = Math\.random\(\)\)[\s\S]*rollBodyshotDamage\(def\.id, randomValue\)[\s\S]*rolled \?\? damageAt\(def, dist\)/,
   'only authored body values bypass ordinary distance falloff');
@@ -65,4 +69,4 @@ assert.match(fire, /baseDamage \* \(h\.damageMultiplier \?\? 1\)/,
 assert.doesNotMatch(fire, /Math\.max\(enemy\.maxHealth, directDamage\)|directDamage \* \(head \? 2\.2 : 1\)/,
   'legacy guaranteed-kill and bio 2.2x headshot rules are removed');
 
-console.log('PASS: four firearm headshot averages and Barrett 300 body damage roll uniformly within 90%-110%; wood attenuation remains a later multiplier.');
+console.log('PASS: approved firearm headshot averages and Barrett 300 body damage roll uniformly within 90%-110%; wood attenuation remains a later multiplier.');

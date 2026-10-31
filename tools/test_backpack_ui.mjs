@@ -17,7 +17,7 @@ const emit=(type,e)=>{for(const f of listeners[type]||[])f(e)};
 const flush=()=>{while(pending.length)pending.shift()()};
 const key=(code,repeat=false)=>emit('keydown',{code,repeat,preventDefault(){}});
 const noop=()=>{};
-const ctx={console,document,viewport,window:{addEventListener:noop},state:'playing',locked:true,matchPaused:false,lockRequestCancelled:false,dead:false,curBp:0,selectedMapId:'transport',sniperOnlyMatch:()=>ctx.selectedMapId==='prison',keys:{},fireEnabled:false,BACKPACKS:[['ak','classic','stock'],['m4','classic','stock'],['barrett','classic','dragon'],['m4','ironbeastgold','dragon']].map(([primary,skin,meleeSkin])=>({primary,skin,secondary:'deagle',meleeSkin})),GEAR_SKIN:{deagle:'classic',knife:'classic'},owned:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{state:{mag:30,reserve:90,count:1}}])),WEAPON_DEFS:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{type:id==='barrett'?'sniper':id==='knife'?'melee':['frag','flash','smoke'].includes(id)?'grenade':id==='deagle'?'pistol':'rifle',stats:{magSize:30,reserve:90}}])),emptySlot:{},lifePickup:{primary:null,secondary:null},gunDisplayName:id=>id,activeSkinId:id=>id==='knife'?ctx.BACKPACKS[ctx.curBp].meleeSkin:ctx.BACKPACKS[ctx.curBp].skin,syncMagazineCapacity:noop,magazineSizeFor:(id,skin)=>id==='m4'&&skin==='ironbeastgold'?35:ctx.WEAPON_DEFS[id].stats.magSize,startingReserve:(id,stats,skin)=>{const reserve=id==='m4'&&skin==='ironbeastgold'?105:stats.reserve;return ctx.bioMatch()?reserve*2:reserve},worldModel:()=>({}),classicNades:{},weaponPreview:()=>null,renderer:{},scene:{},knifeBind:null,weaponIconSvg:()=>'<svg/>',sfx:{ui:noop,empty:noop,cancelStreak:noop},canSwapBackpack:()=>allowed,swapBlockReason:()=> 'blocked',showToast:noop,updateMapChoiceUi:noop,cancelMelee:noop,cancelGrenade:noop,showScoreboard:noop,clearTrainingTargets:noop,renderTrainingPanel:noop,chat:{cancel:noop,handleKey:()=>false,isTyping:()=>false},hud:new Element(),menu:new Element(),gameover:new Element(),lobby:{setResume:noop,refresh:noop},setScoped:noop,clearFlash:noop,gameStart:()=>{throw Error('must not restart')},equippedPrimary:()=>ctx.BACKPACKS[ctx.curBp].primary,switchWeapon:(id)=>switched.push(id),scoreboardEl:new Element(),IS_SNEAK:'sneak',IS_CROUCH:'crouch',performance:{now:()=>0},crouchDownAt:0,dropWeapon:()=>{throw Error('must not drop')},startReload:()=>{throw Error('must not reload')},switchToPrimary:noop,switchToSecondary:noop,switchNade:noop,quickSwitch:noop};
+const ctx={console,document,viewport,window:{addEventListener:noop},setTimeout:(fn)=>{pending.push(fn);return fn},clearTimeout:(fn)=>{const i=pending.indexOf(fn);if(i>=0)pending.splice(i,1)},state:'playing',locked:true,matchPaused:false,lockRequestCancelled:false,dead:false,curBp:0,selectedMapId:'transport',keys:{},fireEnabled:false,BACKPACKS:[['ak','classic','stock'],['m4','classic','stock'],['barrett','classic','dragon'],['m4','ironbeastgold','dragon']].map(([primary,skin,meleeSkin])=>({primary,skin,secondary:'deagle',meleeSkin})),GEAR_SKIN:{deagle:'classic',knife:'classic'},owned:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{state:{mag:30,reserve:90,count:1}}])),WEAPON_DEFS:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{type:id==='barrett'?'sniper':id==='knife'?'melee':['frag','flash','smoke'].includes(id)?'grenade':id==='deagle'?'pistol':'rifle',stats:{magSize:30,reserve:90}}])),emptySlot:{},lifePickup:{primary:null,secondary:null},gunDisplayName:id=>id,activeSkinId:id=>id==='knife'?ctx.BACKPACKS[ctx.curBp].meleeSkin:ctx.BACKPACKS[ctx.curBp].skin,syncMagazineCapacity:noop,magazineSizeFor:(id,skin)=>id==='m4'&&skin==='ironbeastgold'?35:ctx.WEAPON_DEFS[id].stats.magSize,startingReserve:(id,stats,skin)=>{const reserve=id==='m4'&&skin==='ironbeastgold'?105:stats.reserve;return ctx.bioMatch()?reserve*2:reserve},worldModel:()=>({}),classicNades:{},weaponPreview:()=>null,renderer:{},scene:{},knifeBind:null,weaponIconSvg:()=>'<svg/>',sfx:{ui:noop,empty:noop,cancelStreak:noop},canSwapBackpack:()=>allowed,swapBlockReason:()=> 'blocked',showToast:noop,updateMapChoiceUi:noop,cancelMelee:noop,cancelGrenade:noop,showScoreboard:noop,clearTrainingTargets:noop,renderTrainingPanel:noop,chat:{cancel:noop,handleKey:()=>false,isTyping:()=>false},hud:new Element(),menu:new Element(),gameover:new Element(),lobby:{setResume:noop,refresh:noop},setScoped:noop,clearFlash:noop,gameStart:()=>{throw Error('must not restart')},equippedPrimary:()=>ctx.BACKPACKS[ctx.curBp].primary,switchWeapon:(id)=>switched.push(id),scoreboardEl:new Element(),IS_SNEAK:'sneak',IS_CROUCH:'crouch',performance:{now:()=>0},crouchDownAt:0,dropWeapon:()=>{throw Error('must not drop')},startReload:()=>{throw Error('must not reload')},switchToPrimary:noop,switchToSecondary:noop,switchNade:noop,quickSwitch:noop};
 ctx.actedThisLife=false;
 ctx.bioMatch=()=>false;
 ctx.trainingMatch=()=>false;
@@ -91,7 +91,28 @@ assert.ok(pick.includes('lifePickup[it.slotKind]'),'pickup records into lifePick
 assert.ok(!/BACKPACKS\[curBp\]|GEAR_SKIN\.deagle\s*=/.test(pick),'pickup must never rewrite the backpack config');
 assert.ok(source.includes('{ primary: "m4", skin: "ironbeastgold", secondary: "deagle", meleeSkin: "dragon" }'),'fourth pack is configured as Iron Beast M4, Desert Eagle and 屠龙');
 const productPacks=source.slice(source.indexOf('const BACKPACKS = ['),source.indexOf('let curBp ='));
-assert.equal((productPacks.match(/secondary: "deagle"/g)||[]).length,4,'all four product backpacks use Desert Eagle');
+assert.equal((productPacks.match(/secondary: "deagle"/g)||[]).length,8,'all eight product backpacks use Desert Eagle');
+// Exercise the newly admitted fifth entry through the same real B/number-key
+// handlers; the earlier four-pack fixture still protects all prior behavior.
+ctx.BACKPACKS.push({primary:'scar',skin:'stock',secondary:'deagle',meleeSkin:'dragon'});
+ctx.owned.scar={state:{mag:30,reserve:90}};
+ctx.WEAPON_DEFS.scar={type:'rifle',stats:{magSize:30,reserve:90}};
+ctx.locked=true;allowed=true;key('KeyB');flush();
+assert.equal(nodes.bpList.children.length,5,'B renders the new fifth backpack');
+nodes.bpList.children[4].onmouseenter();
+assert.equal(nodes.bpLoadout.children[0].dataset.weapon,'scar','fifth tab previews BaiHu');
+key('Digit5');flush();assert.equal(ctx.curBp,4);assert.equal(switched.at(-1),'scar');
+assert.equal(ctx.backpackOpen(),false,'B + 5 equips BaiHu and closes the panel');
+for (const id of ['m200','akgold','kn57']) {
+  ctx.BACKPACKS.push({primary:id,skin:'stock',secondary:'deagle',meleeSkin:'dragon'});
+  ctx.owned[id]={state:{mag:30,reserve:90}};
+  ctx.WEAPON_DEFS[id]={type:'rifle',stats:{magSize:30,reserve:90}};
+}
+key('KeyB');flush();assert.equal(nodes.bpList.children.length,8);
+nodes.bpList.children[7].onmouseenter();
+assert.equal(nodes.bpLoadout.children[0].dataset.weapon,'kn57');
+key('Digit8');flush();assert.equal(ctx.curBp,7);assert.equal(switched.at(-1),'kn57');
+assert.equal(ctx.backpackOpen(),false,'B + 8 equips KN-57 and closes the panel');
 assert.doesNotMatch(productPacks,/secondary: "pistol"|primary: "awm"/,'AWM and USP are absent from product backpacks');
 const productDefs=source.slice(source.indexOf('const WEAPON_DEFS ='),source.indexOf('const PRIMARY_IDS'));
 assert.doesNotMatch(productDefs,/\n  (?:awm|pistol): \{/,'AWM and USP definitions are removed from the playable weapon table');
@@ -121,38 +142,12 @@ ctx.dead=true;ctx.updateGameMenu();assert.equal(nodes.gameMenuReset.disabled,tru
 ctx.dead=false;ctx.toggleMatchPause();ctx.refreshPlayerPosition();flush();assert.deepEqual([ctx.player.pos.x,ctx.player.pos.y,ctx.player.pos.z],[1,0,20]);assert.deepEqual([ctx.player.vel.x,ctx.player.vel.y,ctx.player.vel.z],[0,0,0]);assert.equal(ctx.player.hp,42);assert.equal(ctx.owned.ak.state.mag,7);assert.equal(ctx.kills,8);assert.equal(ctx.actedThisLife,true);assert.equal(ctx.matchPaused,false);assert.equal(ctx.gameMenuOpen(),false);
 // Quit has no result overlay, disposes no shared assets, and starts a NEW match next time.
 let releases=0,removed=0,starts=0;
-ctx.enemyManager={enemies:[{}],corpses:[{}],release:()=>releases++};ctx.scene={remove:()=>removed++};ctx.smokes=[{sprites:[{visible:true}]}];ctx.smokePool=[];ctx.clearGroundItems=noop;ctx.resetSwitchState=noop;ctx.cancelDeath=()=>ctx.dead=false;ctx.chat.clear=noop;
+ctx.onlineMatch=()=>false;ctx.enemyManager={enemies:[{}],corpses:[{}],release:()=>releases++};ctx.scene={remove:()=>removed++};ctx.smokes=[{sprites:[{visible:true}]}];ctx.smokePool=[];ctx.clearGroundItems=noop;ctx.resetSwitchState=noop;ctx.cancelDeath=()=>ctx.dead=false;ctx.chat.clear=noop;
 key('Escape');flush();ctx.toggleMatchPause();ctx.quitMatchToLobby();assert.equal(ctx.state,'menu');assert.equal(ctx.matchPaused,false);assert.equal(ctx.gameMenuOpen(),false);assert.equal(ctx.menu.classList.contains('hidden'),false);assert.equal(ctx.hud.classList.contains('hidden'),true);assert.equal(ctx.gameover.classList.contains('hidden'),true);assert.equal(releases,2);assert.equal(removed,1);assert.equal(ctx.grenadePool.length,0);assert.equal(ctx.smokes.length,0);assert.equal(ctx.smokePool[0].visible,false);
 // A delayed successful lock from before Quit must not restart behind the lobby.
 document.pointerLockElement=viewport;emit('pointerlockchange',{});flush();assert.equal(ctx.state,'menu');assert.equal(ctx.locked,false);
 ctx.gameStart=()=>{starts++;ctx.state='playing'};ctx.requestLock();flush();assert.equal(starts,1);assert.equal(ctx.state,'playing');assert.equal(ctx.gameMenuOpen(),false);
 console.log('PASS: Esc dialog, pause freezes simulation, resume denial/success, focus wrap, dead-player reset guard, position-only reset, quit cleanup, stale-lock cancellation and fresh match start.');
-
-ctx.selectedMapId='prison';ctx.curBp=2;allowed=true;
-key('KeyB');flush();
-assert.equal(nodes.bpList.children[0].disabled,true,'AK backpack disabled in prison');
-assert.equal(nodes.bpList.children[1].disabled,true,'M4 backpack disabled in prison');
-assert.equal(nodes.bpList.children[2].disabled,false,'Barrett backpack enabled in prison');
-assert.equal(nodes.bpList.children[3].disabled,true,'M4 Iron Beast backpack disabled in prison');
-assert.equal(nodes.bpLoadout.children.length,2,'prison previews sniper and melee slots');
-assert.equal(nodes.bpLoadout.children[1].dataset.weapon,'knife','prison backpack includes the knife');
-assert.equal(ctx.switchBackpack(0),false,'programmatic AK selection is blocked too');
-assert.equal(ctx.curBp,2);
-assert.equal(ctx.switchBackpack(2),true,'Barrett selection remains valid');
-assert.equal(ctx.curBp,2);
-run(source.slice(source.indexOf('const prisonWeaponAllowed ='),source.indexOf('let obstacleMeshes =')));
-assert.equal(run('prisonWeaponAllowed("awm")'),false);
-assert.equal(run('prisonWeaponAllowed("barrett")'),true);
-assert.equal(run('prisonWeaponAllowed("knife")'),true);
-for(const id of ['ak','m4','pistol','deagle','frag','flash','smoke'])
-  assert.equal(run(`prisonWeaponAllowed(${JSON.stringify(id)})`),false,`${id} stays prohibited`);
-run(source.slice(source.indexOf('function canQuickSwitchTo('),source.indexOf('// 当前手上该是哪把主武器')));
-ctx.slotWeapon=()=>ctx.BACKPACKS[ctx.curBp].primary;ctx.lastWeaponId=null;
-key('KeyB');flush();
-switched.length=0;ctx.currentId='barrett';key('Digit3');assert.equal(switched.at(-1),'knife','3 equips knife in prison');
-key('KeyQ');assert.equal(switched.at(-1),'knife','Q switches sniper to knife');
-ctx.currentId='knife';key('KeyQ');assert.equal(switched.at(-1),'barrett','Q switches knife back to selected sniper');
-console.log('PASS: prison disables rifle backpacks, previews knife, allows sniper/knife only, and Q switches between them.');
 
 // 直接运行产品里的真实资格判定：生化准备期忽略出生区与 actedThisLife，live 后拒绝；
 // 团队竞技仍保留原来的出生区 + 未开火双门槛。

@@ -28,6 +28,18 @@ assert.equal(blade?.unlit,true,'source gold/red albedo must not be recoloured by
 assert.ok(blade?.reflectionMap,'source $envmapmask is retained as its own reflection pass');
 assert.equal(blade.reflectionOpacity,.22,'source reflection remains subordinate to its colour sheet');
 assert.ok(data.parts.find(p=>p.textureName==='Arms')?.normalMap,'source arm normal map is wired');
+const exposedHands=data.parts.find(p=>p.textureName==='v_hands');
+const sourceArms=data.parts.find(p=>p.textureName==='Arms');
+assert.equal(exposedHands?.roughness,.94,'the exposed hand sheet remains matte under viewmodel lighting');
+assert.equal(exposedHands?.envMapIntensity,.08,'the level IBL cannot bleach the exposed hand sheet');
+assert.equal(exposedHands?.color,'#dcecff','the warm fallback atlas receives a Kukri-only neutral balance');
+assert.equal(exposedHands?.emissiveMap,exposedHands?.map,'the hand receives a restrained texture-coloured fill');
+assert.equal(exposedHands?.emissiveIntensity,.16,'the fill light is visible without flattening the hand');
+assert.ok(sourceArms?.roughnessMap,'the Source Phong exponent mask is converted and wired');
+assert.deepEqual(sourceArms?.normalScale,[.55,-.55],'the Source normal is corrected and kept below the harsh full-strength Three response');
+assert.equal(sourceArms?.envMapIntensity,.3,'the authored low-energy arm highlight stays restrained');
+assert.ok(statSync(path.join(root,`assets/classic/kukri_dragon/${sourceArms.roughnessMap}`)).size>100,
+  'the converted roughness map is a real runtime asset');
 assert.ok(statSync(path.join(root,'assets/classic/kukri_dragon/view.bin')).size>1_000_000);
 const glb=read('assets/classic/kukri_dragon/world.glb');
 assert.equal(glb.subarray(0,4).toString(),'glTF');
@@ -63,7 +75,7 @@ assert.match(main,/KUKRI_ACTION_SOUND_AT\/kukriSpeedFor\(kind\)/,
   'the first sound node follows the selected attack speed');
 assert.match(main,/!a\.previewOnly&&!a\.damageResolved/,'preview attacks cannot damage enemies or props');
 assert.match(main,/activeSkinId\('knife'\)==='dragon'/);
-assert.match(main,/kukri: Object\.freeze\(\{ x: 0, y: 0, z: 0, pitch: 0, yaw: 0, roll: 0, scale: 1\.13 \}\)/);
+assert.match(main,/kukri: WEAPON_TUNING\.kukri\.pose/);
 assert.match(main,/KUKRI_ATTACK_SPEED_DEFAULTS = Object\.freeze\(\{ light: \.87, heavy: \.36 \}\)/,
   'the user-confirmed light and heavy speeds are the clean-game defaults');
 assert.match(main,/KUKRI_TIMING_FIELDS = Object\.freeze\(\[[\s\S]*?key: "heavyHitAt", label: "重击伤害判定", min: \.2, max: 1\.3, step: \.01/,
@@ -156,6 +168,12 @@ assert.match(text('scripts/classic_view.js'),/p\.linearAdditive\?THREE\.NoColorS
   'only opted-in Source additive cards bypass sRGB darkening');
 assert.match(text('scripts/classic_view.js'),/else if\(p\.unlit\)/,'source-colour viewmodel path exists');
 assert.match(text('scripts/classic_view.js'),/maps\.reflectionMap/,'Source $envmapmask gets an independent overlay');
+assert.match(text('scripts/classic_view.js'),/roughnessMap:maps\.roughnessMap\|\|null/,
+  'ClassicView consumes imported Source roughness maps');
+assert.match(text('scripts/classic_view.js'),/color:p\.color\?new THREE\.Color\(p\.color\):new THREE\.Color\(0xffffff\)/,
+  'ClassicView supports an asset-scoped albedo balance without recolouring other weapons');
+assert.match(text('scripts/classic_view.js'),/p\.normalScale\)material\.normalScale\.fromArray\(p\.normalScale\)/,
+  'ClassicView applies asset-authored tangent normal orientation');
 for(const id of ['kukri_dragon_deploy','kukri_dragon_slash1','kukri_dragon_slash2','kukri_dragon_stab','kukri_dragon_hit','kukri_dragon_hitwall'])assert.ok(audio.includes(id));
 assert.match(audio,/heavy && stage === "windup"[\s\S]*\? "kukri_dragon_slash2"/,
   'heavy windup uses the requested source knife_slash2 WAV');

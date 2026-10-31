@@ -47,6 +47,16 @@ export const STOCK = "stock";
 // （掉落的手枪再也刷不出来，而且没有任何报错）。原厂对应的是基础枪自己的 GLB，
 // 「有对应模型」这句话对它是成立的。
 export const SKINS = {
+  kn57: [{ id: STOCK, name: "KN-57 原色", slots: {}, accent: 0xa9986b }],
+  m200: [
+    { id: STOCK, name: "幻神原色", slots: {}, accent: 0xc8a66a },
+  ],
+  akgold: [
+    { id: STOCK, name: "炫金无影原色", slots: {}, accent: 0xd5a83c },
+  ],
+  scar: [
+    { id: STOCK, name: "白虎原色", slots: {}, accent: 0xd5bd80 },
+  ],
   ak: [
     { id: STOCK, name: "原厂", slots: {}, accent: 0x2b2b2e },
     {
@@ -91,7 +101,7 @@ export const SKINS = {
         Highlight: { color: 0xf2d47b, metalness: 0.74, roughness: 0.27 },
       },
       accent: 0xd5a83c, muzzle: 0xffd078,
-      model: { file: "./assets/classic/m4_ironbeast/ironbeast.glb", rotY: 0, targetLen: 0.82, anchorKey: "m4_ironbeast" },
+      model: { file: "./assets/classic/m4_ironbeast/world-baked.glb?v=3", rotY: 0, targetLen: 0.82, anchorKey: "m4_ironbeast" },
     },
     {
       id: "thor", name: "雷神", slots: {
@@ -266,7 +276,7 @@ export const SKINS = {
 // 表现为「默认皮肤莫名其妙没了」。
 export const DEFAULT_SKIN = {
   ak: "classic", m4: "classic", awm: "classic", barrett: STOCK,
-  pistol: STOCK, deagle: STOCK, knife: STOCK,
+  pistol: STOCK, deagle: STOCK, knife: STOCK, scar: STOCK, m200: STOCK, akgold: STOCK, kn57: STOCK,
 };
 
 // 枪口焰没上皮肤时的原色（与 muzzleShot / muzzleLight 的构造值一致）

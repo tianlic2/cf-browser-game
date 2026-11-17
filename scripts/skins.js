@@ -295,7 +295,7 @@ export function skinsFor(weaponId) {
     new URLSearchParams(globalThis.location?.search || '').has('publicDeploy');
   if (!publicDeploy)return list;
   const allowed={ak:['stock','classic'],m4:['stock','classic'],barrett:['stock'],
-    deagle:['stock'],knife:['stock']};
+    deagle:['stock'],knife:['stock'],cfv_m4a1:['stock'],cfv_deagle:['stock']};
   return list.filter(s=>allowed[weaponId]?.includes(s.id));
 }
 

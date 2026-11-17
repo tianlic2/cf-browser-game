@@ -1,15 +1,16 @@
+import { PUBLIC_CF_WEAPONS } from './public_weapons.js';
 import {updateHeading, updateMagazine, updateVitals, matchNotice} from './match_hud.js';
 // ===== CrossFire FPS - 主游戏（运输船 · 团队竞技 · CF 手感）=====
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
-import { SFX } from "./audio.js?v=hbr7-recordings-3";
+import { SFX } from "./audio.js?v=public-ordinary-1";
 let createHarborRifleModel, createHarborRifleView, HARBOR_ACTION_SECONDS;
 import { EnemyManager, ENEMY_TUNING } from "./enemies.js?v=visit-skeleton-1";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
 import { ClassicView } from "./classic_view.js?v=scar-scope-smooth-1";
 import { loadScarLightView, SCAR_LIGHT_SELECT_DURATION,
   SCAR_LIGHT_FIRE_CLIPS } from './scar_light.js?v=scar-scope-smooth-1';
-import { ADMITTED_GAMEBANANA, loadAdmittedGameBananaView } from './admitted_gamebanana.js?v=cf-vanilla-1';
+import { ADMITTED_GAMEBANANA, loadAdmittedGameBananaView } from './admitted_gamebanana.js?v=public-ordinary-1';
 import { CF_VANILLA } from './cf_vanilla_catalog.js?v=cfv-awp-name-2';
 import { CF_VANILLA_POSES } from './cf_vanilla_visuals.js?v=approved-m4-1';
 import { AWM_DRAW_TIME_SPLIT, awmDrawSourcePhase, awmDrawTimePhase } from './awm_nature_draw.js?v=draw-6';
@@ -41,8 +42,8 @@ import { RenderBudget } from './render_budget.js?v=1';
 import {
   SKINS, STOCK, DEFAULT_SKIN, DEFAULT_MUZZLE,
   skinsFor, findSkin, isSkinned, skinLabel, paintSkin, modelOf, allModelSkins,
-} from "./skins.js?v=hbr7-1";
-import { buildGunCatalog, worldModel, enemyModel, randomGunRoll } from "./guncatalog.js?v=hbr7-1";
+} from "./skins.js?v=public-ordinary-1";
+import { buildGunCatalog, worldModel, enemyModel, randomGunRoll } from "./guncatalog.js?v=public-ordinary-1";
 import { Chat } from "./chat.js";
 import { makeBlobShadow } from "./blobshadow.js";
 // IBL 去蓝的唯一实现（规则、推导与**实测的剂量–反应**都在 envtame.js 的文件头）
@@ -974,12 +975,12 @@ const WEAPON_DEFS = {
 };
 // The source models contain no game balance values. These local defaults use
 // the existing game's weapon classes, retaining each authored reload length.
-if (!PUBLIC_DEPLOY) for (const spec of CF_VANILLA) {
+for (const spec of CF_VANILLA.filter(spec=>!PUBLIC_DEPLOY || PUBLIC_CF_WEAPONS[spec.id])) {
   const pistol = spec.type === 'pistol', sniper = spec.type === 'sniper', shotgun = spec.type === 'shotgun';
   const bolt = ['awp', 'scout'].includes(spec.sourceId);
   WEAPON_DEFS[spec.id] = {
     id:spec.id, name:spec.name, type:spec.type, slot:pistol?'secondary':'primary',
-    model:`./assets/local/cf_vanilla/${spec.sourceId}/world.glb?v=upright-2`, keepMap:true,
+    model:PUBLIC_DEPLOY ? `./assets/classic/${PUBLIC_CF_WEAPONS[spec.id]}/world.glb?v=ordinary-1` : `./assets/local/cf_vanilla/${spec.sourceId}/world.glb?v=upright-2`, keepMap:true,
     rotY:0, targetLen:pistol?.30:sniper?1.14:.82, key:pistol?'2':'1',
     fullAuto:!pistol && !sniper && spec.sourceId !== 'm3', woodPenetration:.75,
     pellets:shotgun?8:1,
@@ -1023,7 +1024,7 @@ function activeWeaponDef(id = currentId) {
     ? IRONBEAST_RUNTIME_DEF : WEAPON_DEFS[id];
 }
 const PRIMARY_IDS = PUBLIC_DEPLOY
-  ? ["ak", "m4", "barrett"]
+  ? ["ak", "cfv_m4a1", "barrett"]
   : ["ak", "m4", "barrett", "scar", "m200", "akgold", "kn57", "awm_nature", "hbr7", ...CF_VANILLA.filter(s=>s.type!=='pistol').map(s=>s.id)];
 const NADE_IDS = ["frag", "flash", "smoke"];
 const CF_VANILLA_SECONDARY = CF_VANILLA.filter(s=>s.type==='pistol');
@@ -1627,7 +1628,7 @@ let knifeHeavyHeld = false, knifeChain = 0, knifeLastSwingAt = -Infinity, meleeS
 let classicView = null, classicFireT = Infinity;
 let m4cView = null, m4cFireT = Infinity, m4cShotN = -1;
 let scarLightView = null, scarLightFireT = Infinity, scarLightShotN = -1;
-const admittedViews = PUBLIC_DEPLOY ? {} : { m200: null, akgold: null, kn57: null, awm_nature:null, ...Object.fromEntries(CF_VANILLA.map(s=>[s.id,null])) };
+const admittedViews = PUBLIC_DEPLOY ? Object.fromEntries(Object.keys(PUBLIC_CF_WEAPONS).map(id=>[id,null])) : { m200: null, akgold: null, kn57: null, awm_nature:null, ...Object.fromEntries(CF_VANILLA.map(s=>[s.id,null])) };
 const admittedFireT = { m200: Infinity, akgold: Infinity, kn57: Infinity, awm_nature:Infinity, ...Object.fromEntries(CF_VANILLA.map(s=>[s.id,Infinity])) };
 let kn57InspectT = null;
 const admittedShotN = { m200: -1, akgold: -1, kn57: -1, awm_nature:-1, ...Object.fromEntries(CF_VANILLA.map(s=>[s.id,-1])) };
@@ -2659,17 +2660,17 @@ function updateDeathKillerMarker() {
 // 与 CF 一致（CF 里这也是两件不同的事）。
 // Classic loadout; modern model skins remain available to the existing skin API.
 const BACKPACKS = [
-  { primary: "ak", skin: DEFAULT_SKIN.ak, secondary: "deagle", meleeSkin: STOCK },
-  { primary: "m4", skin: DEFAULT_SKIN.m4, secondary: "deagle", meleeSkin: STOCK },
-  { primary: "barrett", skin: DEFAULT_SKIN.barrett, secondary: "deagle", meleeSkin: PUBLIC_DEPLOY ? STOCK : "dragon" },
+  { primary: "ak", skin: DEFAULT_SKIN.ak, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: STOCK },
+  { primary: PUBLIC_DEPLOY ? "cfv_m4a1" : "m4", skin: PUBLIC_DEPLOY ? STOCK : DEFAULT_SKIN.m4, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: STOCK },
+  { primary: "barrett", skin: DEFAULT_SKIN.barrett, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: PUBLIC_DEPLOY ? STOCK : "dragon" },
   ...(!PUBLIC_DEPLOY ? [
-    { primary: "m4", skin: "ironbeastgold", secondary: "deagle", meleeSkin: "dragon" },
-    { primary: "scar", skin: DEFAULT_SKIN.scar, secondary: "deagle", meleeSkin: "dragon" },
-    { primary: "m200", skin: DEFAULT_SKIN.m200, secondary: "deagle", meleeSkin: "dragon" },
-    { primary: "akgold", skin: DEFAULT_SKIN.akgold, secondary: "deagle", meleeSkin: "dragon" },
-    { primary: "kn57", skin: DEFAULT_SKIN.kn57, secondary: "deagle", meleeSkin: "dragon" },
-    { primary: "awm_nature", skin: DEFAULT_SKIN.awm_nature, secondary: "deagle", meleeSkin: "dragon" },
-    { primary: "hbr7", skin: DEFAULT_SKIN.hbr7, secondary: "deagle", meleeSkin: STOCK },
+    { primary: "m4", skin: "ironbeastgold", secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: "dragon" },
+    { primary: "scar", skin: DEFAULT_SKIN.scar, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: "dragon" },
+    { primary: "m200", skin: DEFAULT_SKIN.m200, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: "dragon" },
+    { primary: "akgold", skin: DEFAULT_SKIN.akgold, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: "dragon" },
+    { primary: "kn57", skin: DEFAULT_SKIN.kn57, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: "dragon" },
+    { primary: "awm_nature", skin: DEFAULT_SKIN.awm_nature, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: "dragon" },
+    { primary: "hbr7", skin: DEFAULT_SKIN.hbr7, secondary: PUBLIC_DEPLOY ? "cfv_deagle" : "deagle", meleeSkin: STOCK },
   ] : []),
 ];
 let curBp = 0;
@@ -2689,7 +2690,7 @@ const LOADOUT_DEFAULT = {
 const LOADOUT_STORAGE_KEY = 'cf.backpackLoadouts.v1';
 const loadoutChoices = {
   primary: LOADOUT_DEFAULT.packs.map(({primary,skin})=>({id:primary,skin})),
-  secondary: Object.values(WEAPON_DEFS).filter(d=>d.slot==='secondary')
+  secondary: Object.values(WEAPON_DEFS).filter(d=>d.slot==='secondary' && (!PUBLIC_DEPLOY || d.id==='cfv_deagle'))
     .map(d=>({id:d.id,skin:DEFAULT_SKIN[d.id] || STOCK})),
   melee: [{id:'knife',skin:STOCK},...(!PUBLIC_DEPLOY ? [{id:'knife',skin:'dragon'}] : [])],
 };
@@ -9093,10 +9094,10 @@ async function init() {
       if(v){vmScene.add(v.root);v.root.visible=false;handsOk=viewArms.loadClassic(v);}
       else await loadHands();
     })),
-    trackAsset(ClassicView.load('m4c_view').then(v=>{
+    ...(!PUBLIC_DEPLOY ? [trackAsset(ClassicView.load('m4c_view').then(v=>{
       m4cView=v;
       if(v){v.root.scale.setScalar(viewmodelPoseLive.m4.scale);vmScene.add(v.root);v.root.visible=false;}
-    })),
+    }))] : []),
     ...(!PUBLIC_DEPLOY ? [trackAsset(loadScarLightView().then(v=>{
       scarLightView=v;vmScene.add(v.root);v.root.visible=false;
     }))] : []),
@@ -9120,10 +9121,10 @@ async function init() {
       kukriView=v;
       if(v){v.root.scale.setScalar(viewmodelPoseLive.kukri.scale);vmScene.add(v.root);v.root.visible=false;}
     }))] : []),
-    trackAsset(ClassicView.load('deagle_festa').then(v=>{
+    ...(!PUBLIC_DEPLOY ? [trackAsset(ClassicView.load('deagle_festa').then(v=>{
       deagleFestaView=v;
       if(v){v.root.scale.setScalar(viewmodelPoseLive.deagle.scale);vmScene.add(v.root);v.root.visible=false;}
-    })),
+    }))] : []),
     ...['frag','flash','smoke'].map(id=>trackAsset((async()=>{
       const v=await ClassicView.load('grenades/'+id);
       if(v){classicNades[id]=v;v.root.name='cf-grenade-'+id;v.root.visible=false;v.projectile();vmScene.add(v.root);}
@@ -9138,7 +9139,7 @@ async function init() {
     trackAsset(loadFoxSoldier()),
     ...PRIMARY_IDS.map(id=>trackAsset(requiredWeapon(id))),
     ...(!PUBLIC_DEPLOY ? CF_VANILLA_SECONDARY.map(s=>trackAsset(requiredWeapon(s.id))) : []),
-    ...['deagle','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
+    ...[PUBLIC_DEPLOY ? 'cfv_deagle' : 'deagle','knife','frag','flash','smoke'].map(id=>trackAsset(requiredWeapon(id))),
   ]);
   prepareAkgoldLookReference();
   // 手臂加载失败是**明确降级**（枪照常、只是没有手），所以必须让玩家看见，
@@ -9147,8 +9148,8 @@ async function init() {
   // Load equipped skin models before making the shared world catalog, so
   // picking up a dropped gun preserves its actual appearance.
   bootPhase("actors", "正在整理武器库", "加载经典皮肤与世界模型");
-  const catalogSkins = [["ak", DEFAULT_SKIN.ak], ["m4", DEFAULT_SKIN.m4],
-    ...(!PUBLIC_DEPLOY ? [["m4", "ironbeastgold"], ["knife", "dragon"]] : [])];
+  const catalogSkins = [["ak", DEFAULT_SKIN.ak],
+    ...(!PUBLIC_DEPLOY ? [["m4", DEFAULT_SKIN.m4], ["m4", "ironbeastgold"], ["knife", "dragon"]] : [])];
   for (const [id, skin] of catalogSkins) mountGunModel(id, skin);
   let skinsDone = 0;
   await Promise.all(catalogSkins.map(async ([id, skin])=>{

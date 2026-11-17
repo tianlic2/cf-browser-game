@@ -1,10 +1,11 @@
+import { PUBLIC_CF_WEAPONS, publicDeployment } from './public_weapons.js';
 import { AWM_DRAW_DURATION } from './awm_nature_draw.js?v=draw-6';
 import { CF_VANILLA } from './cf_vanilla_catalog.js';
 // User-approved local gameplay imports. Assets remain gitignored because their
 // CC BY-NC-ND / original-game rights do not permit public redistribution here.
 export const ADMITTED_GAMEBANANA = Object.freeze({
   ...Object.fromEntries(CF_VANILLA.map(spec => [spec.id, {
-    ...spec, base: `./assets/local/cf_vanilla/${spec.sourceId}/`,
+    ...spec, base: publicDeployment() && PUBLIC_CF_WEAPONS[spec.id] ? `./assets/classic/${PUBLIC_CF_WEAPONS[spec.id]}/` : `./assets/local/cf_vanilla/${spec.sourceId}/`,
     fireClips: spec.sourceId === 'elite' ? ['prefire', 'prefire_L'] : spec.fireClips,
   }])),
   awm_nature: Object.freeze({

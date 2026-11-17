@@ -1,6 +1,6 @@
 # CrossFire
 
-2026-11-17 GitHub Pages 精简版：三个主武器背包保留 AK-47、M4A1、巴雷特，配沙漠之鹰、近战与三种投掷物。复杂枪械、炫金雷神、屠龙及额外模型皮肤保留本地，不打包、不预载；运输船、黑色城镇和灵隐寺仍在进入地图时按需加载。公开版不包含 Zone 13。
+2026-11-17 GitHub Pages 精简版：三个主武器背包保留 AK-47、M4A1（普通）、巴雷特，配沙漠之鹰（普通）、近战与三种投掷物。复杂枪械、炫金雷神、屠龙及额外模型皮肤保留本地，不打包、不预载；运输船、黑色城镇和灵隐寺仍在进入地图时按需加载。公开版不包含 Zone 13。
 
 运行 `python3 tools/prepare_public_release.py /private/tmp/cf-public-release` 生成独立公开目录，再运行 `node tools/test_public_release_browser.mjs` 验证。该目录不改变本地完整版；`public-release.json` 列出包体统计与排除项。
 

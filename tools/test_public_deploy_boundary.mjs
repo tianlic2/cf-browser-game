@@ -6,7 +6,7 @@ const ignore = readFileSync(new URL('../.gitignore', import.meta.url), 'utf8');
 
 assert.match(main, /const PUBLIC_DEPLOY = \/\\\.github\\\.io\$\/i/,
   'GitHub Pages is detected as a public redistribution target');
-assert.match(main, /const PRIMARY_IDS = PUBLIC_DEPLOY[\s\S]*?\["ak", "m4", "barrett"\]/,
+assert.match(main, /const PRIMARY_IDS = PUBLIC_DEPLOY[\s\S]*?\["ak", "cfv_m4a1", "barrett"\]/,
   'public weapon preload contains only publishable primary weapons');
 assert.match(main, /\.\.\.\(!PUBLIC_DEPLOY \? \{[\s\S]*?bio:/,
   'local-only Zone 13 map is omitted from public metadata');

@@ -15,3 +15,9 @@ GitHub Pages 公开版保留 AK、M4、巴雷特三个主武器背包、沙鹰�
 复杂枪械资源与 HBR-7 几何代码请求为零；公开资源实际 Git 树检查、武器预载边界、Fox 发布资源检查及 JS 语法检查通过。地图进入时才加载，未加入全地图启动预载。
 
 复现：`python3 tools/prepare_public_release.py /private/tmp/cf-public-release`，随后 `node tools/test_public_release_browser.mjs`。截图及机器报告输出到 `/private/tmp/cf-public-evidence/`。
+
+## 普通武器替换
+
+公开版第二背包现使用 M4A1（普通，30 发），三个背包均配沙漠之鹰（普通，7 发）。两把使用各自原生手部骨骼、出枪/开火/换弹片段、世界模型与原事件录音；旧 M4A1-C/赛事沙鹰不再预载和打包。本地完整武器库保留。
+
+`node tools/test_public_ordinary_browser.mjs` 已验证按键换背包/切枪、两枪各射一发、完整换弹恢复、手部骨骼变化，以及各条出枪/换弹/开火声音均已解码和实际触发。无页面/资源错误，无其他本地枪械请求。

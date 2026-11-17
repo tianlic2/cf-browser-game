@@ -1,0 +1,19 @@
+{
+  "source": "https://gamebanana.com/mods/459371",
+  "archiveMD5": "74e7bfc9babb7fc963813e35a768e849",
+  "id": "m4a1",
+  "publicRedistributionApproved": false,
+  "files": {
+    "audio/g_mzc_m4a1_clipin.wav": "6202e4d3d750951d841851397e1522a5a9c63d684d76697cd0591372ef490d7a",
+    "audio/g_mzc_m4a1_clipout.wav": "4dc885fad25bf5b9500416b8d62f87f4f67042056fe7c7186b70681783fba9e6",
+    "audio/g_reload_m4a1.wav": "b8928a522b82011af377f01d7186b808c0036ddbd827a3b8d6819ac0567e59e5",
+    "audio/m4a1_unsil-1.wav": "9491a0142d86078a70cef388db3f847c90509033a6da8e641e660525af9d54b7",
+    "tex0.png": "bbd4570be19b66dc9c82d4c987127342622fff95b749030260f0f858337a790b",
+    "tex1.png": "93629d1d1758b9e1622dd8cbc749614dee63d795f6598b6bd47325669e1e0e15",
+    "tex2.png": "f77f6e5a477ddab06656fe5e321aa49544baac45c09b079e83069b2d82973f44",
+    "tex3.png": "7b34cd9dfe29c4375ab3bae3b4a67a071de24f9f410b4ef2a01bb1df7f54feaa",
+    "view.bin": "6daf41f35129e12acffb3cfd59b979397a7c02c764a593c37a137c6d10ac3c55",
+    "view.json": "78464e8e79d5df35049b91c3d007af8434c40489e4e86c440236ecce98cde3af",
+    "world.glb": "5b4928879073b4ce81c0085c59307c16204fa28e321623322f5b53171253e2bd"
+  }
+}

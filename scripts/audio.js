@@ -1,3 +1,4 @@
+import { PUBLIC_CF_WEAPONS, publicDeployment } from './public_weapons.js';
 import { CF_VANILLA } from './cf_vanilla_catalog.js';
 // ===== 音效系统：采样 + 合成混合（Web Audio API）=====
 //
@@ -270,7 +271,7 @@ const cfSample = (spec, path) => `${spec.id}:${path}`;
 const cfSpec = id => CF_VANILLA.find(s => s.id === id);
 for (const spec of CF_VANILLA) {
   const files = new Set([spec.fireSound,...[...spec.selectEvents,...spec.reloadEvents,...spec.fireEvents].map(e=>e.audio)].filter(Boolean));
-  for (const file of files) SAMPLES[cfSample(spec,file)] = [`./assets/local/cf_vanilla/${spec.sourceId}/${file}`];
+  for (const file of files) SAMPLES[cfSample(spec,file)] = [publicDeployment() && PUBLIC_CF_WEAPONS[spec.id] ? `./assets/classic/${PUBLIC_CF_WEAPONS[spec.id]}/${file}` : `./assets/local/cf_vanilla/${spec.sourceId}/${file}`];
   GUN[spec.id] = {sample:cfSample(spec,spec.fireSound),rate:1,window:0,vol:1,crack:0};
   DEDICATED_GUN_SAMPLES.add(spec.id);
 }
@@ -449,7 +450,8 @@ export class SFX {
     const publicDeploy = /\.github\.io$/i.test(globalThis.location?.hostname || '') ||
       new URLSearchParams(globalThis.location?.search || '').has('publicDeploy');
     for (const [id, stems] of Object.entries(SAMPLES)) {
-      if (publicDeploy && (/^(cfv_|awm_nature_|hbr7_|ironbeast_|kukri_dragon_|bio_)/.test(id) ||
+      const publicOrdinary = Object.keys(PUBLIC_CF_WEAPONS).some(key=>id.startsWith(key+':'));
+      if (publicDeploy && !publicOrdinary && (/^(cfv_|awm_nature_|hbr7_|ironbeast_|kukri_dragon_|bio_|cf_m4c_|deagle_festa_)/.test(id) ||
         stems.some(stem=>stem.includes('/assets/local/')))) continue;
       for (const stem of stems) { this._total++; jobs.push(this._loadOne(dec, id, stem)); }
     }

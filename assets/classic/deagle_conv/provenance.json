@@ -1,0 +1,20 @@
+{
+  "source": "https://gamebanana.com/mods/459371",
+  "archiveMD5": "74e7bfc9babb7fc963813e35a768e849",
+  "id": "deagle",
+  "publicRedistributionApproved": false,
+  "files": {
+    "audio/deagle-1.wav": "fe451012cbc9f324f27071bdd7a9bf4c3e22d4b199912736b046f333622bc913",
+    "audio/g_mzc_deagle_bback.wav": "4bd10d3800311913f1ea3d89bf8b62644cf7b2049ac3f2f783aafe178570814c",
+    "audio/g_mzc_deagle_bcback.wav": "950a01d4db7d551b2b17d981524305980da199315f9c99fb5e6956e6d18545bf",
+    "audio/g_mzc_deagle_clipin.wav": "c15b84b68154a7f1e9c186e8cae35121511f6c484c1f0764b7d243df2d2e4333",
+    "audio/g_mzc_deagle_clipout.wav": "786908b1193e56761f487439187f2159300654efbde56844d69cebc6d908ed38",
+    "audio/g_reload_deagle.wav": "fa6d6b06f1795a37fe776c689915d5712d15b0315694b87f55d07c1e0c2add3b",
+    "tex0.png": "18d83f3abe84ffcbec0765dee637eebc765acaab0b70ec8b29b9181aa86e09d2",
+    "tex1.png": "f77f6e5a477ddab06656fe5e321aa49544baac45c09b079e83069b2d82973f44",
+    "tex2.png": "7b34cd9dfe29c4375ab3bae3b4a67a071de24f9f410b4ef2a01bb1df7f54feaa",
+    "view.bin": "f2626934980d722824d705ff9f91c314bc5ecb6e2559e6994f4a735a71781ac6",
+    "view.json": "02a2f577844987e820daf535e75384a7d18f71803cc90210ca8c3de0932bd114",
+    "world.glb": "ea1029e76738f0e1aba2b78194b07efa59c0c687f8ce36583a7736e941e8bc31"
+  }
+}

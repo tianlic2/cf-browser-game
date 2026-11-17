@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { CF_VANILLA } from './cf_vanilla_catalog.js';
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
-import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=hbr7-1";
+import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=public-ordinary-1";
 
 // 会出现在世界里的枪。团队竞技按玩家八个背包的主武器配置抽取；
 // M4A1 与炫金雷神共用 gunId，但 skin 不同，所以抽取单位必须是 id+skin。

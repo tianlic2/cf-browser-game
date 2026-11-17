@@ -3,7 +3,7 @@
 from pathlib import Path
 import json, shutil, subprocess
 ROOT=Path(__file__).resolve().parents[1]
-OMIT=('assets/local/', 'assets/preview/', 'assets/classic/m4_ironbeast/',
+OMIT=('audio/classic/m4c_', 'assets/classic/m4c/', 'assets/classic/m4c_view/', 'assets/classic/deagle/', 'assets/classic/deagle_festa/', 'audio/classic/deagle_festa/', 'assets/local/', 'assets/preview/', 'assets/classic/m4_ironbeast/',
       'assets/classic/kukri_dragon/', 'models/skins/', 'assets/classic/motions/', 'audio/classic/ironbeast/',
       'audio/classic/kukri_dragon/', 'audio/weapons/hbr7/', 'scripts/harbor_', 'scripts/pyramid_map.js')
 # Fox is the already admitted shared character, not a local-only weapon.
@@ -15,12 +15,12 @@ def files():
     tracked=subprocess.check_output(['git','ls-files','-z'],cwd=ROOT).decode().split('\0')
     result={p for p in tracked if p and publish(p) and (ROOT/p).is_file()}
     for folder,glob in [('scripts','*.js'),('styles','*.css'),('lingyin-map/src','**/*'),
-        ('assets/transport-materials','**/*'),('assets/lingyin','**/*'),
+        ('assets/classic/m4a1_conv','**/*'),('assets/classic/deagle_conv','**/*'),('assets/transport-materials','**/*'),('assets/lingyin','**/*'),
         ('assets/hud','**/*'),('assets/ui','**/*'),('audio/footsteps/transport','**/*'),
         ('audio/weather','**/*')]:
         for p in (ROOT/folder).glob(glob):
             if p.is_file() and publish(p.relative_to(ROOT).as_posix()):result.add(p.relative_to(ROOT).as_posix())
-    for p in ['PUBLIC_RELEASE.md','assets/local/fox_npc/visit-surface.png','assets/map-posters/blacktown.png','.gitattributes','assets/classic/deagle_festa/ui.glb','tools/prepare_public_release.py','tools/test_public_release_browser.mjs']:
+    for p in ['PUBLIC_RELEASE.md','assets/local/fox_npc/visit-surface.png','assets/map-posters/blacktown.png','.gitattributes','tools/prepare_public_release.py','tools/test_public_release_browser.mjs','tools/test_public_ordinary_browser.mjs']:
         if (ROOT/p).is_file():result.add(p)
     return sorted(result)
 if __name__=='__main__':

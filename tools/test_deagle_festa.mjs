@@ -9,6 +9,7 @@ const view = JSON.parse(await text('assets/classic/deagle_festa/view.json'));
 const binary = await bytes('assets/classic/deagle_festa/view.bin');
 const main = await text('scripts/main.js');
 const audio = await text('scripts/audio.js');
+const tuning = await text('scripts/weapon_tuning.js');
 const importer = await text('tools/import_ironbeast_view.py');
 
 assert.equal(view.bones.length, 49, 'the supplied Desert Eagle keeps its complete 49-bone rig');
@@ -45,6 +46,10 @@ for (const part of view.parts) {
   assert.ok((await stat(new URL(`assets/classic/deagle_festa/${part.map}`, root))).size > 100,
     `${part.map} exists`);
 }
+const ui = await bytes('assets/classic/deagle_festa/ui.glb');
+assert.equal(ui.toString('ascii', 0, 4), 'glTF');
+assert.ok(ui.includes(Buffer.from('deagle-festa-ui-original')),
+  'backpack/HUD model is baked from the admitted Festa weapon mesh');
 for (const [name, clip] of Object.entries(view.clips))
   assert.ok(clip.offset >= 0 && clip.offset + clip.count * view.bones.length * 28 <= binary.length,
     `${name} animation payload stays inside view.bin`);
@@ -65,7 +70,7 @@ assert.match(main, /ClassicView\.load\('deagle_festa'\)/);
 assert.match(main, /const DEAGLE_FIRE_CLIPS = Object\.freeze\(\['prefire','fire','postfire'\]\)/);
 assert.match(main, /if\(deagleFestaView&&vid==='deagle'\)[\s\S]*?viewArms\.root\.visible=false;[\s\S]*?deagleFestaView\.sample\(clip,t\)/,
   'the full supplied hands, weapon and animation rig replace the old first-person view');
-assert.match(main, /deagle: Object\.freeze\(\{ x: \.23, y: -\.19, z: -\.55, pitch: 0, yaw: -\.04, roll: 0, scale: 1\.368 \}\)/,
+assert.match(tuning, /pose: Object\.freeze\(\{ x: \.23, y: -\.19, z: -\.55, pitch: 0, yaw: -\.04, roll: 0, scale: 1\.368 \}\)/,
   'the imported rig uses the user-approved live-tuned pose');
 assert.match(main, /\{ id: "deagle", label: "沙漠之鹰", weapon: "deagle", backpack: 0 \}/,
   'the existing real-time tuner still selects the replaced Desert Eagle');

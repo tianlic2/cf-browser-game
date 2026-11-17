@@ -1,4 +1,5 @@
 // ============ CF 风格武器皮肤表 ============
+import { CF_VANILLA } from './cf_vanilla_catalog.js';
 //
 // 一款皮肤 = 三件事：
 //   1. `slots` —— 按 GLB 里的**原始材质名**分部位上漆（AK 的 Wood/Metal/Dark_metal、
@@ -47,6 +48,8 @@ export const STOCK = "stock";
 // （掉落的手枪再也刷不出来，而且没有任何报错）。原厂对应的是基础枪自己的 GLB，
 // 「有对应模型」这句话对它是成立的。
 export const SKINS = {
+  hbr7: [{ id: STOCK, name: "HBR-7 原厂", slots: {}, accent: 0x939078 }],
+  awm_nature: [{ id: STOCK, name: "AWM 雷神", slots: {}, accent: 0x559dce }],
   kn57: [{ id: STOCK, name: "KN-57 原色", slots: {}, accent: 0xa9986b }],
   m200: [
     { id: STOCK, name: "幻神原色", slots: {}, accent: 0xc8a66a },
@@ -276,14 +279,24 @@ export const SKINS = {
 // 表现为「默认皮肤莫名其妙没了」。
 export const DEFAULT_SKIN = {
   ak: "classic", m4: "classic", awm: "classic", barrett: STOCK,
-  pistol: STOCK, deagle: STOCK, knife: STOCK, scar: STOCK, m200: STOCK, akgold: STOCK, kn57: STOCK,
+  pistol: STOCK, deagle: STOCK, knife: STOCK, scar: STOCK, m200: STOCK, akgold: STOCK, kn57: STOCK, awm_nature: STOCK, hbr7: STOCK,
 };
+for (const spec of CF_VANILLA) {
+  SKINS[spec.id] = [{ id: STOCK, name: '原厂', slots: {}, accent: 0x51565a }];
+  DEFAULT_SKIN[spec.id] = STOCK;
+}
 
 // 枪口焰没上皮肤时的原色（与 muzzleShot / muzzleLight 的构造值一致）
 export const DEFAULT_MUZZLE = { sprite: 0xffcf70, light: 0xffa040 };
 
 export function skinsFor(weaponId) {
-  return SKINS[weaponId] || [];
+  const list=SKINS[weaponId] || [];
+  const publicDeploy=/\.github\.io$/i.test(globalThis.location?.hostname || '') ||
+    new URLSearchParams(globalThis.location?.search || '').has('publicDeploy');
+  if (!publicDeploy)return list;
+  const allowed={ak:['stock','classic'],m4:['stock','classic'],barrett:['stock'],
+    deagle:['stock'],knife:['stock']};
+  return list.filter(s=>allowed[weaponId]?.includes(s.id));
 }
 
 // 这款皮肤是不是**模型皮肤**（自带一棵 GLB）。取不到皮肤返回 null，
@@ -297,7 +310,7 @@ export function modelOf(weaponId, skinId) {
 export function allModelSkins() {
   const out = [];
   for (const id of Object.keys(SKINS)) {
-    for (const s of SKINS[id]) if (s.model) out.push({ weaponId: id, skinId: s.id, model: s.model });
+    for (const s of skinsFor(id)) if (s.model) out.push({ weaponId: id, skinId: s.id, model: s.model });
   }
   return out;
 }

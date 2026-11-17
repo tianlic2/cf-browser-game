@@ -1,3 +1,13 @@
 export const MAIN_HALL:Readonly<{name:'main';x:number;z:number;w:number;d:number;eave:number;plinth:number;rot:number}>;
+export const MAIN_HALL_RAISE:number;
+export const MAIN_HALL_FLOOR_Y:number;
+export const MAIN_HALL_STAIRS:Readonly<{count:number;width:number;treadDepth:number;treadHeight:number;frontGap:number;railWidth:number;railHeight:number}>;
+export function mainHallStair(index:number):{z:number;top:number};
 export const MAIN_HALL_SCALE:Readonly<{x:number;z:number}>;
 export function mainHallPoint(x:number,z:number):{x:number;z:number};
+export const MAIN_HALL_RAIL:Readonly<{halfPost:number;postTop:number;postShoulder:number;capWidth:number;capTop:number;postSteps:readonly number[];landingBays:number;landingZ:number;endX:number}>;
+export const hallRailX:number;
+export function hallRailGrade(z:number):number;
+export const MAIN_PORTAL:Readonly<{halfClear:number;jambWidth:number;leafThickness:number;leafDepth:number;clearHeight:number;flankX:number;wallZ:number}>;
+export const mainPortalWallHalf:number;
+export function mainPortalTimbers():{name:string;role:'lacquer'|'darkWood';w:number;h:number;d:number;x:number;y:number;z:number}[];

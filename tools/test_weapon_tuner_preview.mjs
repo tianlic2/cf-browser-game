@@ -11,7 +11,7 @@ assert.match(html,/全枪矩阵/);
 assert.match(html,/gamePreview/);
 assert.match(html,/location\.protocol === 'file:'/);
 assert.match(html,/127\.0\.0\.1:8123\/preview\/weapon-tuner\.html/);
-assert.match(html,/weapon-tuner\.js\?v=approved-20261029/);
+assert.match(html,/weapon-tuner\.js\?v=[^"']+/);
 for(const id of ['ak','m4','barrett','ironbeast','scar','m200','akgold','kn57','deagle','knife','kukri'])
   assert.match(js,new RegExp(`${id}:gun\\('|id:'${id}'`),`missing ${id}`);
 for(const key of ['magSize','reserve','dmg','head','interval','reload','rangeMod','wood'])
@@ -22,11 +22,11 @@ for(const key of ['vertical','horizontal','reset','hold','viewTrack'])
   assert.match(js,new RegExp(`key:'${key}'`),`missing recoil field ${key}`);
 assert.match(js,/localStorage\.setItem\(STORAGE_KEY/,'draft must persist locally');
 assert.match(js,/WEAPON_TUNING\[id\]/,'formal tuning is the default baseline');
-assert.match(js,/effects=\{tracer:WEAPON_TUNING\[id\]\.effects\?\.tracer \?\? true\}/,'each firearm has its own tracer setting');
+assert.match(js,/effects=\{tracer:WEAPON_TUNING\[id\]\.effects\?\.tracer \?\? false\}/,'each firearm defaults to disabled tracer');
 assert.match(js,/typeof value==='boolean'/,'saved and imported tracer settings survive reload');
 assert.match(js,/syncEffectsToGame/,'tracer changes reach the embedded game');
-assert.match(main,/if \(playerTracerEnabled\(currentId,activeSkinId\(currentId\)\)\)\s*impactVfx\.tracer\(_playerTraceStart/,'only player tracers are gated');
-assert.match(main,/impactVfx\.tracer\(mz, eye, "enemy"\)/,'enemy hit tracers remain enabled');
+assert.match(main,/if \(pellet === 0 && playerTracerEnabled\(currentId,activeSkinId\(currentId\)\)\)\s*impactVfx\.tracer\(_playerTraceStart/,'only player tracers are gated');
+assert.match(main,/impactVfx\.tracer\(coverHit && !hitAheadOfMuzzle \? from : mz, coverHit \|\| eye, "enemy"\)/,'enemy hit tracers remain enabled');
 assert.match(main,/impactVfx\.tracer\(mz, _enemyTraceEnd, "enemy"\)/,'enemy miss tracers remain enabled');
 assert.match(js,/undoStack/,'tuner must support undo');
 assert.match(js,/schema:'cf-weapon-tuner-v1'/,'export must be versioned');

@@ -9,17 +9,22 @@ class Element {
  set className(v){this.classes=new Set(v.split(' '))}get className(){return [...this.classes].join(' ')}
  append(...v){this.children.push(...v)}appendChild(v){this.append(v)}replaceChildren(){this.children=[]}setAttribute(k,v){this.attrs[k]=v}addEventListener(){}blur(){}focus(){document.activeElement=this}getClientRects(){return [this]}
 }
-const nodes=Object.fromEntries(['backpack','bpList','bpLoadout','bpHint','bpCurrent','startBtn','restartBtn','goLobbyBtn','gameMenu','gameMenuHome','gameMenuSettings','gameMenuSettingsOpen','gameMenuSettingsBack','gameMenuResume','gameMenuPause','gameMenuReset','gameMenuEnd','gameMenuStatus','hudPauseBtn','hudUtility'].map(id=>[id,new Element()]));nodes.backpack.classList.add('hidden');nodes.gameMenu.classList.add('hidden');
+const nodes=Object.fromEntries(['backpack','bpList','bpLoadout','bpHint','bpCurrent','startBtn','restartBtn','goLobbyBtn','mapLoadEnter','gameMenu','gameMenuHome','gameMenuSettings','gameMenuSettingsOpen','gameMenuSettingsBack','gameMenuResume','gameMenuPause','gameMenuReset','gameMenuEnd','gameMenuStatus','hudPauseBtn','hudUtility'].map(id=>[id,new Element()]));nodes.backpack.classList.add('hidden');nodes.gameMenu.classList.add('hidden');
 const listeners={},pending=[];let lockRequests=0,shots=0,switched=[],denyLock=false,allowed=true;
-const document={getElementById:id=>nodes[id],createElement:()=>new Element(),createTextNode:s=>s,querySelectorAll:()=>[nodes.gameMenuResume,nodes.gameMenuPause,nodes.gameMenuReset,nodes.gameMenuEnd],activeElement:null,addEventListener:(name,cb)=>(listeners[name]??=[]).push(cb),exitPointerLock:()=>{document.pointerLockElement=null;pending.push(()=>emit('pointerlockchange',{}));}};
+const document={getElementById:id=>nodes[id],createElement:()=>new Element(),createTextNode:s=>s,querySelectorAll:()=>[nodes.gameMenuResume,nodes.gameMenuPause,nodes.gameMenuReset,nodes.gameMenuEnd],activeElement:null,visibilityState:'visible',hasFocus:()=>true,addEventListener:(name,cb)=>(listeners[name]??=[]).push(cb),exitPointerLock:()=>{document.pointerLockElement=null;pending.push(()=>emit('pointerlockchange',{}));}};
 const viewport=new Element();viewport.requestPointerLock=()=>{lockRequests++;if(denyLock)throw Error('denied');document.pointerLockElement=viewport;pending.push(()=>emit('pointerlockchange',{}));};document.pointerLockElement=viewport;
 const emit=(type,e)=>{for(const f of listeners[type]||[])f(e)};
 const flush=()=>{while(pending.length)pending.shift()()};
 const key=(code,repeat=false)=>emit('keydown',{code,repeat,preventDefault(){}});
 const noop=()=>{};
-const ctx={console,document,viewport,window:{addEventListener:noop},setTimeout:(fn)=>{pending.push(fn);return fn},clearTimeout:(fn)=>{const i=pending.indexOf(fn);if(i>=0)pending.splice(i,1)},state:'playing',locked:true,matchPaused:false,lockRequestCancelled:false,dead:false,curBp:0,selectedMapId:'transport',keys:{},fireEnabled:false,BACKPACKS:[['ak','classic','stock'],['m4','classic','stock'],['barrett','classic','dragon'],['m4','ironbeastgold','dragon']].map(([primary,skin,meleeSkin])=>({primary,skin,secondary:'deagle',meleeSkin})),GEAR_SKIN:{deagle:'classic',knife:'classic'},owned:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{state:{mag:30,reserve:90,count:1}}])),WEAPON_DEFS:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{type:id==='barrett'?'sniper':id==='knife'?'melee':['frag','flash','smoke'].includes(id)?'grenade':id==='deagle'?'pistol':'rifle',stats:{magSize:30,reserve:90}}])),emptySlot:{},lifePickup:{primary:null,secondary:null},gunDisplayName:id=>id,activeSkinId:id=>id==='knife'?ctx.BACKPACKS[ctx.curBp].meleeSkin:ctx.BACKPACKS[ctx.curBp].skin,syncMagazineCapacity:noop,magazineSizeFor:(id,skin)=>id==='m4'&&skin==='ironbeastgold'?35:ctx.WEAPON_DEFS[id].stats.magSize,startingReserve:(id,stats,skin)=>{const reserve=id==='m4'&&skin==='ironbeastgold'?105:stats.reserve;return ctx.bioMatch()?reserve*2:reserve},worldModel:()=>({}),classicNades:{},weaponPreview:()=>null,renderer:{},scene:{},knifeBind:null,weaponIconSvg:()=>'<svg/>',sfx:{ui:noop,empty:noop,cancelStreak:noop},canSwapBackpack:()=>allowed,swapBlockReason:()=> 'blocked',showToast:noop,updateMapChoiceUi:noop,cancelMelee:noop,cancelGrenade:noop,showScoreboard:noop,clearTrainingTargets:noop,renderTrainingPanel:noop,chat:{cancel:noop,handleKey:()=>false,isTyping:()=>false},hud:new Element(),menu:new Element(),gameover:new Element(),lobby:{setResume:noop,refresh:noop},setScoped:noop,clearFlash:noop,gameStart:()=>{throw Error('must not restart')},equippedPrimary:()=>ctx.BACKPACKS[ctx.curBp].primary,switchWeapon:(id)=>switched.push(id),scoreboardEl:new Element(),IS_SNEAK:'sneak',IS_CROUCH:'crouch',performance:{now:()=>0},crouchDownAt:0,dropWeapon:()=>{throw Error('must not drop')},startReload:()=>{throw Error('must not reload')},switchToPrimary:noop,switchToSecondary:noop,switchNade:noop,quickSwitch:noop};
+const ctx={console,document,viewport,window:{addEventListener:noop},setTimeout:(fn)=>{pending.push(fn);return fn},clearTimeout:(fn)=>{const i=pending.indexOf(fn);if(i>=0)pending.splice(i,1)},requestAnimationFrame:(fn)=>pending.push(fn),state:'playing',locked:true,matchPaused:false,lockRequestCancelled:false,dead:false,curBp:0,selectedMapId:'transport',keys:{},fireEnabled:false,BACKPACKS:[['ak','classic','stock'],['m4','classic','stock'],['barrett','classic','dragon'],['m4','ironbeastgold','dragon']].map(([primary,skin,meleeSkin])=>({primary,skin,secondary:'deagle',meleeSkin})),GEAR_SKIN:{deagle:'classic',knife:'classic'},owned:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{state:{mag:30,reserve:90,count:1}}])),WEAPON_DEFS:Object.fromEntries(['ak','m4','barrett','deagle','knife','frag','flash','smoke'].map(id=>[id,{type:id==='barrett'?'sniper':id==='knife'?'melee':['frag','flash','smoke'].includes(id)?'grenade':id==='deagle'?'pistol':'rifle',stats:{magSize:30,reserve:90}}])),emptySlot:{},lifePickup:{primary:null,secondary:null},gunDisplayName:id=>id,activeSkinId:id=>id==='knife'?ctx.BACKPACKS[ctx.curBp].meleeSkin:ctx.BACKPACKS[ctx.curBp].skin,syncMagazineCapacity:noop,magazineSizeFor:(id,skin)=>id==='m4'&&skin==='ironbeastgold'?35:ctx.WEAPON_DEFS[id].stats.magSize,startingReserve:(id,stats,skin)=>{const reserve=id==='m4'&&skin==='ironbeastgold'?105:stats.reserve;return ctx.bioMatch()?reserve*2:reserve},worldModel:()=>({}),classicNades:{},weaponPreview:()=>null,renderer:{},scene:{},knifeBind:null,weaponIconSvg:()=>'<svg/>',sfx:{ui:noop,empty:noop,cancelStreak:noop},canSwapBackpack:()=>allowed,swapBlockReason:()=> 'blocked',showToast:noop,updateMapChoiceUi:noop,cancelMelee:noop,cancelGrenade:noop,cancelAllSkillPreviews:noop,showScoreboard:noop,clearTrainingTargets:noop,renderTrainingPanel:noop,chat:{cancel:noop,handleKey:()=>false,isTyping:()=>false},hud:new Element(),menu:new Element(),gameover:new Element(),lobby:{setResume:noop,refresh:noop},setScoped:noop,clearFlash:noop,gameStart:()=>{throw Error('must not restart')},equippedPrimary:()=>ctx.BACKPACKS[ctx.curBp].primary,switchWeapon:(id)=>switched.push(id),scoreboardEl:new Element(),IS_SNEAK:'sneak',IS_CROUCH:'crouch',performance:{now:()=>0},crouchDownAt:0,dropWeapon:()=>{throw Error('must not drop')},startReload:()=>{throw Error('must not reload')},switchToPrimary:noop,switchToSecondary:noop,switchNade:noop,quickSwitch:noop};
+ctx.weaponIconId=(id)=>id;
+ctx.weaponUiPreviewSource=()=>({userData:{previewSource:'test-world-model'}});
 ctx.actedThisLife=false;
 ctx.bioMatch=()=>false;
+ctx.browseMatch=()=>false;
+ctx.browseVisitor=null;
+ctx.grenadeVfx={clear:noop};
 ctx.trainingMatch=()=>false;
 ctx.tdmMatch=()=>true;
 ctx.placePlayerAtClearSpawn=noop;
@@ -27,6 +32,21 @@ ctx.selectPlayerSpawnIndex=()=>0;
 ctx.rememberPlayerSpawn=noop;
 ctx.mapLoading=false;
 ctx.pendingMapStart=false;
+ctx.mapPreparedForStart=false;
+ctx.mapEntryLockGuardUntil=0;
+ctx.mapEntryRelockAttempted=false;
+ctx.pointerUnlockIntent=null;
+ctx.pointerRecoveryPending=false;
+ctx.pointerRecoveryLastAttemptAt=-Infinity;
+ctx.pointerLastEscapeAt=-Infinity;
+ctx.pointerLockDiagnostics={unexpectedLosses:0,recoveryAttempts:0,recoverySuccesses:0,lastLossReason:null,lastLossAt:-Infinity};
+ctx.pointerLookIgnoreUntil=0;
+ctx.pointerLockClientX=null;
+ctx.pointerLockClientY=null;
+ctx.mapLoadEnter=nodes.mapLoadEnter;
+ctx.waitForMapEntryLock=noop;
+ctx.finishPreparedMapStart=noop;
+ctx.cancelFoldingCoverPreview=noop;
 ctx.bioMode=null;
 document.body=new Element();
 ctx.menu.classList.add('hidden');vm.createContext(ctx);
@@ -91,7 +111,7 @@ assert.ok(pick.includes('lifePickup[it.slotKind]'),'pickup records into lifePick
 assert.ok(!/BACKPACKS\[curBp\]|GEAR_SKIN\.deagle\s*=/.test(pick),'pickup must never rewrite the backpack config');
 assert.ok(source.includes('{ primary: "m4", skin: "ironbeastgold", secondary: "deagle", meleeSkin: "dragon" }'),'fourth pack is configured as Iron Beast M4, Desert Eagle and 屠龙');
 const productPacks=source.slice(source.indexOf('const BACKPACKS = ['),source.indexOf('let curBp ='));
-assert.equal((productPacks.match(/secondary: "deagle"/g)||[]).length,8,'all eight product backpacks use Desert Eagle');
+assert.equal((productPacks.match(/secondary: "deagle"/g)||[]).length,10,'all ten product backpacks use Desert Eagle');
 // Exercise the newly admitted fifth entry through the same real B/number-key
 // handlers; the earlier four-pack fixture still protects all prior behavior.
 ctx.BACKPACKS.push({primary:'scar',skin:'stock',secondary:'deagle',meleeSkin:'dragon'});
@@ -113,6 +133,18 @@ nodes.bpList.children[7].onmouseenter();
 assert.equal(nodes.bpLoadout.children[0].dataset.weapon,'kn57');
 key('Digit8');flush();assert.equal(ctx.curBp,7);assert.equal(switched.at(-1),'kn57');
 assert.equal(ctx.backpackOpen(),false,'B + 8 equips KN-57 and closes the panel');
+ctx.BACKPACKS.push({primary:'awm_nature',skin:'stock',secondary:'deagle',meleeSkin:'dragon'});
+ctx.owned.awm_nature={state:{mag:17,reserve:51}};
+ctx.WEAPON_DEFS.awm_nature={type:'sniper',stats:{magSize:17,reserve:51}};
+key('KeyB');flush();assert.equal(nodes.bpList.children.length,9);
+nodes.bpList.children[8].onmouseenter();assert.equal(nodes.bpLoadout.children[0].dataset.weapon,'awm_nature');
+key('Digit9');flush();assert.equal(ctx.curBp,8);assert.equal(switched.at(-1),'awm_nature');
+assert.equal(ctx.backpackOpen(),false,'B + 9 equips AWM Nature and closes the panel');
+ctx.BACKPACKS.push({primary:'hbr7',skin:'stock',secondary:'deagle',meleeSkin:'stock'});
+ctx.owned.hbr7={state:{mag:5,reserve:30}};
+ctx.WEAPON_DEFS.hbr7={type:'sniper',stats:{magSize:5,reserve:30}};
+key('KeyB');flush();assert.equal(nodes.bpList.children.length,10);
+key('Digit0');flush();assert.equal(ctx.curBp,9);assert.equal(switched.at(-1),'hbr7');
 assert.doesNotMatch(productPacks,/secondary: "pistol"|primary: "awm"/,'AWM and USP are absent from product backpacks');
 const productDefs=source.slice(source.indexOf('const WEAPON_DEFS ='),source.indexOf('const PRIMARY_IDS'));
 assert.doesNotMatch(productDefs,/\n  (?:awm|pistol): \{/,'AWM and USP definitions are removed from the playable weapon table');
@@ -120,8 +152,8 @@ const productInit=source.slice(source.indexOf('let assetsDone = 0;'),source.inde
 assert.doesNotMatch(productInit,/["'](?:awm|pistol)["']/,'startup no longer loads AWM or USP');
 // Re-lock denial must expose Return to Battle instead of leaving dead controls.
 key('KeyB');flush();denyLock=true;key('Digit2');assert.equal(ctx.backpackOpen(),false);assert.equal(ctx.gameMenuOpen(),true);assert.equal(ctx.menu.classList.contains('hidden'),true);assert.equal(ctx.hud.classList.contains('hidden'),false);
-// Ordinary Escape/unlock opens the battle dialog, never the lobby.
-denyLock=false;ctx.requestLock();flush();document.exitPointerLock();flush();assert.equal(ctx.gameMenuOpen(),true);assert.equal(ctx.menu.classList.contains('hidden'),true);
+// Intentional Escape/menu unlock opens the battle dialog, never the lobby or an auto-relock loop.
+denyLock=false;ctx.requestLock();flush();ctx.openGameMenu();flush();assert.equal(ctx.gameMenuOpen(),true);assert.equal(ctx.menu.classList.contains('hidden'),true);
 console.log('PASS: native cursor mode, hover without equipping, accurate empty slots, mouse and digit confirmation, same-number close, rule rejection, B/Escape cancel, held-pickup disclosure and pickup discard on backpack confirm (config never rewritten), rapid close/unlock race, re-lock denial recovery, normal game-dialog unlock, no click-through fire or movement.');
 
 // Esc menu regressions share the same real keyboard and pointer-lock handlers.

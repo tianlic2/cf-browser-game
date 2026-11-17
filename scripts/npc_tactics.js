@@ -20,7 +20,7 @@ export function makeTacticalProfile(seed = 0, slot = 0) {
   const role = TACTICAL_ROLES[((slot % TACTICAL_ROLES.length) + TACTICAL_ROLES.length) % TACTICAL_ROLES.length];
   const lane = ROUTE_LANES[((slot % ROUTE_LANES.length) + ROUTE_LANES.length) % ROUTE_LANES.length];
   const jitter = Math.sin(seed * 19.17 + slot * 2.31) * .12;
-  return { ...role, slot, lane: lane || role.lane, radius: role.radius + jitter };
+  return { ...role, slot, seed, lane: lane || role.lane, radius: role.radius + jitter };
 }
 
 const apartFromReservations = (x, z, reserved, spacing) =>
@@ -28,21 +28,37 @@ const apartFromReservations = (x, z, reserved, spacing) =>
 
 // Pick a committed intermediate waypoint instead of feeding every soldier the
 // same final target and therefore the same shortest-path flow field.
-export function chooseRouteDiversion(self, target, profile, valid, reserved = []) {
+export function chooseRouteDiversion(self, target, profile, valid, reserved = [], variant = 0,
+  dangers = []) {
   const dx = target.x - self.x, dz = target.z - self.z;
   const distance = Math.hypot(dx, dz);
   if (!Number.isFinite(distance) || distance < 9) return null;
   const fx = dx / distance, fz = dz / distance;
-  const lane = profile?.lane || 0;
-  const forward = Math.min(13, Math.max(6.5, distance * .42));
-  const lateral = lane * Math.min(7.5, Math.max(3.2, distance * .18));
-  for (const scale of [1, .72, -.42]) {
+  // A role owns a preferred lane, not one immutable rail for its whole life.
+  // Replans rotate the lane width and occasionally swap sides; recent deaths
+  // add a soft cost so a camping player cannot farm one choke indefinitely.
+  const phase = (profile?.slot || 0) * 1.91 + variant * 2.37 + (profile?.seed || 0) * 7.13;
+  const sideCycle = variant % 4 === 3 ? -1 : 1;
+  const lane = ((profile?.lane || 0) + Math.sin(phase) * .46) * sideCycle;
+  const forward = Math.min(14.5, Math.max(5.8, distance * (.34 + .12 *
+    (Math.sin(phase * .71) * .5 + .5))));
+  const lateral = lane * Math.min(8.6, Math.max(3.0, distance * .21));
+  let best = null, bestScore = Infinity;
+  for (const scale of [1, .72, -1, -.48, 1.28]) {
     const x = self.x + fx * forward - fz * lateral * scale;
     const z = self.z + fz * forward + fx * lateral * scale;
-    if (apartFromReservations(x, z, reserved, 2.8) && valid(x, z))
-      return { x, y: self.y, z };
+    if (!apartFromReservations(x, z, reserved, 2.8) || !valid(x, z)) continue;
+    let danger = 0;
+    for (const zone of dangers || []) {
+      const d = Math.hypot(x - zone.x, z - zone.z);
+      if (d < (zone.radius || 5.5)) danger += (1 - d / (zone.radius || 5.5)) *
+        (zone.weight || 1) * 9;
+    }
+    const score = danger + Math.abs(scale - 1) * .32 +
+      Math.abs(Math.hypot(x - self.x, z - self.z) - forward) * .03;
+    if (score < bestScore) { bestScore = score; best = { x, y: self.y, z }; }
   }
-  return null;
+  return best;
 }
 
 // Reserve distinct firing positions around the contact. Roles differ in

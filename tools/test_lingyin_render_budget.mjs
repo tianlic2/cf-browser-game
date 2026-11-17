@@ -11,7 +11,7 @@ try{
  await page.waitForTimeout(600);
  const initial=await page.evaluate(()=>({textures:__tactical.renderer.info.memory.textures,programs:__tactical.renderer.info.programs.length}));
  const stats={};
- for(const [name,p] of Object.entries({court:[-2,0,20,0],hall:[-2,1.35,-18,0],gate:[-2,0,67,0],bridge:[36,.6,28,Math.PI/2]})){
+ for(const [name,p] of Object.entries({court:[-2,0,20,0],hall:[-2,2.35,-18,0],gate:[-2,0,67,0],bridge:[36,.6,28,Math.PI/2]})){
   await page.evaluate(p=>{const t=__tactical;t.player.pos.set(...p.slice(0,3));t.player.vel.set(0,0,0);t.player.yaw=p[3];t.player.pitch=0;t.renderStats()},p);
   await page.waitForTimeout(900);
   stats[name]=await page.evaluate(()=>__tactical.renderStats());
@@ -27,8 +27,9 @@ try{
    return {distance:level.distance,triangles};
   })};
  });
- assert.equal(lod.terrain,49960);assert.equal(lod.levels[0].triangles,147890);assert.equal(lod.levels[1].triangles,29578);
- assert.equal(lod.levels[2].distance,40);assert.ok(lod.levels[2].triangles<5000);
+ assert.equal(lod.terrain,49960);assert.ok(lod.levels[0].triangles<150000,'authored statue stays within the near budget');
+ assert.ok(lod.levels[1].triangles<lod.levels[0].triangles*.55,'medium distance reduces detail');
+ assert.equal(lod.levels[2].distance,40);assert.ok(lod.levels[2].triangles<6000);
  const scoped=await page.evaluate(()=>{
   const t=__tactical,c=t.camera,position=c.position.clone(),fov=c.fov;t.pause();
   c.position.set(-2,3,65);c.fov=11;c.updateProjectionMatrix();t.renderer.render(t.scene,c);

@@ -87,13 +87,14 @@ export class Gate {
     }
     // Shallow front and rear steps meet the existing gameplay walk surface.
     for (let i = 0; i < 3; i++) {
-      geos.push(box(9.5, 0.12, 0.5, 0, 0.06 + i * 0.12, 4.0 + (2 - i) * 0.5));
-      geos.push(box(9.5, 0.12, 0.5, 0, 0.06 + i * 0.12, -4.0 - (2 - i) * 0.5));
+      const top = .12 * (i + 1), height = top + .68;
+      geos.push(box(9.5, height, 0.5, 0, (top - .68) / 2, 4.0 + (2 - i) * 0.5));
+      geos.push(box(9.5, height, 0.5, 0, (top - .68) / 2, -4.0 - (2 - i) * 0.5));
     }
     for (let i = 0; i < 4; i++) {
       const top = .16 * (i + 1);
       for (const side of [-1, 1])
-        geos.push(box(5, .15, .5, 0, top - .68 - .075, side * (7 - i * .5)));
+        geos.push(box(5, top, .5, 0, top / 2 - .68, side * (7 - i * .5)));
     }
     const m = new THREE.Mesh(merge(geos), this.stone);
     m.castShadow = true;
@@ -102,16 +103,29 @@ export class Gate {
 
     // textured paving on the platform and step treads
     const topMat = flagstoneMaterial(3.4, false);
-    const top = new THREE.Mesh(new THREE.PlaneGeometry(16.7, 7.0), topMat);
+    const top = new THREE.Mesh(new THREE.PlaneGeometry(17.6, 7.8), topMat);
     top.rotation.x = -Math.PI / 2;
-    top.position.set(0, 0.356, 0);
+    top.position.set(0, 0.372, 0);
     top.receiveShadow = true;
     this.group.add(top);
     for (let i = 0; i < 3; i++) {
       for (const side of [-1, 1]) {
-        const step = new THREE.Mesh(new THREE.PlaneGeometry(9.4, 0.48), topMat);
+        const step = new THREE.Mesh(new THREE.PlaneGeometry(9.5, 0.5), topMat);
         step.rotation.x = -Math.PI / 2;
         step.position.set(0, 0.122 + i * 0.12, side * (4.0 + (2 - i) * 0.5));
+        step.receiveShadow = true;
+        this.group.add(step);
+      }
+    }
+    // The four lower treads are part of the same staircase. Cover their
+    // horizontal faces with the same stone paving as the upper treads, with
+    // each plane spanning the full tread so adjoining edges meet exactly.
+    for (let i = 0; i < 4; i++) {
+      for (const side of [-1, 1]) {
+        const step = new THREE.Mesh(new THREE.PlaneGeometry(5, 0.5), topMat);
+        step.name = 'gate-lower-stair-paving';
+        step.rotation.x = -Math.PI / 2;
+        step.position.set(0, .16 * (i + 1) - .68 + .002, side * (7 - i * .5));
         step.receiveShadow = true;
         this.group.add(step);
       }

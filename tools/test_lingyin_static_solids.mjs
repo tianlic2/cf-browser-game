@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import {lingyinLayout} from '../scripts/lingyin_layout.js';
-import {MAIN_HALL,MAIN_HALL_SCALE,mainHallPoint} from '../scripts/lingyin_main_hall.js';
+import {MAIN_HALL,MAIN_HALL_FLOOR_Y,MAIN_HALL_RAISE,MAIN_PORTAL,MAIN_HALL_SCALE,mainHallPoint} from '../scripts/lingyin_main_hall.js';
 import {MAIN_INTERIOR_COLUMNS,MAIN_COLUMN_PARTS,MAIN_CENSER,MAIN_HALL_FIXTURES,hallPerimeterColumns} from '../scripts/lingyin_columns.js';
 import {SMALL_HALLS} from '../scripts/lingyin_small_halls.js';
 import {intersectsBrush,canMoveThroughBrushes,brushContainsPoint,brushBottom} from '../scripts/brush_collision.js';
-const map=lingyinLayout(),feet=1.35;
+const map=lingyinLayout(),feet=MAIN_HALL_FLOOR_Y;
 const blocked=(x,z,y=feet,r=.45)=>map.colliders.some(c=>intersectsBrush(c,x,z,y,r,.52,1.78,map.colliders,map.surfaceAt));
 for(const [i,[x,z]] of MAIN_INTERIOR_COLUMNS.entries()){
  const p=mainHallPoint(x,z),parts=map.colliders.filter(c=>c.name?.startsWith(`main-interior-column-${i}-`));
@@ -28,10 +28,21 @@ for(const [i,[x,z]] of MAIN_INTERIOR_COLUMNS.entries()){
  assert.equal(intersectsBrush(shaft,p.x+shaft.hx+.4,p.z+shaft.hz+.4,feet,.45,.52,1.78),false,
   'empty corners outside the ellipse must not turn into square air walls');
 }
+// Cross at both former post locations, as well as at the limits of a
+// player's shoulder clearance. Neither the wall brushes nor old posts may intrude.
+for(const offset of [-3.06,-1.64,0,1.64,3.06]){
+ for(let z=MAIN_HALL.z+MAIN_PORTAL.wallZ+1;z>=MAIN_HALL.z+MAIN_PORTAL.wallZ-MAIN_PORTAL.leafDepth-.25;z-=.12)
+  assert.ok(!blocked(MAIN_HALL.x+offset,z),'entrance and open door leaves clear across the stair axis');
+}
+for(const side of [-1,1]){
+ const x=MAIN_HALL.x+side*(MAIN_PORTAL.halfClear+MAIN_PORTAL.leafThickness/2);
+ assert.ok(blocked(x,MAIN_HALL.z+MAIN_PORTAL.wallZ-1.5),'open leaf remains solid on its face');
+}
 let perimeter=0;
 for(const s of [MAIN_HALL,...SMALL_HALLS])for(const [i,col] of hallPerimeterColumns(s).entries()){
  const c=map.colliders.find(c=>c.name===`${s.name}-perimeter-column-${i}`);perimeter++;
- assert.ok(c?.round);assert.ok(Math.abs(c.h-(.25+col.height))<1e-6);
+ const lift=s.name==='main'?MAIN_HALL_RAISE:0;
+ assert.ok(c?.round);assert.ok(Math.abs(c.h-(.25+col.height+lift))<1e-6);
  assert.ok(blocked(c.x,c.z,s.plinth+.25),'perimeter shafts retain physical collision');
 }
 const censer=mainHallPoint(MAIN_CENSER.x,MAIN_CENSER.z);

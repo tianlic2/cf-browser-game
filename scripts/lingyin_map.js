@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { makeGLTFLoader } from './gltf.js';
-import { ATMO, Sky, Terrain, HillsideTrail, Temple, ForestGate, GateGround, GateFramingTrees, createMainHallInterior, createSmallHallInteriors, mainHallStatueSolids, createApprovedLingyinLandscape, preloadTempleTextures, preloadRuntimeTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Mist } from './lingyin_world.js?v=new-map-3';
-import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=new-map-3';
-import { COURT_COVER } from './lingyin_court_cover.js?v=1';
+import { finishTempleArchitecture } from './lingyin_architectural_finish.js?v=chisel-sanctum-1';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { ATMO, Sky, Terrain, HillsideTrail, Temple, ForestGate, GateGround, GateFramingTrees, createMainHallInterior, createSmallHallInteriors, mainHallStatueSolids, createApprovedLingyinLandscape, preloadTempleTextures, preloadRuntimeTextures, preloadTerrainTextures, preloadFoliagePhotos, Details, Vegetation, Water, Mist } from './lingyin_world.js?v=flanking-apron-leaf-1';
+import { lingyinLayout, LINGYIN_PLATFORM_Y } from './lingyin_layout.js?v=offering-depth-1';
+import { COURT_COVER } from './lingyin_court_cover.js?v=2';
 import { createLingyinWell } from './lingyin_well.js?v=1';
 import { triangulatedWalkSurface } from './lingyin_walk_surface.js?v=2';
 
@@ -71,48 +71,91 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
   gateTrees.group.name = 'lingyin-gate-framing-trees';
   gateTrees.group.position.set(-2,LINGYIN_PLATFORM_Y,40);
   world.add(gateTrees.group);
-  const draco = new DRACOLoader();
-  draco.setDecoderPath(new URL('../vendor/three/examples/jsm/libs/draco/', import.meta.url).href);
-  const buddhaGltf = makeGLTFLoader().setDRACOLoader(draco);
   const textureLoader = new THREE.TextureLoader();
   const hallTexture = name => textureLoader.loadAsync(
     new URL(`../assets/lingyin/hall-preview/${name}.webp`, import.meta.url).href);
-  const [buddha, buddhaFar, coffer, paintedBeam, redLacquer,
-    stoneFloor, carvedAltar, redRoof] = await Promise.all([
-    buddhaGltf.loadAsync(new URL('../assets/lingyin/buddha-clay-scan.glb', import.meta.url).href),
-    buddhaGltf.loadAsync(new URL('../assets/lingyin/buddha-clay-scan-lod.glb', import.meta.url).href),
+  const [coffer, paintedBeam, redLacquer,
+    stoneFloor, carvedAltar, redRoof, sanctumCraft, giltLeaf, altarStone, chasedDetail, centralRobe, aureoleArt] = await Promise.all([
     hallTexture('dragon-coffer'), hallTexture('painted-beam'),
     hallTexture('worn-red-lacquer'), hallTexture('aged-stone-floor'),
-    hallTexture('carved-altar'), hallTexture('red-ceramic-roof'),
+    hallTexture('carved-altar'), hallTexture('red-ceramic-roof'), hallTexture('sanctum-craft'),hallTexture('gilt-leaf-finish'),hallTexture('altar-veined-stone'),hallTexture('three-buddha-incisions'),
+    textureLoader.loadAsync(new URL('../assets/lingyin/hall-preview/central-robe-normal.png?v=seated-folds-1',import.meta.url).href),
+    hallTexture('aureole-scrollwork'),
   ]);
-  draco.dispose();
-  for(const texture of [coffer,paintedBeam,redLacquer,stoneFloor,carvedAltar,redRoof]){
+  aureoleArt.colorSpace=THREE.SRGBColorSpace;aureoleArt.anisotropy=8;
+  centralRobe.channel=1;centralRobe.anisotropy=8;
+  giltLeaf.wrapS=giltLeaf.wrapT=THREE.RepeatWrapping;
+  giltLeaf.anisotropy=8;
+  for(const texture of [altarStone,coffer,paintedBeam,redLacquer,stoneFloor,carvedAltar,redRoof,sanctumCraft]){
     texture.colorSpace=THREE.SRGBColorSpace;
     texture.anisotropy=8;
   }
-  // Reuse the loaded hall stone image, avoiding extra downloads. The visible
-  // screen and its bullet/movement proxy share COURT_COVER dimensions.
+  // Keep the already-loaded hall stone image on the well. The waist walls use
+  // a neutral untextured mineral finish: the hall floor texture is mutated to
+  // a high repeat later and made these small vertical faces read as crates.
+  // The visible walls and their bullet/movement proxies share COURT_COVER bounds.
+  // Recessed panels and end piers stay inside those bounds, so the richer
+  // silhouette never creates a new invisible snag.
   const stoneCoverMaterial = new THREE.MeshStandardMaterial({map:stoneFloor,color:0xc4c1b6,roughness:.92});
+  stoneCoverMaterial.name='lingyin-well-stone';
+  const waistWallMaterial=new THREE.MeshStandardMaterial({color:0x999a95,roughness:.96,metalness:0});
+  waistWallMaterial.name='courtyard-waist-wall-stone';
+  const stonePanelMaterial=waistWallMaterial.clone();
+  stonePanelMaterial.name='courtyard-waist-wall-recess';
+  // The photographed floor map is intentionally not reused on this tiny
+  // inset: repeating it at panel scale reads as a woven crate from combat
+  // distance. A quiet neutral stone keeps the masonry frame legible.
+  stonePanelMaterial.map=null;
+  stonePanelMaterial.color.set(0x50514d);
+  stonePanelMaterial.roughness=.97;
   const coverGroup = new THREE.Group(); coverGroup.name = 'courtyard-stone-cover';
+  const coverStone=[],coverRecess=[];
+  const coverBox=(bucket,w,h,d,x,y,z)=>{
+    const geometry=new THREE.BoxGeometry(w,h,d);
+    geometry.translate(x,LINGYIN_PLATFORM_Y+y,z);
+    bucket.push(geometry);
+  };
   for (const c of COURT_COVER) {
-    const addStone = (w,h,d,x,y,z) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w,h,d),stoneCoverMaterial);
-      mesh.position.set(c.x+x,LINGYIN_PLATFORM_Y+y,c.z+z);
-      mesh.receiveShadow = true;
-      coverGroup.add(mesh);
-    };
-    addStone(c.hx*2,.18,c.hz*2,0,.09,0);
-    addStone(c.hx*2-.12,c.h-.36,c.hz*2-.12,0,c.h/2,0);
-    addStone(c.hx*2,.18,c.hz*2,0,c.h-.09,0);
+    const w=c.hx*2,d=c.hz*2,longX=w>d;
+    coverBox(coverStone,w,.18,d,c.x,.09,c.z);
+    // Pull the broad core face back by 25 mm. The inset panel can then sit
+    // flush with the shared collision boundary instead of being hidden behind
+    // the opaque BoxGeometry face or floating outside the proxy.
+    coverBox(coverStone,longX?w:w-.05,c.h-.36,longX?d-.05:d,c.x,c.h/2,c.z);
+    coverBox(coverStone,w,.18,d,c.x,c.h-.09,c.z);
+    // Slightly broader end piers give each low wall a believable structural
+    // rhythm while remaining within the original rectangular combat proxy.
+    const pier=.22,span=(longX?w:d)/2-pier/2;
+    for(const side of [-1,1])coverBox(coverStone,longX?pier:w,
+      c.h-.22,longX?d:pier,c.x+(longX?side*span:0),c.h/2,
+      c.z+(longX?0:side*span));
+    // A dark inset on both exposed faces reads as carved stone at combat
+    // distance. It is recessed into the solid wall rather than protruding.
+    const panelLength=Math.max(.4,(longX?w:d)-.78),panelHeight=c.h-.68;
+    for(const side of [-1,1])coverBox(coverRecess,
+      longX?panelLength:.025,panelHeight,longX?.025:panelLength,
+      c.x+(longX?0:side*(w/2-.0125)),c.h/2,
+      c.z+(longX?side*(d/2-.0125):0));
   }
+  const addCoverBatch=(geometries,material,name)=>{
+    const geometry=mergeGeometries(geometries,false);
+    if(!geometry)throw new Error(`Failed to merge ${name}`);
+    geometries.forEach(g=>g.dispose());
+    const mesh=new THREE.Mesh(geometry,material);
+    mesh.name=name;
+    mesh.receiveShadow=true;
+    mesh.castShadow=true;
+    coverGroup.add(mesh);
+  };
+  addCoverBatch(coverStone,waistWallMaterial,'courtyard-waist-wall-masonry');
+  addCoverBatch(coverRecess,stonePanelMaterial,'courtyard-waist-wall-carved-panels');
   world.add(coverGroup);
   redLacquer.wrapS=redLacquer.wrapT=THREE.RepeatWrapping;
   redRoof.wrapS=redRoof.wrapT=THREE.RepeatWrapping;
   redRoof.repeat.set(.2,.2);
   redRoof.needsUpdate=true;
   temple.group.add(createMainHallInterior(temple,{
-    coffer,paintedBeam,redLacquer,stoneFloor,carvedAltar,redRoof,
-    buddhaScan:buddha.scene,buddhaSideLod:buddhaFar.scene,
+    coffer,paintedBeam,redLacquer,stoneFloor,carvedAltar,redRoof,sanctumCraft,giltLeaf,altarStone,chasedDetail,centralRobe,aureoleArt,
   }));
   onProgress(.72);
   const muralTexture = await new THREE.TextureLoader().loadAsync(
@@ -125,12 +168,15 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
   onProgress(.74);
   await preloadFoliagePhotos();
   const vegetation = await attach(Vegetation,.82);
-  const details = await attach(Details,.93);
+  // The permanent temple bridge is the playable one; Details also contains
+  // an older, narrower scenic bridge at the same location.
+  const details = await attach(Details,.93,{omitBridge:true});
   const mist = await attach(Mist,.97,details.smokeOrigin);
   const well=createLingyinWell(world,stoneCoverMaterial);
   well.position.y=LINGYIN_PLATFORM_Y;
   world.add(well);
   const landscape=options.editor?null:createApprovedLingyinLandscape(world);
+  await finishTempleArchitecture(world,layout.colliders);
   layout.colliders.push(...mainHallStatueSolids(world));
   if(landscape)layout.setLandscapeData(landscape,
     triangulatedWalkSurface(landscape.walkGeometry,-LINGYIN_PLATFORM_Y,2,true));
@@ -140,7 +186,7 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
   const invisible = new THREE.MeshBasicMaterial({visible:false,side:THREE.DoubleSide});
   for (const c of layout.colliders) {
     // Exact authored triangles below avoid diagonal-deck AABB bullet walls.
-    if(c.landscape)continue;
+    if(c.landscape || c.name==='main-hall-grand-stair-rail' || c.carvedRail)continue;
     // A brush's `h` is its absolute top, not its height. The old proxy
     // extended from y0 to y0+h, creating invisible bullet/LOS slabs above
     // doors and walls even though character movement used the correct top.
@@ -166,6 +212,12 @@ export async function buildLingyinMap(scene, onProgress = () => {}, options = {}
     proxy.visible = false;
     proxies.add(proxy);
   }
+  const railArt=world.getObjectByName('main-hall-stair-carving');
+  const railProxy=new THREE.Mesh(railArt.geometry,invisible);
+  railProxy.name='main-hall-carved-rail-proxy';
+  railProxy.matrixAutoUpdate=false;
+  railProxy.matrix.copy(railArt.matrixWorld);
+  railProxy.visible=false;proxies.add(railProxy);
   const trailPath = hillside?.group.getObjectByName('graded-mountain-stone-path');
   if (!landscape&&trailPath?.geometry) {
     layout.setTrailSurface(triangulatedWalkSurface(

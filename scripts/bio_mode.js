@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { cloneSkinned } from './skinned_clone.js';
 import { makeGLTFLoader } from './gltf.js';
-import { FoxSoldierRig } from './fox_soldier.js?v=fox-published-1';
-import { intersectsBrush } from './brush_collision.js?v=goldsrc-visible-wall-1';
-import { enemyModel } from './guncatalog.js?v=weapon-world-3';
+import { FoxSoldierRig } from './fox_soldier.js?v=visit-skeleton-1';
+import { intersectsBrush } from './brush_collision.js?v=zone13-collision-alignment-1';
+import { enemyModel } from './guncatalog.js?v=enemy-eight-guns-1';
 import { HUMAN_RUN_SPEED } from './move_speed.js?v=bio-arena-1';
 import { overlapsActors, sweepActorAxis, findActorSpawn } from './actor_collision.js';
 import { BIO_DAMAGE_MILESTONE, BIO_NPC_COUNT, BIO_INITIAL_ZOMBIES, BIO_ZOMBIE_HEALTH, bioHumanDamageMultiplier,
@@ -918,8 +918,12 @@ export class BioMode {
     const length = Math.max(acc.moved, .0001);
     const forward = (acc.x * Math.sin(yaw) + acc.z * Math.cos(yaw)) / length;
     const side = (acc.x * Math.cos(yaw) - acc.z * Math.sin(yaw)) / length;
+    const leapDuration = 2 * LEAP_UP / (LEAP_GRAVITY * this.rules.zombieGravity);
     h.rig.animate(animDt, { moved: acc.moved, speed: acc.moved / Math.max(animDt, .001),
       aim: acc.aimed ? 1 : .48, moveForward: forward, moveSide: side,
+      airborne: h.airborne,
+      jumpPhase: h.airborne ? THREE.MathUtils.clamp(h.jumpTime / leapDuration, 0, 1) : 0,
+      crouching: !h.airborne && h.reloadT > 0,
       reload: h.reloadT > 0 ? 1 - h.reloadT / 2.5 : 0,
       turnRate: h.turnRate || 0 });
     acc.moved = acc.x = acc.z = 0;

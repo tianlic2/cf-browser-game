@@ -34,6 +34,13 @@ function segmentHitsTriangle(p0x, p0y, p0z, p1x, p1y, p1z, triangle) {
   return t > 1e-5 && t <= 1 + EPSILON;
 }
 function segmentHitsBox(p0x, p0y, p0z, p1x, p1y, p1z, box) {
+  const yaw = box.yaw || 0, cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const toLocal = (x, z) => {
+    const dx = x - box.x, dz = z - box.z;
+    return [dx * cos - dz * sin, dx * sin + dz * cos];
+  };
+  const p0 = toLocal(p0x, p0z), p1 = toLocal(p1x, p1z);
+  const hx = box.localHx ?? box.hx, hz = box.localHz ?? box.hz;
   let near = 0, far = 1;
   const testAxis = (start, delta, min, max) => {
     if (Math.abs(delta) < EPSILON) return start >= min && start <= max;
@@ -42,9 +49,9 @@ function segmentHitsBox(p0x, p0y, p0z, p1x, p1y, p1z, box) {
     near = Math.max(near, a); far = Math.min(far, b);
     return near <= far;
   };
-  return testAxis(p0x, p1x - p0x, box.x - box.hx, box.x + box.hx) &&
+  return testAxis(p0[0], p1[0] - p0[0], -hx, hx) &&
     testAxis(p0y, p1y - p0y, box.y0 ?? 0, box.h) &&
-    testAxis(p0z, p1z - p0z, box.z - box.hz, box.z + box.hz) && far > 1e-5;
+    testAxis(p0[1], p1[1] - p0[1], -hz, hz) && far > 1e-5;
 }
 
 function triangleHeightAt(x, z, triangle) {
@@ -60,13 +67,77 @@ function triangleHeightAt(x, z, triangle) {
   return u * triangle.ay + v * triangle.by + w * triangle.cy;
 }
 
+function pointSegmentDistanceSq(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const lengthSq = dx * dx + dz * dz;
+  const t = lengthSq > EPSILON ? Math.max(0, Math.min(1,
+    ((px - ax) * dx + (pz - az) * dz) / lengthSq)) : 0;
+  const qx = ax + dx * t, qz = az + dz * t;
+  return (px - qx) ** 2 + (pz - qz) ** 2;
+}
+
+function segmentsIntersect2d(a, b, c, d) {
+  const cross = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) -
+    (q[1] - p[1]) * (r[0] - p[0]);
+  const abC = cross(a, b, c), abD = cross(a, b, d);
+  const cdA = cross(c, d, a), cdB = cross(c, d, b);
+  return abC * abD <= EPSILON && cdA * cdB <= EPSILON &&
+    Math.max(Math.min(a[0], b[0]), Math.min(c[0], d[0])) <=
+      Math.min(Math.max(a[0], b[0]), Math.max(c[0], d[0])) + EPSILON &&
+    Math.max(Math.min(a[1], b[1]), Math.min(c[1], d[1])) <=
+      Math.min(Math.max(a[1], b[1]), Math.max(c[1], d[1])) + EPSILON;
+}
+
+function segmentDistanceSq2d(a, b, c, d) {
+  if (segmentsIntersect2d(a, b, c, d)) return 0;
+  return Math.min(
+    pointSegmentDistanceSq(a[0], a[1], c[0], c[1], d[0], d[1]),
+    pointSegmentDistanceSq(b[0], b[1], c[0], c[1], d[0], d[1]),
+    pointSegmentDistanceSq(c[0], c[1], a[0], a[1], b[0], b[1]),
+    pointSegmentDistanceSq(d[0], d[1], a[0], a[1], b[0], b[1]),
+  );
+}
+
+// Intersect a non-horizontal BSP triangle with a horizontal actor sample.
+// The resulting X/Z segment is the exact visible wall cross-section at that
+// height, so capsule corners cannot slip between three approximate rays.
+function triangleSliceAtY(triangle, y) {
+  if (y < triangle.minY - 1e-5 || y > triangle.maxY + 1e-5) return null;
+  const vertices = [
+    [triangle.ax, triangle.ay, triangle.az],
+    [triangle.bx, triangle.by, triangle.bz],
+    [triangle.cx, triangle.cy, triangle.cz],
+  ];
+  const points = [];
+  const add = (x, z) => {
+    if (!points.some((point) => Math.hypot(point[0] - x, point[1] - z) < 1e-5))
+      points.push([x, z]);
+  };
+  for (let i = 0; i < 3; i++) {
+    const a = vertices[i], b = vertices[(i + 1) % 3];
+    if (Math.abs(a[1] - y) < 1e-6) add(a[0], a[2]);
+    const span = b[1] - a[1];
+    if (Math.abs(span) < EPSILON) continue;
+    const t = (y - a[1]) / span;
+    if (t >= -1e-6 && t <= 1 + 1e-6)
+      add(a[0] + (b[0] - a[0]) * t, a[2] + (b[2] - a[2]) * t);
+  }
+  if (points.length < 2) return null;
+  let pair = [points[0], points[1]], farthest = -Infinity;
+  for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) {
+    const distance = (points[i][0] - points[j][0]) ** 2 + (points[i][1] - points[j][1]) ** 2;
+    if (distance > farthest) { farthest = distance; pair = [points[i], points[j]]; }
+  }
+  return pair;
+}
+
 function pointOnPropTop(x, z, collider, padding = 0) {
   const dx = x - collider.x, dz = z - collider.z;
   const yaw = collider.yaw || 0;
   const localX = dx * Math.cos(yaw) - dz * Math.sin(yaw);
   const localZ = dx * Math.sin(yaw) + dz * Math.cos(yaw);
-  return Math.abs(localX) <= collider.hx + padding &&
-    Math.abs(localZ) <= collider.hz + padding;
+  return Math.abs(localX) <= (collider.localHx ?? collider.hx) + padding &&
+    Math.abs(localZ) <= (collider.localHz ?? collider.hz) + padding;
 }
 
 export function createZone13SpatialCollision(worldData, buffer, propColliders = [], options = {}) {
@@ -174,6 +245,34 @@ export function createZone13SpatialCollision(worldData, buffer, propColliders = 
       if (segmentBlocked(startX, feetY + height, startZ,
         endX, feetY + height, endZ, list)) return true;
     }
+    // Three offset rays are fast and catch broad faces, but a short crate
+    // triangle or diagonal corner can sit between them. Compare the swept
+    // circle with every exact horizontal wall slice as a second, local pass.
+    // If the capsule already touches a wall, parallel/outward motion remains
+    // legal so the player can slide free instead of becoming trapped.
+    const moveA = [x0, z0], moveB = [x1, z1];
+    const radiusSq = Math.max(0, radius - 1e-4) ** 2;
+    for (const height of heights) {
+      const y = feetY + height, slices = [];
+      for (const index of list) {
+        const triangle = triangles[index];
+        if (triangle.maxY < y - .01 || triangle.minY > y + .01) continue;
+        const slice = triangleSliceAtY(triangle, y);
+        if (slice) slices.push(slice);
+      }
+      if (!slices.length) continue;
+      let startDistance = Infinity, endDistance = Infinity, sweptDistance = Infinity;
+      for (const [a, b] of slices) {
+        startDistance = Math.min(startDistance,
+          pointSegmentDistanceSq(x0, z0, a[0], a[1], b[0], b[1]));
+        endDistance = Math.min(endDistance,
+          pointSegmentDistanceSq(x1, z1, a[0], a[1], b[0], b[1]));
+        sweptDistance = Math.min(sweptDistance, segmentDistanceSq2d(moveA, moveB, a, b));
+      }
+      if (startDistance <= radiusSq + 1e-6) {
+        if (endDistance < startDistance - 1e-6) return true;
+      } else if (sweptDistance <= radiusSq) return true;
+    }
     return false;
   };
 
@@ -190,8 +289,7 @@ export function createZone13SpatialCollision(worldData, buffer, propColliders = 
     for (const collider of propColliders) {
       if (collider.active === false) continue;
       if ((collider.y0 ?? 0) >= endY || collider.h <= startY) continue;
-      if (Math.abs(x - collider.x) < collider.hx + radius &&
-          Math.abs(z - collider.z) < collider.hz + radius) return false;
+      if (pointOnPropTop(x, z, collider, radius)) return false;
     }
     return true;
   };
@@ -230,6 +328,30 @@ export function createZone13SpatialCollision(worldData, buffer, propColliders = 
   const supportSurfaceAt = (x, z, maxFeet, radius = .38) =>
     horizontalSurfaceAt(x, z, maxFeet, radius, .48);
 
+  // Lowest visible BSP surface crossed by a rising head. Horizontal movement
+  // already checks wall triangles, but without this vertical query a jump can
+  // enter a crate, balcony or thin ceiling from below.
+  const ceilingSurfaceAt = (x, z, minHead, maxHead, radius = .38) => {
+    if (maxHead <= minHead + 1e-6) return Infinity;
+    let ceiling = Infinity;
+    const probes = [[x, z]];
+    for (let i = 0; i < 8; i++) {
+      const angle = i / 8 * Math.PI * 2;
+      probes.push([x + Math.cos(angle) * radius * .82,
+        z + Math.sin(angle) * radius * .82]);
+    }
+    const list = [...collect(cells, x, z, x, z, radius + .03)];
+    for (const [px, pz] of probes) for (const index of list) {
+      const triangle = triangles[index];
+      if (Math.abs(triangle.normalY) < .2 || triangle.maxY < minHead - .01 ||
+          triangle.minY > maxHead + .01) continue;
+      const height = triangleHeightAt(px, pz, triangle);
+      if (height !== null && height >= minHead - .005 && height <= maxHead + .005)
+        ceiling = Math.min(ceiling, height);
+    }
+    return ceiling;
+  };
+
   const lineClear = (a, b, eyeHeight = 1.2) => {
     stats.lineQueries++;
     const p0y = (a.y || 0) + eyeHeight, p1y = (b.y || 0) + eyeHeight;
@@ -243,6 +365,7 @@ export function createZone13SpatialCollision(worldData, buffer, propColliders = 
   };
 
   return { blocksMovement, hasVerticalClearance, landingSurfaceAt, supportSurfaceAt,
+    ceilingSurfaceAt,
     lineClear, stats,
     resetStats() { stats.movementQueries = stats.lineQueries = stats.triangleTests = 0;
       stats.candidateTotal = stats.maxCandidates = 0; } };

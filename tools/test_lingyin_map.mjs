@@ -3,6 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { GroundNavigation } from '../scripts/navigation.js';
 import { intersectsBrush } from '../scripts/brush_collision.js';
 import { lingyinLayout } from '../scripts/lingyin_layout.js';
+import { MAIN_HALL_FLOOR_Y } from '../scripts/lingyin_main_hall.js';
 
 const map = lingyinLayout();
 assert.equal(map.spawns.player.length,25);
@@ -32,13 +33,13 @@ for (const target of [map.spawns.enemy[0],map.spawns.enemy[14]]) {
   }
 }
 const rooms = [
-  ['山门',-2,46.85,1.05],['大雄宝殿',-2,-19,1.35],
+  ['山门',-2,46.85,1.05],['大雄宝殿',-2,-19,MAIN_HALL_FLOOR_Y],
   ['西侧殿',-25.5,7,.95],['东侧殿',19,7,.95],
 ];
 for(const spawn of [map.spawns.player[0],map.spawns.enemy[0]]) {
   nav.update({x:spawn[0],y:spawn[1],z:spawn[2]});
   for(const [name,x,z,y] of rooms) {
-    assert.ok(Math.abs(map.surfaceAt(x,z,1.6)-y)<.01,`${name} has a walkable indoor floor`);
+    assert.ok(Math.abs(map.surfaceAt(x,z,y+.25)-y)<.01,`${name} has a walkable indoor floor`);
     const index=nav.nearest(x,z,y);
     assert.ok(index>=0&&Math.abs(nav.point(index).y-y)<.1&&nav.distance[index]>0,
       `${name} is reachable from both teams`);
@@ -147,7 +148,7 @@ assert.doesNotMatch(gateVegetation,/addBoundaryGrove\(\)|forecourt-boundary-(?:t
 for(const name of ['forecourt-boundary-stone-base','forecourt-boundary-plaster',
   'forecourt-boundary-roof-cap','forecourt-boundary-timber-posts'])
   assert.match(gateVegetation,new RegExp(name),`${name} forms the low-cost visible boundary`);
-assert.match(lingyinRuntime,/lingyin_world\.js\?v=85/,
+assert.match(lingyinRuntime,/lingyin_world\.js\?v=new-map-4/,
   'the boundary-wall visual bundle is cache-busted');
 assert.match(gateVegetation,/const footingBottom=-\.02,footingTop=1\.11/,
   'the expanded side-wing boundary has a continuous ground footing');

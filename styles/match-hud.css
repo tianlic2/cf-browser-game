@@ -1,0 +1,179 @@
+@font-face { font-family:"Barlow Condensed"; font-weight:600; src:url("../assets/hud/saltline/barlow-semibold.ttf") format("truetype"); font-display:swap; }
+@font-face { font-family:"Barlow Condensed"; font-weight:700; src:url("../assets/hud/saltline/barlow-bold.ttf") format("truetype"); font-display:swap; }
+@font-face { font-family:"Big Shoulders Display"; font-weight:700; src:url("../assets/hud/saltline/shoulders-bold.ttf") format("truetype"); font-display:swap; }
+@font-face { font-family:"IBM Plex Mono"; font-weight:500; src:url("../assets/hud/saltline/plex-medium.ttf") format("truetype"); font-display:swap; }
+#hud {
+  --bone:#e8e4da; --bone-dim:rgba(232,228,218,.64); --bone-faint:rgba(232,228,218,.24);
+  --signal:#ffb347; --alarm:#ff5a40; --f-display:"Big Shoulders Display",Impact,sans-serif;
+  --f-label:"Barlow Condensed","Arial Narrow",sans-serif; --f-mono:"IBM Plex Mono",monospace;
+  --gl:max(clamp(16px,2vw,36px),env(safe-area-inset-left)); --gr:max(clamp(16px,2vw,36px),env(safe-area-inset-right));
+  --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  color:var(--bone); text-shadow:0 0 2px #000c,0 1px 5px #0009;
+}
+.h-k { font: 600 11px/1 var(--f-label); letter-spacing: .26em; text-transform: uppercase; color: rgba(232, 228, 218, .72); }
+
+/* compass */
+.h-compass { position: absolute; top: calc(12px + var(--sat)); left: 50%; width: min(420px, calc(100vw - var(--gl) - var(--gr) - 8px)); height: 60px; transform: translateX(-50%); }
+.h-tape-wrap { position: absolute; left: 0; right: 0; top: 0; height: 28px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent); mask-image: linear-gradient(90deg, transparent, #000 16%, #000 84%, transparent); }
+.h-tape { position: absolute; left: 0; top: 0; height: 100%; width: 2168px; will-change: transform; }
+.h-tape i { position: absolute; bottom: 0; width: 1px; margin-left: -.5px; background: var(--bone); box-shadow: 0 0 2px rgba(0, 0, 0, .6); }
+.h-tape i.mn { height: 4px; opacity: .45; } .h-tape i.md { height: 7px; opacity: .8; } .h-tape i.mj { height: 10px; width: 2px; margin-left: -1px; }
+.h-tape b { position: absolute; top: 0; transform: translateX(-50%); font-weight: 400; white-space: nowrap; }
+.h-tape b.card { font: 700 16px/1 var(--f-display); letter-spacing: .04em; }
+.h-tape b.ic { font: 600 11px/1.4 var(--f-label); color: var(--bone-dim); letter-spacing: .08em; }
+.h-tape b.num { font: 400 9px/1.7 var(--f-mono); color: var(--bone-dim); }
+.h-needle { position: absolute; left: 50%; top: 14px; width: 2px; height: 16px; margin-left: -1px; background: var(--signal); box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
+.h-heading { position: absolute; left: 100%; top: 9px; margin-left: 6px; font: 500 11px/1 var(--f-mono); color: var(--bone-dim); letter-spacing: .06em; }
+/* The sky and deck can both sit directly behind these instruments. Fade the
+   backing locally so the reticle and the perimeter outside the readouts stay clear. */
+.h-compass::before {
+  content:""; position:absolute; inset:-8px -36px auto; height:43px;
+  background:linear-gradient(90deg,transparent,#10191ece 22%,#10191ed6 78%,transparent);
+  mask-image:linear-gradient(#000 78%,transparent);
+}
+.h-heading { margin-left:0; color:#f1e8d7; background:#172025df; padding:3px 5px; top:4px; }
+.h-heading::after { content:"°"; color:var(--signal); }
+#hud .h-tape { left:50%; }
+.h-health,.h-ammo {
+  position:absolute; bottom:calc(clamp(18px,3.4vh,36px) + var(--sab));
+  box-sizing:border-box; isolation:isolate; padding:10px 14px 11px;
+  --plate:rgba(15,23,26,.88);
+}
+.h-health::before,.h-ammo::before {
+  content:""; position:absolute; inset:0; z-index:-1;
+  background:linear-gradient(96deg,var(--plate),rgba(15,23,26,.62) 60%,transparent);
+  border-left:2px solid var(--bone-dim);
+}
+.h-health { left:var(--gl); }
+.h-k { display:flex; align-items:center; gap:7px; color:var(--bone); font-size:11px; letter-spacing:.12em; }
+.h-k::before {
+  content:""; width:10px; height:10px; background:currentColor;
+  clip-path:polygon(35% 0,65% 0,65% 35%,100% 35%,100% 65%,65% 65%,65% 100%,35% 100%,35% 65%,0 65%,0 35%,35% 35%);
+}
+.h-hp-row { display:flex; align-items:baseline; gap:9px; margin-top:6px; }
+.h-hp-n { font:700 38px/.93 var(--f-display); font-variant-numeric:tabular-nums; min-width:2.5ch; }
+.h-hp-bar { display:flex; gap:2px; }
+.h-hp-bar i { width:8px; height:5px; background:var(--bone); }
+.h-hp-bar i.off { background:#ffffff29; }
+#hud #hpFill { background:none; }
+.h-health.on::before { border-color:var(--signal); }
+.h-health.crit { --plate:#522523f0; }
+.h-health.crit::before,.h-health.crit .h-k { color:#ff886e; border-color:currentColor; }
+.h-health.crit .h-hp-bar i:not(.off) { background:#ff886e; }
+
+.h-ammo {
+  right:var(--gr); width:208px; display:grid; align-items:center;
+  grid-template-columns:1fr auto; gap:4px 6px; text-align:right;
+}
+#ammoPanel[hidden] { display:none; }
+.h-ammo::before { transform:scaleX(-1); }
+.h-ammo.low::before { border-color:var(--signal); }
+#hudWeaponIcon { grid-row:1; grid-column:1; justify-self:start; }
+#hudWeaponIcon .hud-gun-icon { display:block; width:66px; height:27px; object-fit:contain; color:var(--bone); }
+.h-wname { grid-row:1; grid-column:2; max-width:113px; overflow-wrap:anywhere;
+  font:600 13px/1.2 var(--f-label); letter-spacing:.06em; color:var(--bone); }
+.h-ammo-row { grid-column:1 / -1; display:flex; align-items:baseline; justify-content:flex-end; gap:8px; }
+.h-ammo-n { font:700 56px/.92 var(--f-display); font-variant-numeric:tabular-nums; }
+.h-ammo-r { font:500 16px/1 var(--f-mono); color:#d2d8d5; }
+.h-ammo-r::before { content:'/ '; color:#96a29f; }
+.h-pips { grid-column:1 / -1; display:flex; justify-content:flex-end; gap:1px; margin-top:3px; }
+.h-pips i { flex:1 1 0; max-width:15px; height:5px; background:var(--bone); }
+.h-pips i:nth-child(5n + 6) { margin-left:2px; }
+.h-pips i.off { background:#ffffff29; }
+.h-ammo.low .h-ammo-n { color:var(--signal); }
+.h-ammo.low .h-pips i:not(.off) { background:var(--signal); }
+.h-cue { position:absolute; right:0; bottom:calc(100% + 4px); padding:4px 9px;
+  font:700 13px/1 var(--f-label); letter-spacing:.11em; color:#ffe2a0; background:#342917eb;
+  border-right:2px solid var(--signal); white-space:nowrap; }
+.h-cue:empty { display:none; }
+.h-cue.urgent { border-color:var(--alarm); color:#ffbaa9; background:#40211eee; }
+
+#hud .match-strip {
+  position:absolute; top:calc(51px + var(--sat)); left:50%; transform:translateX(-50%);
+  display:grid; grid-template-columns:minmax(84px,auto) 66px minmax(84px,auto);
+  align-items:stretch; background:#10191fef; text-shadow:none; white-space:nowrap;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,7px 100%,0 calc(100% - 7px));
+}
+#hud .match-strip .rb-side { display:flex; justify-content:space-between; align-items:center; gap:9px;
+  min-width:0; height:auto; padding:5px 12px; border-top:2px solid var(--team);
+  background:linear-gradient(160deg,var(--wash),transparent); }
+.rb-a { --team:#8fcaf2; --wash:#324f65; }
+.rb-b { --team:#ffa58f; --wash:#5b3935; }
+#hud .match-strip .rb-team { font:700 14px/1 var(--f-label); letter-spacing:.12em; color:var(--team); }
+.match-strip .rb-side b { min-width:2ch; text-align:center; color:#fff9ec; font:700 28px/1 var(--f-display); font-variant-numeric:tabular-nums; }
+.match-strip time { align-self:center; text-align:center; font:500 13px/1 var(--f-mono); color:var(--bone); }
+.match-strip time.low { color:#ff9c81; }
+#hud #hudSession,#hud > #hudUtility,#hud #minimap,#hud .killicon,#hud .streak,#hud .sk-timer { display:none; }
+#hud.dead-state :is(.h-ammo,.h-health,.match-hint),body.bio-mutant #ammoPanel { visibility:hidden; }
+#hud .match-hint {
+  position:absolute; bottom:calc(18px + var(--sab)); left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:12px; padding:5px 11px; color:#d0d5d2;
+  font:600 11px/1.3 var(--f-label); white-space:nowrap;
+  background:linear-gradient(90deg,transparent,#10191ec9 12%,#10191ec9 88%,transparent);
+}
+.match-hint kbd { padding:1px 3px; border:1px solid #bdc6bf66; color:var(--bone); font:600 11px/1 var(--f-label); }
+.match-keys kbd:not(:first-child) { margin-left:8px; }
+.match-hint button { pointer-events:auto; cursor:pointer; font:inherit; color:inherit; background:transparent; border:0; padding:3px 0; text-shadow:inherit; }
+.match-hint button:is(:focus-visible,:hover) { color:white; }
+#hud .killfeed { right:var(--gr); top:calc(105px + var(--sat)); flex-direction:column-reverse; max-width:46vw; }
+#hud .kf-row { max-width:100%; box-sizing:border-box; gap:8px; border:0; border-right:2px solid #8fcaf2;
+  background:linear-gradient(90deg,#131b20bb,#131b20eb); padding:3px 9px;
+  font:600 14px/1.15 var(--f-label); }
+#hud .kf-row.foe { border-color:#ffa58f; }
+#hud .kf-k,#hud .kf-v { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--bone); }
+#hud .kf-w { display:none; }
+#hud .kf-ico { display:block; width:38px; height:17px; object-fit:contain; color:#d9ccae; }
+#matchNotice { position:absolute; top:42%; left:50%; transform:translate(-50%,-50%); text-align:center; color:var(--bone-dim); font:600 13px/1.4 var(--f-label); letter-spacing:.14em; }
+#matchNotice b { display:block; font:700 34px/1 var(--f-display); color:var(--signal); }
+#hud .crosshair.style-classic { --len:9px; --thickness:2px; --dot-size:2px; }
+#hud .scoreboard { background:rgba(4,8,11,.60); }
+#hud .sb-panel { box-sizing:border-box; width:min(720px,93vw); max-height:84vh; overflow:auto;
+  padding:18px 20px; background:#121a1ff5; border:1px solid #95aba93b; box-shadow:0 8px 32px #0005; }
+#hud .sb-head { display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
+  gap:14px; padding:0 0 12px; margin-bottom:10px; }
+#hud .sb-team { min-width:0; display:flex; align-items:center; gap:10px; }
+#hud .sb-tname { font:700 17px/1 var(--f-label); letter-spacing:.12em; }
+#hud .sb-tscore { font:700 38px/1 var(--f-display); color:var(--bone); }
+#hud .sb-title,#hud .sb-rank-icon,#hud .sb-foot { display:none; }
+#hud .sb-sub { color:var(--bone); font-size:12px; letter-spacing:.06em; }
+#hud .sb-target { color:var(--bone-dim); }
+#hud .sb-cols { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; background:none; }
+#hud .sb-col { min-width:0; background:none; padding:0; border-top:2px solid #8fcaf2; }
+#hud .sb-col:last-child { border-color:#ffa58f; }
+#hud .sb-colhead,#hud .sb-row { grid-template-columns:minmax(0,1fr) 40px 40px; padding:4px 8px; }
+#hud .sb-colhead { color:var(--bone-dim); }
+#hud .sb-row { border-bottom:1px solid #e8e4da1a; font:600 15px/1.2 var(--f-label); }
+#hud .sb-row.me { background:#334e5a88; }
+@media(max-width:760px),(max-height:520px) {
+  #hud .h-compass { width:min(260px,65vw); top:calc(6px + var(--sat)); }
+  #hud .match-strip { top:calc(37px + var(--sat)); grid-template-columns:minmax(62px,auto) 53px minmax(62px,auto); }
+  #hud .match-strip .rb-side { padding:3px 7px; }
+  #hud .match-strip .rb-side b { font-size:21px; }
+  #hud .match-strip .rb-team { font-size:12px; }
+  #hud .match-hint { gap:7px; bottom:calc(10px + var(--sab)); }
+  .match-keys { display:none; }
+  #hud .h-health,#hud .h-ammo { bottom:calc(12px + var(--sab)); padding:6px 9px; }
+  #hud .h-ammo { width:152px; }
+  #hud .h-ammo-n { font-size:39px; }
+  #hud .h-ammo-r { font-size:12px; }
+  #hudWeaponIcon .hud-gun-icon { width:40px; height:18px; }
+  #hud .h-hp-n { font-size:29px; }
+  #hud .h-hp-bar i { width:4px; }
+  #hud .h-wname { font-size:11px; }
+}
+@media(max-width:520px) {
+  #hud .match-hint { bottom:calc(99px + var(--sab)); right:var(--gr); left:auto; transform:none; }
+}
+@media(max-width:520px) {
+  #hud .sb-cols { grid-template-columns:1fr; }
+  #hud .sb-panel { padding:12px; }
+  #hud .sb-head { gap:5px; }
+  #hud .sb-team { gap:5px; }
+  #hud .sb-sub { font-size:10px; }
+}
+#hud:has(.death:not(.hidden)) #matchNotice { z-index:4; }
+#hud .match-strip { text-shadow:none; }
+body:has(#scoreboard:not(.hidden)) .fx-layer .hitmark { visibility:hidden; }
+.fx-layer .hitmark.kill,.fx-layer .hitmark.gold { border:0; box-shadow:none; color:#ff5a40; }
+.fx-layer .hitmark::before,.fx-layer .hitmark::after { background:linear-gradient(90deg,currentColor 0 35%,transparent 35% 65%,currentColor 65%); }

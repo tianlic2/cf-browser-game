@@ -47,13 +47,15 @@ assert.match(admitted,/akgold:[\s\S]*?reloadDuration: 34 \/ 13/);
 const main=await text('scripts/main.js'),audio=await text('scripts/audio.js'),catalog=await text('scripts/guncatalog.js');
 assert.match(main,/loadAdmittedGameBananaView\(id\)/);
 assert.match(main,/primary: "m200"/);assert.match(main,/primary: "akgold"/);
-assert.match(main,/\^Digit\[1-8\]\$/);
-assert.match(catalog,/WORLD_GUN_IDS = \[[^\]]*"m200", "akgold", "kn57"\]/);
-assert.match(catalog,/ENEMY_GUN_IDS = \["ak", "m4", "barrett"\]/,
-  'new local weapons stay out of NPC random loadouts');
+assert.match(main,/\^Digit\[1-9\]\$/);
+assert.match(catalog,/WORLD_GUN_IDS = \[[^\]]*"m200", "akgold", "kn57", "awm_nature"\]/);
+assert.match(catalog,/\{ id: "m200", skin: "stock" \}/,
+  'approved M200 enters the eight-backpack NPC loadout bag');
+assert.match(catalog,/\{ id: "akgold", skin: "stock" \}/,
+  'approved Imperial Gold enters the eight-backpack NPC loadout bag');
 
 const sandbox=vm.createContext({addEventListener(){}});
-vm.runInContext(audio.replace('export class SFX','class SFX')+'\nglobalThis.SFX=SFX;',sandbox);
+vm.runInContext(audio.replace(/^import .*cf_vanilla_catalog\.js.*;$/m, 'const CF_VANILLA=[];').replace('export class SFX','class SFX')+'\nglobalThis.SFX=SFX;',sandbox);
 const sfx=Object.create(sandbox.SFX.prototype),played=[];
 sfx.ready=()=>true;sfx._playMapped=(method,options)=>played.push({method,...options});
 sfx._sample=(id,options)=>{played.push({id,...options});return {};};sfx._note=()=>{};
@@ -69,4 +71,4 @@ assert.deepEqual(played.map(p=>p.id),['akgold_gas','akgold_clipin','akgold_reloa
 for(const [i,frame] of [9,19,25].entries())assert.ok(Math.abs(played[i].delay-frame/13)<1e-12);
 played.length=0;sfx.deploy('rifle',{weaponId:'akgold'});assert.equal(played[0].id,'akgold_select');assert.equal(played[0].delay,0);
 
-console.log('PASS: M200 and Imperial Gold use the reviewed byte-identical rigs, native clips/event audio, arm-free world models, backpacks 6/7, and remain local-only and outside NPC loadouts.');
+console.log('PASS: M200 and Imperial Gold use the reviewed byte-identical rigs, native clips/event audio, arm-free world models, backpacks 6/7, and local NPC loadouts.');

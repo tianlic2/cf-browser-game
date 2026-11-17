@@ -30,7 +30,7 @@ assert.match(helpers, /muzzleT = Infinity;[\s\S]*?updateMuzzleFlash\(0\)/,
 
 const animatePrefix = main.slice(animateStart, main.indexOf('// 一律读', animateStart));
 assert.match(animatePrefix,
-  /if \(bioZombieWeaponViewSuppressed\(\)\) \{[\s\S]*?hideHumanWeaponViewmodelsForBioZombie\(\);[\s\S]*?return;/,
+  /if \(bioZombieWeaponViewSuppressed\(\)\) \{[\s\S]*?hideHumanWeaponViewmodels\(\);[\s\S]*?return;/,
   'weapon animation exits before it can re-enable a gun root');
 assert.ok(renderStart > animateStart, 'render pass rechecks zombie visibility while paused');
 const renderBlock = main.slice(renderStart, main.indexOf('// 显式清屏', renderStart));
@@ -50,7 +50,7 @@ assert.match(sourceView, /root\.position\.set\(0, 0, 0\)[\s\S]*?root\.rotation\.
   'formal view keeps the exact camera-space transform approved in the tuner');
 assert.match(sourceView, /light_hit[\s\S]*?light_miss/,
   'native hit and miss attack variants are selected without procedural posing');
-assert.match(renderBlock, /if \(bioZombieView\)[\s\S]*?hideHumanWeaponViewmodelsForBioZombie\(\)/,
+assert.match(renderBlock, /if \(bioZombieView\)[\s\S]*?hideHumanWeaponViewmodels\(\)/,
   'human weapons remain hidden throughout zombie respawn and paused frames');
 
 console.log('PASS: bio zombies render claws exclusively and never retain a human weapon viewmodel.');

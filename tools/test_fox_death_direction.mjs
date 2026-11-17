@@ -30,11 +30,17 @@ assert.match(enemy, /dead: true, deathDirection: this\.deathDirection/);
 assert.match(enemy, /this\.deathPushX = length > 1e-4 \? x \/ length/);
 assert.match(fox, /const clipName = \['forward', 'back', 'left', 'right'\]/);
 assert.match(fox, /settleDeathClip\(clip\)/);
-assert.match(fox, /const move = speed > \.3 \? 'run\.001' : 'idle-calm'/);
+assert.match(fox, /const move = airborne \? 'jump' : crouching[\s\S]*?'crouchrun'[\s\S]*?'run\.001'/);
 assert.match(fox, /clips\.set\('death-grounded', clips\.get\('left'\)\.clone\(\)\)/,
-  'all directions use the source fall whose final torso is actually grounded');
+  'lateral deaths retain the source fall whose final torso is actually grounded');
+assert.match(fox, /nativeBackFall \? 'back' : 'death-grounded'/,
+  'a frontal hit uses the anatomically correct native backward fall');
+assert.match(fox, /BACK_SETTLE_ROLL \* settle/,
+  'the native backward fall continues settling after the head first contacts the floor');
+assert.match(fox, /BACK_SETTLE_LIFT \* settle/,
+  'the settled body receives a matching floor-clearance correction');
 assert.match(fox, /GROUNDED_DEATH_YAW\[clipName\]/,
-  'the grounded source fall is rotated to preserve the selected impact direction');
+  'only lateral grounded falls need mirroring');
 assert.match(fox, /previous\.crossFadeTo\(death, \.08, false\)/,
   'death blends from the current locomotion pose instead of snapping');
 assert.match(fox, /function reactionClip[\s\S]*\^Bip01_\(Spine\|Neck\|Head\)/,
@@ -68,6 +74,52 @@ const { isHeadshotIntersection } = await import('../scripts/head_hit.js');
 assert.equal(await loadFoxSoldier(), true, 'the native Fox source loads');
 const rig = new FoxSoldierRig(null);
 assert.equal(rig.source, 'fox-original-fbx');
+const skinnedMinY = () => {
+  rig.root.updateMatrixWorld(true);
+  const mesh = rig.meshes[0], positions = mesh.geometry.attributes.position;
+  const point = new THREE.Vector3();
+  let minY = Infinity;
+  for (let i = 0; i < positions.count; i++) {
+    point.fromBufferAttribute(positions, i);
+    mesh.applyBoneTransform(i, point).applyMatrix4(mesh.matrixWorld);
+    minY = Math.min(minY, point.y);
+  }
+  return minY;
+};
+for (const clip of ['jump', 'crouch-calm', 'crouchrun', 'reload-crouch-ak',
+  'reload-crouch-rifle'])
+  assert.ok(rig.actions.has(clip), `the runtime action map contains ${clip}`);
+rig.animate(1 / 60, { dead: false, airborne: true, jumpPhase: .35,
+  speed: 3, flinch: 0, reload: 0 });
+assert.equal(rig.baseName, 'jump', 'airborne Fox uses the authored jump action');
+assert.ok(Math.abs(rig.baseAction.time / rig.baseAction.getClip().duration - .35) < 1e-5,
+  'jump pose follows ballistic progress instead of animation frame rate');
+rig.animate(1 / 60, { dead: false, airborne: true, jumpPhase: 1,
+  speed: 3, flinch: 0, reload: 0 });
+assert.ok(Math.abs(rig.baseAction.time - rig.baseAction.getClip().duration) < 1e-5,
+  'the landing sample clamps on the final jump pose instead of looping to takeoff');
+rig.reset();
+for (let i = 0; i < 20; i++) rig.animate(1 / 60,
+  { dead: false, airborne: false, crouching: false, speed: 0, flinch: 0, reload: 0 });
+rig.root.updateMatrixWorld(true);
+const standingHeadY = rig.headBone.getWorldPosition(new THREE.Vector3()).y;
+rig.animate(1 / 60, { dead: false, airborne: false, crouching: true,
+  speed: 0, flinch: 0, reload: .2 });
+assert.equal(rig.baseName, 'crouch-calm', 'stationary crouch uses the planted authored stance');
+assert.equal(rig.reloadAction?.getClip().name, 'reload-crouch-rifle',
+  'crouched rifle reload keeps the native upper-body action');
+for (let i = 0; i < 35; i++) rig.animate(1 / 60,
+  { dead: false, airborne: false, crouching: true, speed: 0, flinch: 0, reload: .3 });
+rig.root.updateMatrixWorld(true);
+const crouchedHeadY = rig.headBone.getWorldPosition(new THREE.Vector3()).y;
+const crouchedMinY = skinnedMinY();
+assert.ok(crouchedMinY >= -.008 && crouchedMinY <= .035,
+  `crouched Fox must keep its visible feet on the floor (${crouchedMinY})`);
+assert.ok(standingHeadY - crouchedHeadY > .22,
+  `crouching must lower the head instead of lifting the feet (${standingHeadY}, ${crouchedHeadY})`);
+rig.animate(1 / 60, { dead: false, crouching: true,
+  speed: 2, flinch: 0, reload: .3 });
+assert.equal(rig.baseName, 'crouchrun', 'moving crouch uses the authored crouch run');
 assert.ok(rig.meshes.every(mesh => mesh.userData.headRegion?.bone === rig.headBone),
   'both the body material and face material carry head-region metadata');
 rig.root.updateMatrixWorld(true);
@@ -109,9 +161,9 @@ for (const [impact, direction] of [
   for (let i = 0; i < 90; i++) rig.animate(1 / 60,
     { dead: true, deathDirection: enemy.deathDirection, flinch: 0, speed: 0 });
   assert.equal(rig.baseName, direction, 'the authored directional fall is played');
-  const expectedYaw = { left: 0, right: Math.PI, forward: -Math.PI / 2, back: Math.PI / 2 }[direction];
+  const expectedYaw = { left: 0, right: Math.PI, forward: -Math.PI / 2, back: 0 }[direction];
   assert.ok(Math.abs(rig.fox.rotation.y - expectedYaw) < 1e-6,
-    `${direction} must rotate the grounded fall toward the impact direction`);
+    `${direction} must preserve the native front/back pose or mirror only a lateral fall`);
   rig.root.updateMatrixWorld(true);
   const mesh = rig.meshes[0], positions = mesh.geometry.attributes.position;
   const point = new THREE.Vector3();
@@ -122,9 +174,25 @@ for (const [impact, direction] of [
     minY = Math.min(minY, point.y);
   }
   assert.ok(minY >= -0.005, `${direction} corpse must not sink under the floor (${minY})`);
+  const boneLimits = direction === 'back'
+    ? { Bip01_Head: .38, Bip01_Pelvis: .38, Bip01_Spine2: .38 }
+    : { Bip01_Head: .34, Bip01_Pelvis: .34, Bip01_Spine2: .34 };
   for (const boneName of ['Bip01_Head', 'Bip01_Pelvis', 'Bip01_Spine2']) {
     const y = rig.fox.getObjectByName(boneName).getWorldPosition(new THREE.Vector3()).y;
-    assert.ok(y < .34, `${direction} ${boneName} must rest near the floor instead of suspending the torso (${y})`);
+    assert.ok(y < boneLimits[boneName],
+      `${direction} ${boneName} must remain within its authored grounded envelope (${y})`);
+  }
+  if (direction === 'back') {
+    const head = rig.fox.getObjectByName('Bip01_Head').getWorldPosition(new THREE.Vector3());
+    assert.ok(head.z < -.6 && Math.abs(head.z) > Math.abs(head.x) * 4,
+      `a frontal kill must visibly carry the head backward, not sideways (${head.x}, ${head.z})`);
+    const pelvis = rig.fox.getObjectByName('Bip01_Pelvis').getWorldPosition(new THREE.Vector3());
+    assert.ok(Math.abs(pelvis.y - head.y) < .08,
+      `head and hips must finish on the same grounded plane (${head.y}, ${pelvis.y})`);
+    for (const footName of ['Bip01_L_Foot', 'Bip01_R_Foot']) {
+      const foot = rig.fox.getObjectByName(footName).getWorldPosition(new THREE.Vector3());
+      assert.ok(foot.y < .25, `${footName} must not remain suspended after the backward fall (${foot.y})`);
+    }
   }
 }
 console.log('PASS: Fox hit reaction preserves the grip; directional deaths settle head, chest and hips on the floor.');

@@ -1,9 +1,10 @@
-import { WEAPON_TUNING } from './weapon_tuning.js?v=approved-20261029';
+import { WEAPON_TUNING } from './weapon_tuning.js?v=awm-pose-20261106';
 
 // Authored firearm hit damage that is intentionally independent from ordinary range falloff.
 // Direct hits roll uniformly around the requested average; penetration multipliers are applied
 // later by the firing pipeline so wooden crates still weaken both headshots and Barrett body hits.
 export const HEADSHOT_DAMAGE_AVERAGES = Object.freeze({
+  awm_nature: WEAPON_TUNING.awm_nature.stats.head,
   ak: WEAPON_TUNING.ak.stats.head,
   m4: WEAPON_TUNING.m4.stats.head,
   ironbeast: WEAPON_TUNING.ironbeast.stats.head,

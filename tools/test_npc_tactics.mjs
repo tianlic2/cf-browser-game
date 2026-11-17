@@ -62,6 +62,17 @@ for (const profile of profiles.slice(0, 3)) {
 assert.equal(chooseRouteDiversion({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 8 },
   profiles[0], () => true), null, 'short approaches stay direct');
 
+const reroutes = Array.from({ length: 6 }, (_, variant) => chooseRouteDiversion(
+  { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 40 }, profiles[1], () => true,
+  [], variant));
+assert.ok(new Set(reroutes.map(goal => `${goal.x.toFixed(2)},${goal.z.toFixed(2)}`)).size >= 4,
+  'the same soldier varies committed lane and depth across replans');
+const danger = reroutes[0];
+const safer = chooseRouteDiversion({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 40 },
+  profiles[1], () => true, [], 0, [{ ...danger, radius: 8, weight: 3 }]);
+assert.ok(Math.hypot(safer.x - danger.x, safer.z - danger.z) > 8,
+  'recent death zones make an alternate valid lane preferable');
+
 const combatReservations = [];
 for (const profile of profiles.slice(0, 5)) {
   const goal = chooseCombatPosition({ x: 0, y: 0, z: 18 }, { x: 0, y: 0, z: 0 },

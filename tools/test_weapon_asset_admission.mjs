@@ -15,17 +15,20 @@ for (const id of ["smg", "shotgun", "battle"]) {
     `${id} must not remain in the player weapon definitions`);
 }
 
-assert.match(main, /const PRIMARY_IDS = \["ak", "m4", "barrett", "scar", "m200", "akgold"\];/,
-  "only the three user-approved complete imports may extend the restored primary set");
-assert.match(catalog, /export const ENEMY_GUN_IDS = \["ak", "m4", "barrett"\];/,
-  "incomplete candidates must not remain in the NPC random weapon pool");
+assert.match(main, /\["ak", "m4", "barrett", "scar", "m200", "akgold", "kn57"\]/,
+  "only user-approved complete imports extend the restored primary set");
+for (const entry of ['ak','m4','barrett','scar','m200','akgold','kn57']) {
+  assert.match(catalog, new RegExp(`\\{ id: "${entry}", skin:`),
+    `${entry} belongs to an admitted NPC backpack loadout`);
+}
 
 const backpacks = main.match(/const BACKPACKS = \[([\s\S]*?)\n\];/)?.[1] ?? "";
-assert.equal((backpacks.match(/primary:/g) ?? []).length, 7,
-  "BaiHu, M200 and Imperial Gold each have one admitted backpack");
+assert.equal((backpacks.match(/primary:/g) ?? []).length, 8,
+  "all eight admitted primary backpacks remain registered");
 assert.match(backpacks, /primary: "scar"/);
 assert.match(backpacks, /primary: "m200"/);
 assert.match(backpacks, /primary: "akgold"/);
+assert.match(backpacks, /primary: "kn57"/);
 
 for (const path of ["assets/weapons/realistic_pbr", "audio/fps_cc0"]) {
   assert.equal(fs.existsSync(new URL(`../${path}`, import.meta.url)), false,

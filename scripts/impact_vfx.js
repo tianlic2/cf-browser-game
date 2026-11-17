@@ -27,34 +27,119 @@ function raggedPath(ctx, cx, cy, radius, count, seed) {
   ctx.closePath();
 }
 
-function bulletTexture() {
-  return texture(128, (ctx, s) => {
-    const c = s / 2;
-    let haze = ctx.createRadialGradient(c, c, 5, c, c, 59);
-    haze.addColorStop(0, "rgba(8,7,6,.78)");
-    haze.addColorStop(.42, "rgba(25,23,21,.54)");
-    haze.addColorStop(.78, "rgba(45,42,38,.15)");
-    haze.addColorStop(1, "rgba(45,42,38,0)");
-    ctx.fillStyle = haze;
-    ctx.fillRect(0, 0, s, s);
-    // Chipped material around a small dark puncture; off-center marks keep it
-    // from reading like a stamped target icon.
-    raggedPath(ctx, c + 2, c - 1, 24, 19, 791);
-    ctx.fillStyle = "rgba(135,128,115,.52)";
-    ctx.fill();
-    raggedPath(ctx, c + 1, c, 18, 17, 203);
-    ctx.fillStyle = "rgba(35,32,28,.9)";
-    ctx.fill();
-    raggedPath(ctx, c, c + 1, 11, 14, 403);
-    ctx.fillStyle = "rgba(5,5,5,.98)";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(16,15,14,.52)";
-    ctx.lineWidth = 1.4;
-    for (const [a, len] of [[.3, 28], [1.75, 33], [3.55, 31], [5.25, 27]]) {
-      ctx.beginPath();
-      ctx.moveTo(c + Math.cos(a) * 18, c + Math.sin(a) * 18);
-      ctx.lineTo(c + Math.cos(a + .08) * len, c + Math.sin(a + .08) * len);
-      ctx.stroke();
+const surfaces = ['stone', 'metal', 'wood', 'cloth'];
+
+// Four rows of deterministic variants share a single instanced decal draw.
+function bulletAtlas() {
+  return texture(512, ctx => {
+    for (let column = 0; column < surfaces.length; column++) {
+      const surface = surfaces[column];
+      for (let row = 0; row < 4; row++) {
+        let seed = 109 + column * 3929 + row * 773;
+        const random = () => ((seed = Math.imul(seed, 1664525) + 1013904223 | 0) >>> 0) / 4294967296;
+        ctx.save();
+        ctx.translate(column * 128 + 64, row * 128 + 64);
+        const patch = (x,y,rx,ry,color) => {
+          ctx.save();
+          ctx.translate(x,y);
+          ctx.scale(rx,ry);
+          raggedPath(ctx,0,0,1,17,Math.round(random()*65535));
+          ctx.fillStyle=color;
+          ctx.fill();
+          ctx.restore();
+        };
+        const stroke = (x,y,dx,dy,color,width) => {
+          ctx.beginPath(); ctx.moveTo(x,y);
+          ctx.quadraticCurveTo(x+dx*.48+random()*2-1,y+dy*.57,x+dx,y+dy);
+          ctx.lineWidth=width; ctx.strokeStyle=color; ctx.stroke();
+        };
+        if (surface === 'metal') {
+          // Broken paint lip with a narrow, interrupted exposed-steel edge.
+          patch(0,0,24,21,'rgba(39,40,39,.64)');
+          patch(1,1,19,17,'#797e79');
+          patch(-2,-2,17,15,'#3c4140');
+          for(let i=0;i<7;i++) {
+            const a=random()*Math.PI*2, r=19+random()*9;
+            patch(Math.cos(a)*r,Math.sin(a)*r,1+random()*3,1+random()*2,'#777b75');
+          }
+          patch(-1,0,9,10,'#171b1a');
+        } else if (surface === 'wood') {
+          for(let i=0;i<18;i++) {
+            const x=(random()-.5)*24, sign=i%2?1:-1, length=10+random()*42;
+            stroke(x,sign*4,(random()-.5)*6,sign*length,
+              i%3?'rgba(156,123,84,.83)':'rgba(39,29,22,.87)',1+random()*3);
+          }
+          patch(0,0,14,23,'#947656');
+          patch(-1,2,11,15,'#543e30');
+          patch(0,0,8,11,'#251f1a');
+        } else if (surface === 'cloth') {
+          ctx.rotate((random()-.5)*.7);
+          patch(0,0,14,9,'rgba(84,84,65,.76)');
+          patch(-1,1,11,8,'rgba(42,43,34,.95)');
+          const pull = row % 2 ? 1 : -1;
+          for(let i=0;i<13;i++) {
+            const j=(random()-.5)*11;
+            const x=(random()-.5)*16, y=(random()-.5)*10;
+            const dx = i<8 ? pull*(3+random()*13) : j;
+            const dy = i<8 ? j*.65 : (i%2?1:-1)*(3+random()*7);
+            stroke(x,y,dx,dy,i%3?'rgba(134,131,102,.73)':'rgba(62,65,49,.88)',.6+random()*1.25);
+          }
+          patch(-2,1,7,5,'#1b201a');
+        } else {
+          patch(0,0,32,25,'rgba(117,111,99,.65)');
+          patch(2,1,23,20,'#a29a87');
+          patch(-2,-2,17,14,'#615e55');
+          patch(-1,0,10,9,'#302f2a');
+          for(let i=0;i<15;i++) {
+            const a=random()*Math.PI*2, r=22+random()*24;
+            patch(Math.cos(a)*r,Math.sin(a)*r,1+random()*3,1+random()*2,'rgba(156,149,131,.68)');
+          }
+        }
+        // Break up flat pigment on the cut edges without painting beyond the tear.
+        ctx.globalCompositeOperation='source-atop';
+        for(let i=0;i<1600;i++) {
+          ctx.fillStyle=i%2 ? 'rgba(12,14,13,.21)' : 'rgba(196,188,161,.14)';
+          ctx.fillRect(random()*94-47,random()*94-47,.7+random()*2,.8+random()*2);
+        }
+        ctx.restore();
+      }
+    }
+  });
+}
+
+function fleckTexture() {
+  return texture(32, ctx => {
+    ctx.fillStyle='white';
+    ctx.beginPath();ctx.moveTo(1,14);ctx.lineTo(15,9);ctx.lineTo(31,15);
+    ctx.lineTo(23,20);ctx.lineTo(9,19);ctx.closePath();ctx.fill();
+  });
+}
+
+function sparkTexture() {
+  return texture(64, ctx => {
+    const tail = ctx.createLinearGradient(3,0,61,0);
+    tail.addColorStop(0,'rgba(245,117,45,0)');
+    tail.addColorStop(.65,'rgba(255,204,130,.73)');
+    tail.addColorStop(.9,'#fff7df');
+    tail.addColorStop(1,'rgba(255,237,196,.22)');
+    ctx.fillStyle = tail;
+    ctx.beginPath(); ctx.moveTo(3,32); ctx.lineTo(52,24);
+    ctx.quadraticCurveTo(67,32,52,40); ctx.closePath(); ctx.fill();
+  });
+}
+
+function dustTexture() {
+  return texture(128, ctx => {
+    // Overlapping, translucent lobes keep the edge porous as the puff expands.
+    for (let i = 0; i < 23; i++) {
+      const a = i * 2.39996, d = Math.sqrt(i/23)*34;
+      const x = 64 + Math.cos(a)*d, y = 64 + Math.sin(a)*d*.78;
+      const radius = 16 + 8*(1+Math.cos(i*3.17));
+      const g = ctx.createRadialGradient(x,y,0,x,y,radius);
+      g.addColorStop(0,'rgba(255,255,255,.30)');
+      g.addColorStop(.58,'rgba(246,244,236,.13)');
+      g.addColorStop(1,'rgba(245,243,235,0)');
+      ctx.fillStyle = g; ctx.fillRect(x-radius,y-radius,2*radius,2*radius);
     }
   });
 }
@@ -72,50 +157,83 @@ function dropletTexture() {
   });
 }
 
-function cloudTexture(red) {
-  return texture(128, (ctx, s) => {
-    const c = s / 2;
-    const g = ctx.createRadialGradient(c, c, 5, c, c, 58);
-    if (red) {
-      g.addColorStop(0, "rgba(97,25,27,.46)");
-      g.addColorStop(.48, "rgba(79,24,25,.2)");
-      g.addColorStop(1, "rgba(74,22,23,0)");
-    } else {
-      g.addColorStop(0, "rgba(135,125,110,.48)");
-      g.addColorStop(.5, "rgba(113,105,95,.21)");
-      g.addColorStop(1, "rgba(100,94,85,0)");
-    }
+function bloodCloudTexture() {
+  return texture(128, (ctx, size) => {
+    const center = size/2;
+    const g = ctx.createRadialGradient(center,center,5,center,center,58);
+    g.addColorStop(0, "rgba(97,25,27,.46)");
+    g.addColorStop(.48, "rgba(79,24,25,.2)");
+    g.addColorStop(1, "rgba(74,22,23,0)");
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, s, s);
+    ctx.fillRect(0,0,size,size);
   });
 }
 
 export class ImpactVfx {
-  constructor(scene) {
+  constructor(scene, camera = null) {
+    this.camera = camera;
+    this.detailRay = new THREE.Raycaster();
+    this.instanceWorld = new THREE.Matrix4();
+    this.screenVelocity = new THREE.Vector3();
     this.scene = scene;
     this.normalMatrix = new THREE.Matrix3();
+    this.viewRotation = new THREE.Matrix3();
     this.up = new THREE.Vector3(0, 0, 1);
     this.markCursor = 0;
     this.markCount = 0;
     // 弹孔使用单个 InstancedMesh 循环覆写：持续交火时画面能留下足够多的战斗痕迹，
-    // 但不会为每一发永久增加一个 Mesh / draw call。
+    // 但不会为每一发永久增加一个 Mesh / draw call。每个实例单独计时，
+    // 末段逐渐透明并从提交列表删除，低频射击也不会把旧弹痕永久留在地图上。
     this.markLimit = 144;
+    this.markLife = 10;
+    this.markFade = 2;
+    this.marks = Array.from({ length: this.markLimit }, () => ({
+      matrix: new THREE.Matrix4(), t: Infinity, life: 0, tile: 0,
+    }));
+    const markGeometry = new THREE.PlaneGeometry(1, 1);
+    this.markOpacity = new THREE.InstancedBufferAttribute(
+      new Float32Array(this.markLimit), 1,
+    );
+    this.markOpacity.setUsage(THREE.DynamicDrawUsage);
+    markGeometry.setAttribute("instanceOpacity", this.markOpacity);
+    this.markTiles = new THREE.InstancedBufferAttribute(new Float32Array(this.markLimit), 1);
+    this.markTiles.setUsage(THREE.DynamicDrawUsage);
+    markGeometry.setAttribute("instanceTile", this.markTiles);
+    // 运输船的 Source 几何整体做过镜像，且地图表面用烘焙光照的
+    // MeshBasicMaterial。弹痕是覆在表面上的贴花，不应再被世界灯光压黑；
+    // DoubleSide 则防止导入网格的镜像/双面三角形让贴花在某些朝向被剔除。
+    const markMaterial = new THREE.MeshBasicMaterial({
+      map: bulletAtlas(), transparent: true, opacity: .94, depthWrite: false,
+      side: THREE.DoubleSide, toneMapped: false,
+      polygonOffset: true, polygonOffsetFactor: -1,
+    });
+    markMaterial.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace("#include <common>", "#include <common>\nattribute float instanceOpacity;\nattribute float instanceTile;\nvarying float vInstanceOpacity;")
+        .replace("#include <uv_vertex>", "#include <uv_vertex>\nvMapUv = (vMapUv + vec2(mod(instanceTile,4.),3.-floor(instanceTile/4.))) * .25;")
+        .replace("#include <begin_vertex>", "vInstanceOpacity = instanceOpacity;\n#include <begin_vertex>");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying float vInstanceOpacity;")
+        .replace("#include <color_fragment>", "#include <color_fragment>\ndiffuseColor.a *= vInstanceOpacity;");
+    };
+    markMaterial.customProgramCacheKey = () => "impact-mark-surface-atlas-v2";
     this.markMesh = new THREE.InstancedMesh(
-      new THREE.PlaneGeometry(1, 1),
-      new THREE.MeshStandardMaterial({
-        map: bulletTexture(), transparent: true, opacity: .94, depthWrite: false,
-        roughness: 1, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1,
-      }), this.markLimit,
+      markGeometry, markMaterial, this.markLimit,
     );
     this.markMesh.count = 0;
+    this.markMesh.name = "bullet-impact-marks";
     this.markMesh.frustumCulled = false;
     this.markMesh.renderOrder = 1;
+    this.markMesh.raycast = () => {};
     this.markMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.markMesh);
 
     const drop = dropletTexture();
-    const bloodHaze = cloudTexture(true);
-    const dust = cloudTexture(false);
+    const bloodHaze = bloodCloudTexture();
+    const dust = dustTexture();
+    this.sparkMap = sparkTexture();
+    this.dustMap = dust;
+    this.fleckMap = fleckTexture();
     this.particles = [];
     for (let i = 0; i < 96; i++) {
       const material = new THREE.SpriteMaterial({
@@ -132,6 +250,23 @@ export class ImpactVfx {
     // 每条共用同一个低面数圆柱几何，只保留独立材质以便逐条淡出；池耗尽时循环复用。
     this.tracerCursor = 0;
     this.tracerGeometry = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
+    this.shipTracerGeometry = new THREE.CylinderGeometry(1, 1, 1, 8, 6, true);
+    // Vertex colour + additive blending makes the dim tail taper into the air.
+    for (const geom of [this.tracerGeometry,this.shipTracerGeometry]) {
+      const pos=geom.attributes.position, rgb=[];
+      for (let i=0;i<pos.count;i++) {
+        const along=pos.getY(i)+.5;
+        if (geom===this.shipTracerGeometry) {
+          const radius=.13+.87*Math.sin(along*1.8);
+          pos.setX(i,pos.getX(i)*radius);pos.setZ(i,pos.getZ(i)*radius);
+          rgb.push(.06+1.6*along,.12*along+1.02*along*along,.65*along**3);
+        } else rgb.push(1,1,1);
+      }
+      geom.setAttribute('color',new THREE.Float32BufferAttribute(rgb,3));
+    }
+    this.smokeOrigin=new THREE.Vector3();
+    this.smokeVelocity=new THREE.Vector3();
+    this.wakePosition=new THREE.Vector3();
     this.tracers = [];
     this.tracerUp = new THREE.Vector3(0, 1, 0);
     this.tracerMid = new THREE.Vector3();
@@ -141,7 +276,7 @@ export class ImpactVfx {
     this.tracerVector = new THREE.Vector3();
     for (let i = 0; i < 40; i++) {
       const material = new THREE.MeshBasicMaterial({
-        color: 0xffd28a, transparent: true, opacity: 0,
+        color: 0xffd28a, vertexColors:true, transparent: true, opacity: 0,
         depthWrite: false, blending: THREE.AdditiveBlending,
       });
       const mesh = new THREE.Mesh(this.tracerGeometry, material);
@@ -157,6 +292,24 @@ export class ImpactVfx {
         distance: 0, t: 1, life: 0, speed: 0, segment: 0, radius: 0,
       });
     }
+  }
+
+  _syncMarks() {
+    let visible = 0;
+    for (const mark of this.marks) {
+      if (mark.t >= mark.life) continue;
+      const fadeAt = Math.max(0, mark.life - this.markFade);
+      const opacity = mark.t <= fadeAt ? 1 : Math.max(0, (mark.life - mark.t) / this.markFade);
+      this.markMesh.setMatrixAt(visible, mark.matrix);
+      this.markOpacity.setX(visible, opacity);
+      this.markTiles.setX(visible, mark.tile);
+      visible++;
+    }
+    this.markCount = visible;
+    this.markMesh.count = visible;
+    this.markMesh.instanceMatrix.needsUpdate = true;
+    this.markOpacity.needsUpdate = true;
+    this.markTiles.needsUpdate = true;
   }
 
   _placeTracer(tracer) {
@@ -217,61 +370,212 @@ export class ImpactVfx {
     item.speed = kind === "enemy" ? 175 : 235;
     item.segment = kind === "enemy" ? 1.25 : 1.65;
     item.radius = kind === "enemy" ? .012 : .009;
+    const shipRound=this.transportCombat && kind==="enemy";
+    item.mesh.geometry=shipRound ? this.shipTracerGeometry : this.tracerGeometry;
+    if (shipRound) {
+      item.speed=260; item.segment=3.5; item.radius=.025;
+      // A few short-lived wisps near the muzzle linger after the hot head passes.
+      const reach=Math.min(item.distance,6.5);
+      if (reach>2) for (const fraction of [.25,.66]) {
+        this.wakePosition.copy(start).addScaledVector(item.dir,reach*(fraction+.1*Math.random()));
+        const w=this.emit('dust',this.wakePosition,this.smokeVelocity.copy(item.dir).multiplyScalar(.38),
+          .06,.46+Math.random()*.2,0);
+        if (w) {w.alpha=.18;w.grow=2;w.sprite.material.opacity=0;}
+      }
+    }
     item.t = 0;
-    item.life = Math.min(.32, Math.max(.055,
+    item.life = Math.min(shipRound?.64:.32, Math.max(.055,
       (item.distance + item.segment - .42) / item.speed));
-    item.mesh.material.color.setHex(kind === "enemy" ? 0xff6a32 : 0xffd28a);
+    item.mesh.material.color.setHex(shipRound ? 0xffdfa9 : kind === "enemy" ? 0xff6a32 : 0xffd28a);
     this._placeTracer(item);
   }
 
-  normal(hit) {
+  normal(hit, incomingDirection = null) {
     if (!hit?.face || !hit.object?.matrixWorld) return null;
-    this.normalMatrix.getNormalMatrix(hit.object.matrixWorld);
-    return hit.face.normal.clone().applyMatrix3(this.normalMatrix).normalize();
+    let world = hit.object.matrixWorld;
+    if (hit.instanceId != null && hit.object.isInstancedMesh) {
+      hit.object.getMatrixAt(hit.instanceId, this.instanceWorld);
+      world = this.instanceWorld.premultiply(world);
+    }
+    this.normalMatrix.getNormalMatrix(world);
+    const normal = hit.face.normal.clone().applyMatrix3(this.normalMatrix).normalize();
+    // DoubleSide 射线可以命中三角形的背面，镜像导入还会翻转绕序。
+    // 可视贴花必须朝向子弹来处：法线与入射方向同向时就翻转。
+    if (incomingDirection && normal.dot(incomingDirection) > 0) normal.multiplyScalar(-1);
+    return normal;
   }
 
-  surface(hit, bullet = true) {
-    const n = this.normal(hit);
+  surface(hit, bullet = true, incomingDirection = null) {
+    // Decorative sheets and battens can sit just in front of the resolved box.
+    // Look back along this shot only within its surface skin, after gameplay resolved it.
+    if (bullet && hit.object.impactLayers && incomingDirection) {
+      const ray = this.detailRay;
+      const skin = Math.min(.32,hit.distance ?? .32);
+      ray.ray.origin.copy(hit.point).addScaledVector(incomingDirection,-skin);
+      ray.ray.direction.copy(incomingDirection);
+      ray.far = skin + .25;
+      hit = ray.intersectObjects(hit.object.impactLayers,false)[0] ?? hit;
+    }
+    const n = this.normal(hit, incomingDirection);
     if (!n) return;
+    const info = hit.object.userData;
+    const surface = info.impactSurfaceAt?.(hit.uv) ?? info.impactSurface ??
+      (info.bulletMaterial === 'wood' ? 'wood' : 'stone');
+    const pos = hit.point.clone().addScaledVector(n, .006);
     if (bullet) {
-      const q = new THREE.Quaternion().setFromUnitVectors(this.up, n);
-      q.multiply(new THREE.Quaternion().setFromAxisAngle(this.up, Math.random() * Math.PI * 2));
-      const radius = .075 + Math.random() * .04;
-      const pos = hit.point.clone().addScaledVector(n, .006);
-      const matrix = new THREE.Matrix4().compose(pos, q, new THREE.Vector3(radius, radius, 1));
-      this.markMesh.setMatrixAt(this.markCursor, matrix);
+      const q = new THREE.Quaternion().setFromUnitVectors(this.up,n);
+      let angle = Math.random() * Math.PI * 2;
+      if (surface === 'wood' || surface === 'cloth') {
+        // Vertical crate planks and woven sides have a persistent local direction.
+        const localUp = new THREE.Vector3(0,1,0);
+        if (info.impactGrainAxis && hit.instanceId != null) {
+          localUp.copy(info.impactGrainAxis).transformDirection(this.instanceWorld);
+        }
+        localUp.applyQuaternion(q.clone().invert());
+        if (Math.hypot(localUp.x,localUp.y)>.1) angle = Math.atan2(-localUp.x,localUp.y);
+        angle += (Math.random()-.5)*.25;
+      }
+      q.multiply(new THREE.Quaternion().setFromAxisAngle(this.up,angle));
+      const size = (.15 + Math.random()*.045) * (surface==='cloth' ? .85 : 1);
+      const mark = this.marks[this.markCursor];
+      mark.matrix.compose(pos,q,new THREE.Vector3(size,size,1));
+      mark.tile = surfaces.indexOf(surface) + 4 * Math.floor(Math.random()*4);
+      mark.t = 0;
+      mark.life = this.markLife;
       this.markCursor = (this.markCursor + 1) % this.markLimit;
-      this.markCount = Math.min(this.markCount + 1, this.markLimit);
-      this.markMesh.count = this.markCount;
-      this.markMesh.instanceMatrix.needsUpdate = true;
+      this._syncMarks();
     }
-    // A few muted chips and one soft dust wisp; no glowing yellow spheres.
-    for (let i = 0; i < 3; i++) {
-      const v = n.clone().multiplyScalar(.35 + Math.random() * 1.1);
-      v.x += (Math.random() - .5) * 1.1;
-      v.y += (Math.random() - .3) * 1.0;
-      v.z += (Math.random() - .5) * 1.1;
-      this.emit("dust", hit.point, v, .065 + Math.random() * .055, .22 + Math.random() * .18, 2.0);
+    if (bullet && (surface === 'metal' || surface === 'wood' || surface === 'stone')) {
+      this.impactBurst(surface,pos,n,incomingDirection,info.impactGrainAxis);
+      return;
+    }
+    if (bullet) {
+      for (let i=0; i<2; i++) {
+        const v=n.clone().multiplyScalar(.5+Math.random());
+        v.x+=(Math.random()-.5)*.8; v.y+=Math.random()*.6;
+        this.emit("dust",pos,v,.028,.25+Math.random()*.12,2,surface);
+      }
+    }
+    this.puff(pos,n,surface,false);
+  }
+
+  impactBurst(surface,pos,n,incoming,grainAxis) {
+    const metal = surface==='metal', wood = surface==='wood';
+    // One tangent fan per impact, with individual spread inside it. At grazing
+    // angles its axis follows the shot across the wall; head-on fans vary.
+    const tangent = incoming ? incoming.clone() : new THREE.Vector3();
+    tangent.addScaledVector(n,-tangent.dot(n));
+    const grazing = Math.min(1,tangent.length());
+    if (wood && grainAxis) {
+      tangent.copy(grainAxis).transformDirection(this.instanceWorld);
+      tangent.addScaledVector(n,-tangent.dot(n));
+    } else if (grazing<.18 || wood) {
+      tangent.set(Math.random()-.5,wood ? .8 : Math.random()-.5,Math.random()-.5);
+      tangent.addScaledVector(n,-tangent.dot(n));
+    }
+    if (tangent.lengthSq()<.0001) tangent.set(1,0,0).addScaledVector(n,-n.x);
+    tangent.normalize();
+    if (wood && Math.random()<.5) tangent.negate();
+    const across = new THREE.Vector3().crossVectors(n,tangent);
+    const energy = Math.random();
+    const count = (metal ? 2 : 1) + Math.floor(energy*(metal ? 5 : 4));
+    // Behind penetrated crates, distant bursts read as a few specks. Keep
+    // their longer-lived debris from displacing the nearer impact.
+    const distant = this.camera && this.camera.position.distanceToSquared(pos)>144;
+    for (let i=0; i<(distant ? Math.min(count,2) : count); i++) {
+      const speed = .4+Math.random()*(metal?3.2:1.9);
+      const v = n.clone().multiplyScalar((.32+Math.random()*.80)*speed);
+      const fan = (Math.random()-.5)*(metal?1.85:1.6);
+      v.addScaledVector(tangent,Math.cos(fan)*speed*(.48+grazing*.8));
+      v.addScaledVector(across,Math.sin(fan)*speed);
+      v.y += (metal?.2:.36)+Math.random()*.42;
+      const size = metal ? .020+speed*.017 : .014+Math.random()*.046;
+      const life = metal ? .06+speed*.04+Math.random()*.07 : .24+size*3+Math.random()*.17;
+      this.emit("dust",pos,v,size,life,metal?5.0:wood?7.2:9.1,surface);
+    }
+    if (!metal || (!distant && energy>.79)) this.puff(pos,n,surface,distant);
+  }
+
+  muzzleSmoke(pos,dir) {
+    // The narrow jet outruns the softer gas at the crown, then drag and
+    // buoyancy take over. One pair per discharge, including shotguns.
+    for (const jet of [true,false]) {
+      const vel=this.smokeVelocity.copy(dir).multiplyScalar(jet?1.75:.47);
+      vel.y+=jet?.18:.40;
+      vel.x+=(Math.random()-.35)*.24;
+      const p=this.emit('dust',pos,vel,jet?.095:.12,(jet?.53:.72)+Math.random()*.18,0);
+      if (!p) continue;
+      p.alpha=jet?.58:.44;
+      p.grow=jet?3.7:2.7;
+      p.sprite.material.color.setHex(jet?0xc2c8c9:0xa6adaf);
+      p.sprite.material.opacity=0;
     }
   }
 
-  emit(kind, point, velocity, size, life, gravity) {
-    const p = this.particles.find((item) => item.kind === kind && item.t >= item.life);
+  puff(pos,n,surface,distant) {
+    const wood = surface==='wood', mineral = surface==='stone';
+    // Feed an existing young plume at nearby hits. Its age keeps advancing
+    // so repeated shots cannot freeze the plume or pin it to the crosshair.
+    const nearby = this.particles.find(p=>p.kind==='dust' && !p.fragment &&
+      p.dustSurface===surface && p.t<p.life && p.t<.38 && p.sprite.position.distanceToSquared(pos)<.14);
+    if (nearby) {
+      nearby.size = Math.min(.43,nearby.size+.037);
+      nearby.alpha = Math.min(.65,nearby.alpha+.065);
+      nearby.life = Math.min(1.1,nearby.life+.09);
+      nearby.vel.addScaledVector(n,.035);
+      return;
+    }
+    const v=n.clone().multiplyScalar(.18+Math.random()*.23);
+    v.x+=.10; v.y+=.16+Math.random()*.22;
+    const size = (mineral?.22:wood?.17:.09)*(.83+Math.random()*.45);
+    const p = this.emit('dust',pos,v,size,(wood || mineral ? .72 : .38)+Math.random()*.22,0);
     if (!p) return;
+    p.dustSurface = surface;
+    p.alpha = (mineral?.58:wood?.50:.25)*(distant?.55:1);
+    p.sprite.material.color.setHex(wood?0xb09a79:mineral?0xb5b0a2:0x97968b);
+  }
+
+  emit(kind, point, velocity, size, life, gravity, fragment = null) {
+    let p = this.particles.find(item=>item.kind===kind && item.t>=item.life);
+    if (!p && kind==='dust' && this.camera && this.camera.position.distanceToSquared(point)<16) {
+      // Reclaim the faintest finished-looking or distant fleck, never a fresh local puff.
+      let best=.7;
+      for (const item of this.particles) {
+        if (item.kind!=='dust') continue;
+        const rank=item.t/item.life+(this.camera.position.distanceToSquared(item.sprite.position)>144 ? .7 : 0);
+        if (rank>best) { best=rank; p=item; }
+      }
+    }
+    if (!p) return;
+    p.fragment = fragment;
+    p.dustSurface = null;
+    p.aspect = fragment==='metal' ? .23+Math.random()*.22 : fragment ? .30+Math.random()*.65 : 1;
+    p.spin = fragment==='wood' || fragment==='stone' ? (Math.random()-.5)*21 : 0;
+    if (kind==="dust") {
+      const material = p.sprite.material;
+      material.map = fragment==='metal' ? this.sparkMap : fragment ? this.fleckMap : this.dustMap;
+      material.color.setHex(({metal:0xffe4ab,wood:0xbf976b,cloth:0x999680,stone:0xafa99b})[fragment] ?? 0xffffff);
+      if (fragment==='wood' || fragment==='stone') material.color.multiplyScalar(.65+Math.random()*.65);
+      material.blending = fragment==='metal' ? THREE.AdditiveBlending : THREE.NormalBlending;
+    }
     p.sprite.position.copy(point);
-    p.sprite.position.x += (Math.random() - .5) * .045;
-    p.sprite.position.y += (Math.random() - .5) * .045;
-    p.sprite.position.z += (Math.random() - .5) * .045;
+    if (kind !== "dust") {
+      p.sprite.position.x += (Math.random() - .5) * .045;
+      p.sprite.position.y += (Math.random() - .5) * .045;
+      p.sprite.position.z += (Math.random() - .5) * .045;
+    }
     p.vel.copy(velocity);
     p.size = size;
     p.life = life;
     p.t = 0;
     p.gravity = gravity;
-    p.grow = kind === "drop" ? .7 : 1.65;
-    p.sprite.material.opacity = kind === "drop" ? .9 : .52;
+    p.grow = fragment ? -.55 : kind === "drop" ? .7 : 1.65;
+    p.alpha = fragment || kind === "drop" ? .9 : .60;
+    p.sprite.material.opacity = p.alpha;
     p.sprite.material.rotation = Math.random() * Math.PI * 2;
-    p.sprite.scale.setScalar(size);
+    p.sprite.scale.set(size, size*p.aspect,1);
     p.sprite.visible = true;
+    return p;
   }
 
   blood(point, shotDir) {
@@ -301,28 +605,61 @@ export class ImpactVfx {
   }
 
   update(dt) {
+    let marksChanged = false;
+    for (const mark of this.marks) {
+      if (mark.t >= mark.life) continue;
+      mark.t = Math.min(mark.life, mark.t + dt);
+      if (mark.t > mark.life - this.markFade) marksChanged = true;
+    }
+    if (marksChanged) this._syncMarks();
     for (const tracer of this.tracers) {
       if (tracer.t >= tracer.life) continue;
       tracer.t += dt;
       if (tracer.t >= tracer.life) tracer.mesh.visible = false;
       else this._placeTracer(tracer);
     }
+    if (this.camera) this.viewRotation.setFromMatrix4(this.camera.matrixWorldInverse);
     for (const p of this.particles) {
       if (p.t >= p.life) continue;
       p.t += dt;
       if (p.t >= p.life) { p.sprite.visible = false; continue; }
+      if (p.kind==='dust') {
+        const drag=p.fragment==='metal'?3.5:p.fragment?1.3:2.1;
+        p.vel.multiplyScalar(Math.exp(-drag*dt));
+        if (!p.fragment) { p.vel.y+=.34*dt; p.vel.x+=.10*dt; }
+      }
       p.vel.y -= p.gravity * dt;
       p.sprite.position.addScaledVector(p.vel, dt);
       const f = p.t / p.life;
-      p.sprite.scale.setScalar(p.size * (1 + p.grow * f));
-      p.sprite.material.opacity = (p.kind === "drop" ? .9 : .52) * (1 - f) ** 1.25;
+      const size = p.size * (1 + p.grow * f);
+      const mat = p.sprite.material;
+      p.sprite.scale.set(size,size*p.aspect,1);
+      if (p.fragment==='metal') {
+        // Hot, fast streaks contract into dim embers instead of fading at a fixed length.
+        if (this.camera) {
+          this.screenVelocity.copy(p.vel).applyMatrix3(this.viewRotation);
+          mat.rotation=Math.atan2(this.screenVelocity.y,this.screenVelocity.x);
+          const speed=Math.hypot(this.screenVelocity.x,this.screenVelocity.y);
+          p.sprite.scale.x=size*(.24+Math.min(1.9,speed*.64))*(1-.45*f);
+        }
+        mat.color.setRGB(1,1-.72*f,.73*(1-f));
+      } else if (p.spin) {
+        mat.rotation+=p.spin*dt;
+        p.sprite.scale.y*=.29+.71*Math.abs(Math.cos(p.t*p.spin*1.32));
+      }
+      if (p.kind==='dust' && !p.fragment) {
+        const appear=Math.min(1,p.t/.065);
+        mat.opacity=p.alpha*appear*(1-f)**1.35;
+      } else {
+        mat.opacity=p.alpha*(1-f)**(p.fragment==='metal' ? .77 : 1.25);
+      }
     }
   }
 
   clear() {
     this.markCursor = 0;
-    this.markCount = 0;
-    this.markMesh.count = 0;
+    for (const mark of this.marks) { mark.t = Infinity; mark.life = 0; }
+    this._syncMarks();
     for (const tracer of this.tracers) { tracer.t = tracer.life; tracer.mesh.visible = false; }
     for (const p of this.particles) { p.t = p.life; p.sprite.visible = false; }
   }

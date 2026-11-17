@@ -3,10 +3,12 @@
 import { FRONT_GATE_FORECOURT, RIDGE_HALF_WIDTH, RIDGE_LOOKOUTS, RIDGE_TRAILS,
   ridgeGuardSections, ridgeTrailSurfaceAt } from './lingyin_hillside_route.js?v=hillside-7';
 import { SMALL_HALLS, smallHallFurnitureBounds } from './lingyin_small_halls.js?v=2';
-import { MAIN_HALL, MAIN_HALL_SCALE, mainHallPoint } from './lingyin_main_hall.js?v=1';
+import { MAIN_HALL, MAIN_HALL_FLOOR_Y, MAIN_HALL_RAISE, MAIN_HALL_SCALE,
+  MAIN_HALL_STAIRS, MAIN_HALL_RAIL, mainPortalWallHalf, mainPortalTimbers, hallRailX, hallRailGrade, mainHallPoint, mainHallStair } from './lingyin_main_hall.js?v=grand-portal-1';
 import { stairLandingSupport } from './brush_collision.js?v=lingyin-jump-1';
-import {MAIN_INTERIOR_COLUMNS,MAIN_COLUMN_PARTS,MAIN_CENSER,MAIN_CENSER_PROFILE,MAIN_HALL_FIXTURES,hallPerimeterColumns,columnBrush} from './lingyin_columns.js?v=1';
-import { COURT_COVER } from './lingyin_court_cover.js?v=1';
+import { PAGODA, pagodaTiers } from './lingyin_pagoda.js?v=1';
+import {MAIN_VOTIVE_LAMPS,MAIN_INTERIOR_COLUMNS,MAIN_COLUMN_PARTS,MAIN_PORCH_SHOE,MAIN_CENSER,MAIN_CENSER_PROFILE,MAIN_HALL_FIXTURES,hallPerimeterColumns,columnBrush} from './lingyin_columns.js?v=offering-depth-1';
+import { COURT_COVER } from './lingyin_court_cover.js?v=2';
 import { LINGYIN_WELL as W } from './lingyin_well_layout.js?v=1';
 
 export const LINGYIN_BOUNDS = { hw: 84, hl: 76 };
@@ -201,19 +203,44 @@ export function lingyinLayout({approvedLandscape=false}={}) {
     floors.push({s,lx:0,lz:0,hx:hw+1.37,hz:hd+1.37,y:roomY});
     // The original treads are 0.4m apart; a narrow support overlap accounts
     // for a character's foot contact patch without changing their visible art.
-    for(let i=0;i<5;i++) {
-      const z=hd+1.35+(4-i)*.4+(s.plinth-.8)*.25;
-      const y=.24+i*.16;
-      addLocal(s,0,z,2.5,.25,0,y,true);
-      floors.push({s,lx:0,lz:z,hx:2.5,hz:.3,y});
+    const stairCount=s.name==='main'?MAIN_HALL_STAIRS.count:5;
+    for(let i=0;i<stairCount;i++) {
+      const stair=s.name==='main'?mainHallStair(i):null;
+      const z=stair?.z??hd+1.35+(4-i)*.4+(s.plinth-.8)*.25;
+      const y=stair?.top??.24+i*.16;
+      const halfWidth=s.name==='main'?MAIN_HALL_STAIRS.width/2:2.5;
+      const halfDepth=s.name==='main'?(MAIN_HALL_STAIRS.treadDepth+.02)/2:.25;
+      addLocal(s,0,z,halfWidth,halfDepth,0,y,true);
+      colliders.at(-1).name=s.name==='main'?'main-hall-grand-stair-tread':`${s.name}-stair-tread`;
+      floors.push({s,lx:0,lz:z,hx:halfWidth,hz:halfDepth+.05,y});
+      if(s.name==='main')for(const side of [-1,1]){
+        const R=MAIN_HALL_RAIL,x=side*hallRailX;
+        const halfRun=MAIN_HALL_STAIRS.treadDepth/2;
+        const slope=MAIN_HALL_STAIRS.treadHeight/MAIN_HALL_STAIRS.treadDepth;
+        const cap=hallRailGrade(z)+R.capTop;
+        addLocal(s,x,z,R.capWidth/2,halfRun,0,cap+slope*halfRun);
+        const rail=colliders.at(-1);
+        rail.name='main-hall-grand-stair-rail';
+        rail.planes=[[0,1,slope,cap+slope*rail.z],[0,-1,0,0],
+          [1,0,0,rail.x+rail.hx],[-1,0,0,-rail.x+rail.hx],
+          [0,0,1,rail.z+halfRun],[0,0,-1,-rail.z+halfRun]];
+        rail.preciseEscape=true;
+        if(R.postSteps.includes(i)){
+          addLocal(s,x,z,R.halfPost,R.halfPost,y,y+R.postShoulder);
+          colliders.at(-1).carvedRail=true;
+          addLocal(s,x,z,.108,.108,y+R.postShoulder,y+R.postTop);
+          colliders.at(-1).carvedRail=true;
+        }
+      }
       if(s.name==='gate') {
         const back=-hd-1.35-(4-i)*.4;
         addLocal(s,0,back,2.5,.25,0,y,true);
         floors.push({s,lx:0,lz:back,hx:2.5,hz:.3,y});
       }
     }
-    const inset=1.35,gap=s.name==='main'?5.4:s.name==='rear'||s.name==='gate'?4.6:3.4;
-    const wallY=roomY,wallTop=s.name==='gate'?3.8:s.eave-s.plinth-.15;
+    const inset=1.35,gap=s.name==='main'?2*mainPortalWallHalf:s.name==='rear'||s.name==='gate'?4.6:3.4;
+    const superLift=s.name==='main'?MAIN_HALL_RAISE:0;
+    const wallY=roomY,wallTop=(s.name==='gate'?3.8:s.eave-s.plinth-.15)+superLift;
     const wallX=hw-inset,wallZ=hd-inset;
     const seg=(s.w-2*inset-gap)/2;
     for(const sign of [-1,1]) {
@@ -226,10 +253,17 @@ export function lingyinLayout({approvedLandscape=false}={}) {
     } else addLocal(s,0,-wallZ,wallX,.18,wallY,wallTop);
     // Perimeter columns are visible cylinders, including those beside open
     // doors. Keep their collision small enough to preserve the actual bay.
-    const columnTop=s.eave-s.plinth-.35;
+    const columnTop=s.eave-s.plinth-.35+superLift;
     for(const [index,column] of hallPerimeterColumns(s).entries()){
       const p=world(s,column.x,column.z);
-      colliders.push(columnBrush(p.x,p.z,.49,.25+column.height,.27,.33,1,1,s.rot,12,
+      if(s.name==='main' && column.z===hd-.9){
+        for(let j=1;j<MAIN_PORCH_SHOE.length;j++){
+          const lo=MAIN_PORCH_SHOE[j-1],hi=MAIN_PORCH_SHOE[j];
+          colliders.push(columnBrush(p.x,p.z,roomY+lo.y,roomY+hi.y,hi.r,lo.r,1,1,s.rot,32,
+            `main-porch-stone-shoe-${index}-${j}`));
+        }
+      }
+      colliders.push(columnBrush(p.x,p.z,.49+superLift,.25+column.height+superLift,.27,.33,1,1,s.rot,12,
         `${s.name}-perimeter-column-${index}`));
     }
     if(s.name==='gate'){
@@ -238,10 +272,23 @@ export function lingyinLayout({approvedLandscape=false}={}) {
       addLocal(s,0,-hd+1.35,4.45,.16,3.68,5.78);
     }
     if(s.name==='main'){
+      for(const p of mainPortalTimbers()){
+        addLocal(s,p.x,p.z,p.w/2,p.d/2,roomY+p.y-p.h/2,roomY+p.y+p.h/2);
+        colliders.at(-1).name='main-portal-'+p.name;
+      }
       const railW=hw+1.2,railZ=hd+1.45;
       for(const sign of [-1,1]){
-        addLocal(s,sign*(railW+3.6)/2,railZ,(railW-3.6)/2,.14,.45,1.35);
-        addLocal(s,sign*railW,0,.14,railZ,.45,1.35);
+        const R=MAIN_HALL_RAIL,run=R.endX-hallRailX;
+        addLocal(s,sign*(R.endX+hallRailX)/2,R.landingZ,run/2,R.capWidth/2,roomY,roomY+R.capTop);
+        colliders.at(-1).carvedRail=true;
+        for(let i=0;i<=R.landingBays;i++){
+          const x=sign*(hallRailX+run*i/R.landingBays);
+          addLocal(s,x,R.landingZ,R.halfPost,R.halfPost,roomY,roomY+R.postShoulder);
+          colliders.at(-1).carvedRail=true;
+          addLocal(s,x,R.landingZ,.108,.108,roomY+R.postShoulder,roomY+R.postTop);
+          colliders.at(-1).carvedRail=true;
+        }
+        addLocal(s,sign*railW,0,.14,railZ,.45+superLift,1.35+superLift);
       }
       // The three-figure shrine now sits against the rear wall. Match its
       // raised dais and altar, leaving the aisle from the front door clear.
@@ -249,7 +296,8 @@ export function lingyinLayout({approvedLandscape=false}={}) {
       for(const [index,[x,z]] of MAIN_INTERIOR_COLUMNS.entries()){
         const p=mainHallPoint(x,z);
         for(const [partIndex,part] of MAIN_COLUMN_PARTS.entries())
-          colliders.push(columnBrush(p.x,p.z,part.y-part.h/2,part.y+part.h/2,
+          colliders.push(columnBrush(p.x,p.z,MAIN_HALL_RAISE+part.y-part.h/2,
+            MAIN_HALL_RAISE+part.y+part.h/2,
             part.rt,part.rb,sx,sz,0,part.segments,`main-interior-column-${index}-${partIndex}`));
       }
       for(const part of MAIN_HALL_FIXTURES){
@@ -258,16 +306,23 @@ export function lingyinLayout({approvedLandscape=false}={}) {
         colliders.at(-1).name=`main-fixture-${part.name}`;
         if(part.support)floors.push({s,lx:part.x*sx,lz:part.z*sz,hx:part.w*sx/2,hz:part.d*sz/2,y:roomY+part.y+part.h/2});
       }
-      const censer=mainHallPoint(MAIN_CENSER.x,MAIN_CENSER.z),k=MAIN_CENSER.scale;
+      for(const side of [-1,1]){
+        const lamp=MAIN_VOTIVE_LAMPS,p=mainHallPoint(side*lamp.x,lamp.z);
+        for(let j=1;j<lamp.profile.length;j++){
+          const [rb,y0]=lamp.profile[j-1],[rt,y1]=lamp.profile[j];
+          colliders.push(columnBrush(p.x,p.z,roomY+y0,roomY+y1,rt,rb,sx,sz,0,24,'main-hall-votive-lamp'));
+        }
+      }
+      const censer=mainHallPoint(MAIN_CENSER.x,MAIN_CENSER.z),k=MAIN_CENSER.scale,base=roomY+MAIN_CENSER.baseY;
       for(let i=0;i<4;i++){
         const a=MAIN_CENSER_PROFILE[i],b=MAIN_CENSER_PROFILE[i+1];
-        colliders.push(columnBrush(censer.x,censer.z,roomY+(.4+a[1])*k,roomY+(.4+b[1])*k,
+        colliders.push(columnBrush(censer.x,censer.z,base+(.4+a[1])*k,base+(.4+b[1])*k,
           b[0]*k,a[0]*k,1,1,0,28,`main-interior-censer-bowl-${i}`));
       }
       for(let i=0;i<3;i++){
         const angle=i*Math.PI*2/3;
         colliders.push(columnBrush(censer.x+Math.cos(angle)*.58*k,censer.z+Math.sin(angle)*.58*k,
-          roomY+.065*k,roomY+.495*k,.08*k,.13*k,1,1,0,9,`main-interior-censer-leg-${i}`));
+          base+.065*k,base+.495*k,.08*k,.13*k,1,1,0,9,`main-interior-censer-leg-${i}`));
       }
     }
     const interior=SMALL_HALLS.find(hall=>hall.name===s.name);
@@ -284,7 +339,17 @@ export function lingyinLayout({approvedLandscape=false}={}) {
   }
   // Raised stone link between the west hall's rear bay and the open gate.
   add(-34.25,7,2.16,1.63,0,.98,true);
-  add(-31, 33, 3.1, 3.1, 0, 8);
+  colliders.push(columnBrush(PAGODA.x,PAGODA.z,0,PAGODA.baseH,
+    PAGODA.baseTop,PAGODA.baseBottom,1,1,0,PAGODA.segments,'pagoda-base'));
+  for(const tier of pagodaTiers()) {
+    const {base,radius,height,index}=tier;
+    colliders.push(columnBrush(PAGODA.x,PAGODA.z,base,base+height,
+      radius-.12,radius,1,1,0,PAGODA.segments,`pagoda-body-${index}`));
+    colliders.push(columnBrush(PAGODA.x,PAGODA.z,base+height,base+height+.36,
+      radius+.85,radius+.2,1,1,0,PAGODA.segments,`pagoda-eave-${index}`));
+    colliders.push(columnBrush(PAGODA.x,PAGODA.z,base+height+.34,base+height+.5,
+      radius+.1,radius+.1,1,1,0,PAGODA.segments,`pagoda-cornice-${index}`));
+  }
   // The censer is a tripod, not a solid cube: its three feet and upper bowl
   // have separate collision so actors and shots can pass between the legs.
   for(let i=0;i<3;i++) {
@@ -351,7 +416,7 @@ export function lingyinLayout({approvedLandscape=false}={}) {
     [-23,-28,0,'rear-court'],[-23,-39,0,'rear-court'],[19,-39,0,'rear-court'],
     [-2,46.85,1.05,'gate-hall'],[-25.5,7,.95,'west-hall'],[19,7,.95,'east-hall'],
     ...[[0,7],[-6,4],[7,4],[0,1]].map(([x,z])=>{
-      const p=mainHallPoint(x,z);return [p.x,p.z,1.35,'main-hall'];
+      const p=mainHallPoint(x,z);return [p.x,p.z,MAIN_HALL_FLOOR_Y,'main-hall'];
     }),
   ];
   const player=spawnCandidates.map(([x,z,y,zone])=>[x,y,z,zone]);

@@ -18,9 +18,9 @@ const browser=await chromium.launch({channel:'chrome',headless:true});try{
    }}finally{Math.random=oldRandom;t.enemyManager.enemies=save}
   return {packs,enemyTracer:emitted,errors:t.loopErrors()};
  });
- for(const x of result.packs){assert.equal(x.afterAmmo,x.ammo.mag-1,`backpack ${x.bp} still fires`);assert.equal(x.traceDelta,x.bp===0?1:0,`backpack ${x.bp} tracer`);assert.equal(x.tracer,x.bp===0);}
- const kn=result.packs.at(-1);assert.equal(kn.ammo.mag,70);assert.equal(kn.ammo.reserve,210);assert.equal(kn.stats.dmg,500);assert.equal(kn.head,1000);
- assert.equal(kn.inacc.stand,.0173);assert.equal(kn.inacc.crouch,.0036);assert.equal(kn.inacc.fire,.0303);assert.equal(kn.hold,.25);assert.deepEqual(kn.pattern[1],[.0714,.918]);
- const iron=result.packs.find(x=>x.bp===3),gold=result.packs.find(x=>x.bp===6);assert.equal(iron.inacc.stand,.0313);assert.equal(iron.inacc.fire,.0198);assert.equal(gold.inacc.stand,.0248);assert.equal(gold.inacc.fire,.0174);assert.equal(gold.reset,.68);
+ for(const x of result.packs){assert.equal(x.afterAmmo,x.ammo.mag-1,`backpack ${x.bp} still fires`);assert.equal(x.traceDelta,0,`backpack ${x.bp} tracer`);assert.equal(x.tracer,false);}
+ const kn=result.packs.at(-1);assert.equal(kn.ammo.mag,50);assert.equal(kn.ammo.reserve,150);assert.equal(kn.stats.dmg,60);assert.equal(kn.head,200);
+ assert.equal(kn.inacc.stand,.0173);assert.equal(kn.inacc.crouch,.0036);assert.equal(kn.inacc.fire,.0102);assert.equal(kn.hold,.13);assert.deepEqual(kn.pattern[1],[.012,.375]);
+ const iron=result.packs.find(x=>x.bp===3),gold=result.packs.find(x=>x.bp===6);assert.equal(iron.inacc.stand,0);assert.equal(iron.inacc.fire,.00718);assert.equal(gold.inacc.stand,.00641);assert.equal(gold.inacc.fire,.0078);assert.equal(gold.reset,.3);
  assert.ok(result.enemyTracer,'enemy shots still create visible tracer while player tracer is disabled');assert.equal(result.errors,0);assert.deepEqual(errors,[]);assert.deepEqual(failed,[]);console.log(JSON.stringify(result));
 }finally{await browser.close()}

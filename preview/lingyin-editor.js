@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { buildLingyinMap } from '../scripts/lingyin_map.js?v=new-map-3';
-import { LingyinMasterplanBlockout } from '../scripts/lingyin_world.js?v=new-map-3';
+import { buildLingyinMap } from '../scripts/lingyin_map.js?v=new-map-6';
+import { LingyinMasterplanBlockout } from '../scripts/lingyin_world.js?v=new-map-4-eaves-1';
 import { RenderBudget } from '../scripts/render_budget.js?v=1';
 import { prepareMapMaterials,prepareMapTextures } from '../scripts/map_material_warmup.js?v=2';
 
@@ -194,8 +194,8 @@ document.querySelector('#undo').addEventListener('click',()=>{if(!undoStack.leng
 document.querySelector('#redo').addEventListener('click',()=>{if(!redoStack.length)return;undoStack.push(JSON.stringify(snapshotAll()));applyAll(JSON.parse(redoStack.pop()));saveState(false)});
 document.querySelector('#toggle-panel').addEventListener('click',event=>{const hidden=document.querySelector('#editor-panel').classList.toggle('hidden');event.currentTarget.textContent=hidden?'显示面板':'隐藏面板'});
 
-const VIEWS={reference:{p:[-2,64,104],t:[-3,5,2]},courtyard:{p:[54,34,64],t:[-2,5,-6]},top:{p:[-2,118,2],t:[-2,0,2]},gate:{p:[24,16,70],t:[-2,6,37]},wing:{p:[17,2.4,38.9],t:[7,1.45,38.9]},boundary:{p:[38,16,88],t:[-2,1.8,60]},trail:{p:[-56,32,4],t:[-43,13,-6]},boardwalk:{p:[-70,45,48],t:[-37,7,9]},boardwalkEntry:{p:[-12,18,-7],t:[-35,4,-25]},pavilion:{p:[-78,33,51],t:[-53,13,62]},river:{p:[67,31,20],t:[37,4,9]},westInterior:{p:[-20.4,2.65,6.7],t:[-28,1.9,7.6],fov:60},eastInterior:{p:[14,2.65,7.3],t:[23.2,2.05,7],fov:60},rearInterior:{p:[-1.7,2.85,-34.6],t:[-2,2.2,-40],fov:64}};
-VIEWS.mainInterior={p:[-2,3.05,-17],t:[-2,4.2,-31],fov:70};
+const VIEWS={reference:{p:[-2,64,104],t:[-3,5,2]},courtyard:{p:[54,34,64],t:[-2,5,-6]},top:{p:[-2,118,2],t:[-2,0,2]},gate:{p:[24,16,70],t:[-2,6,37]},wing:{p:[17,2.4,38.9],t:[7,1.45,38.9]},boundary:{p:[38,16,88],t:[-2,1.8,60]},trail:{p:[-56,32,4],t:[-43,13,-6]},boardwalk:{p:[-70,45,48],t:[-37,7,9]},boardwalkEntry:{p:[-12,18,-7],t:[-35,4,-25]},pavilion:{p:[-78,33,51],t:[-53,13,62]},river:{p:[67,31,20],t:[37,4,9]},westInterior:{p:[-20.4,2.65,6.7],t:[-28,1.9,7.6],fov:60},eastInterior:{p:[14,2.65,7.3],t:[23.2,2.05,7],fov:60},rearInterior:{p:[-1.7,3.85,-34.6],t:[-2,3.2,-40],fov:64}};
+VIEWS.mainInterior={p:[-2,4.05,-17],t:[-2,5.2,-31],fov:70};
 VIEWS.mainHall={p:[34,23,8],t:[-2,6,-26]};
 // Old saved review URLs still open a useful view rather than the removed room.
 VIEWS.rearInterior=VIEWS.mainInterior;

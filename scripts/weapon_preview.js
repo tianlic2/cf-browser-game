@@ -20,7 +20,8 @@ export function weaponPreview(renderer, source, key, environment, compact = fals
   const fill=new THREE.DirectionalLight(0xbadce7,.9);fill.position.set(-3,1,2);stage.add(fill);
   stage.updateMatrixWorld(true);
   const camera=new THREE.OrthographicCamera(-1,1,1,-1,.01,100);
-  if(key === 'knife:stock') camera.position.set(3,2,.65);
+  if (key.includes('cfv_')) camera.position.set(3,.12,0);
+  else if(key === 'knife:stock') camera.position.set(3,2,.65);
   else camera.position.set(3,.4,.65);
   camera.lookAt(0,0,0);camera.updateMatrixWorld(true);
   const projected=new THREE.Box3(),corner=new THREE.Vector3();

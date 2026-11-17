@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { brushContainsPoint, canMoveThroughBrushes, intersectsBrush } from '../scripts/brush_collision.js';
 import { lingyinLayout } from '../scripts/lingyin_layout.js';
-import {MAIN_HALL,mainHallPoint} from '../scripts/lingyin_main_hall.js';
+import {MAIN_HALL,MAIN_HALL_FLOOR_Y,MAIN_HALL_RAISE,mainHallPoint} from '../scripts/lingyin_main_hall.js';
 
 const map = lingyinLayout();
 assert.ok(map.colliders.every(c => Number.isFinite(c.h) && c.h > c.y0),
@@ -86,16 +86,16 @@ for (let z = 24.5; z >= 19.5; z -= .05) {
 // The main stair gap is open, but its flanking stone rail and exposed columns
 // stop actors from walking through solid architecture.
 const railZ=MAIN_HALL.z+MAIN_HALL.d/2+1.45;
-assert.equal(blocked(-2, railZ, .88), false,
+assert.equal(blocked(-2, railZ, .88+MAIN_HALL_RAISE), false,
   'the central main-hall stair opening is clear');
 assert.ok(blocked(-10, railZ), 'main-hall side rail is solid');
-assert.ok(blocked(MAIN_HALL.x-MAIN_HALL.w/2+1,MAIN_HALL.z+MAIN_HALL.d/2-.9,1.35), 'main-hall perimeter column is solid');
-assert.ok(blocked(MAIN_HALL.x-MAIN_HALL.w/2+1.35,MAIN_HALL.z,1.35), 'main-hall side wall is solid');
-assert.equal(blocked(-2,mainHallPoint(0,1.75).z,1.35),false,
+assert.ok(blocked(MAIN_HALL.x-MAIN_HALL.w/2+1,MAIN_HALL.z+MAIN_HALL.d/2-.9,MAIN_HALL_FLOOR_Y), 'main-hall perimeter column is solid');
+assert.ok(blocked(MAIN_HALL.x-MAIN_HALL.w/2+1.35,MAIN_HALL.z,MAIN_HALL_FLOOR_Y), 'main-hall side wall is solid');
+assert.equal(blocked(-2,mainHallPoint(0,1.75).z,MAIN_HALL_FLOOR_Y),false,
   'the removed Buddha must leave no invisible block in the centre aisle');
-assert.ok(blocked(-2,mainHallPoint(0,-1.7).z,1.35),
+assert.ok(blocked(-2,mainHallPoint(0,-1.7).z,MAIN_HALL_FLOOR_Y),
   'the new altar has a matching solid combat proxy');
-assert.ok(blocked(-2,mainHallPoint(0,-4.7).z,1.35),
+assert.ok(blocked(-2,mainHallPoint(0,-4.7).z,MAIN_HALL_FLOOR_Y),
   'the three-figure dais has a matching solid combat proxy');
 
 console.log(`Lingyin alignment: ${map.colliders.length} visible-matched brushes, exits and rooms checked`);

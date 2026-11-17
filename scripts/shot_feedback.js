@@ -24,7 +24,8 @@ export function resetShotShake(state) {
 export function triggerShotShake(state, weaponId, scoped = false, sequence = 0) {
   const profile = SHOT_SHAKE_PROFILES[weaponId] || SHOT_SHAKE_PROFILES.default;
   // 开镜时保留枪响的冲击，但适当收敛，避免高倍率镜筒让轻震被视觉放大成眩晕。
-  const scopeScale = scoped ? .64 : 1;
+  // 白虎反射瞄具按获准规则把后坐降到原值 40%；两把栓动狙保留既有 .64 视觉比例。
+  const scopeScale = scoped ? (weaponId === 'scar' ? .4 : .64) : 1;
   // 自动武器连续射击时保留少量上一发余震，随后限幅，避免帧率或射速令振幅无限叠加。
   const carry = state.active ? .24 : 0;
   state.pitch = Math.min(profile.pitch * 1.42, state.pitch * carry + profile.pitch * scopeScale);

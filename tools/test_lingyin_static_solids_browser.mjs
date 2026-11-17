@@ -10,10 +10,10 @@ try{
  const audit=await page.evaluate(async()=>{
   const t=__tactical,w=t.scene.getObjectByName('lingyin-authored-world');t.pause();w.updateMatrixWorld(true);
   const {MAIN_INTERIOR_COLUMNS}=await import('/scripts/lingyin_columns.js');
-  const {mainHallPoint}=await import('/scripts/lingyin_main_hall.js');
+  const {MAIN_HALL_FLOOR_Y,MAIN_HALL_RAISE,mainHallPoint}=await import('/scripts/lingyin_main_hall.js?v=2');
   const {brushContainsPoint,intersectsBrush}=await import('/scripts/brush_collision.js');
   const body=w.getObjectByName('hall-structure-lacquer'),colliders=t.colliders(),rays=[];
-  for(const [i,[x,z]] of MAIN_INTERIOR_COLUMNS.entries())for(const y of [2.1,3,5])for(let n=0;n<8;n++){
+  for(const [i,[x,z]] of MAIN_INTERIOR_COLUMNS.entries())for(const y of [2.1,3,5].map(y=>y+MAIN_HALL_RAISE))for(let n=0;n<8;n++){
    const p=mainHallPoint(x,z),a=n*Math.PI/4,dx=Math.sin(a),dz=Math.cos(a);
    const ray=new t.THREE.Raycaster(new t.THREE.Vector3(p.x+dx*2,y,p.z+dz*2),new t.THREE.Vector3(-dx,0,-dz),0,2.1);
    const visible=ray.intersectObject(body,false)[0];
@@ -33,7 +33,7 @@ try{
   const otherMissing=otherPoints.filter(p=>!colliders.some(c=>intersectsBrush(c,p.x,p.z,p.y,.45,.52,1.78,colliders,nav.surfaceAt)));
   const disconnected=t.mapState().spawns.player.filter(([x,y,z])=>nav.distance[nav.nearest(x,z,y)]<0);
   const structures=colliders.filter(c=>c.name?.includes('perimeter-column')||c.name?.startsWith('main-interior-column'));
-  const unblocked=structures.filter(c=>c.h>2&&c.y0<3&&!colliders.some(b=>intersectsBrush(b,c.x,c.z,1.35,.45,.52,1.78,colliders,nav.surfaceAt)));
+  const unblocked=structures.filter(c=>c.h>2&&c.y0<4&&!colliders.some(b=>intersectsBrush(b,c.x,c.z,MAIN_HALL_FLOOR_Y,.45,.52,1.78,colliders,nav.surfaceAt)));
   const statues=[];
   w.traverse(o=>{if(o.isLOD&&['hall-central-buddha','hall-flanking-buddha'].includes(o.name)){
    const box=new t.THREE.Box3().setFromObject(o.levels[0].object),centre=box.getCenter(new t.THREE.Vector3());
@@ -46,12 +46,13 @@ try{
   'visible shafts, tapered collision planes and bullet proxies match at 144 angles/heights');
  assert.equal(audit.unblocked,0);assert.deepEqual(audit.disconnected,[]);
  assert.deepEqual(audit.otherMissing,[],'gate columns, pavilion columns and all 11 side-room furnishings remain solid');
- await page.evaluate(()=>{Object.defineProperty(document,'pointerLockElement',{configurable:true,get:()=>document.getElementById('viewport')});document.dispatchEvent(new Event('pointerlockchange'));
-  const t=__tactical;t.player.pos.set(2.15,1.35,-25.294117647);t.player.vel.set(0,0,0);t.player.yaw=-Math.PI/2;t.player.pitch=0;t.player.onGround=true;t.resume();});
+ const column=await page.evaluate(()=>{const c=__tactical.colliders().find(c=>c.name==='main-interior-column-5-1');return {x:c.x,z:c.z,hx:c.hx};});
+ await page.evaluate(column=>{Object.defineProperty(document,'pointerLockElement',{configurable:true,get:()=>document.getElementById('viewport')});document.dispatchEvent(new Event('pointerlockchange'));
+  const t=__tactical;t.player.pos.set(column.x-column.hx-1.1,2.35,column.z);t.player.vel.set(0,0,0);t.player.yaw=-Math.PI/2;t.player.pitch=0;t.player.onGround=true;t.resume();},column);
  await page.bringToFront();
  await page.keyboard.down('w');await page.waitForTimeout(1500);await page.keyboard.up('w');
  const approach=await page.evaluate(()=>{__tactical.pause();return __tactical.player.pos.toArray()});
- assert.ok(approach[0]<3.3&&approach[0]>2.2,`real game movement stops before the front right column: ${approach}`);
+ assert.ok(Math.abs(approach[0]-(column.x-column.hx-.45))<.11,`real game movement stops before the front right column: ${approach}`);
  await page.screenshot({path:'/private/tmp/lingyin-column-collision.png'});
  assert.ok(audit.statues.every(s=>s.bodySolid),'all three visible statue bodies have lightweight physical envelopes');
  const ceilings=[];
@@ -62,8 +63,15 @@ try{
   const highest=await page.evaluate(()=>{__headRecord=false;__tactical.pause();return Math.max(...__headHeights)});
   assert.ok(highest<=3.168&&highest>3,'hanging lantern stops an actual jump without blocking normal passage');ceilings.push({x,highest});
  }
- const altarLanding=await page.evaluate(async()=>{const t=__tactical;t.player.pos.set(-2,3.05,-26-2.06*24/17);t.player.vel.set(0,0,0);t.player.onGround=false;t.player.jumpBuf=0;t.player.coyote=0;t.resume();
-  await new Promise(r=>setTimeout(r,600));t.pause();return t.player.pos.toArray();});
- assert.ok(Math.abs(altarLanding[1]-2.65)<.01,'landing on the altar does not fall through its tabletop');
+ const altarLanding=await page.evaluate(async()=>{
+  const {OFFERING_TABLE:table}=await import('/scripts/lingyin_columns.js');
+  const {mainHallPoint,MAIN_HALL_FLOOR_Y}=await import('/scripts/lingyin_main_hall.js');
+  const t=__tactical,p=mainHallPoint(-.55,table.z);
+  t.player.pos.set(p.x,MAIN_HALL_FLOOR_Y+table.top+.55,p.z);
+  t.player.vel.set(0,0,0);t.player.onGround=false;t.player.jumpBuf=0;t.player.coyote=0;t.resume();
+  await new Promise(r=>setTimeout(r,600));t.pause();
+  return {pos:t.player.pos.toArray(),expected:MAIN_HALL_FLOOR_Y+table.top};
+ });
+ assert.ok(Math.abs(altarLanding.pos[1]-altarLanding.expected)<.01,'landing on the altar does not fall through its tabletop');
  assert.deepEqual(errors,[]);console.log(JSON.stringify({raySamples:audit.rays.length,otherChecked:audit.otherChecked,disconnected:audit.disconnected,unblocked:audit.unblocked,statues:audit.statues,approach,ceilings,altarLanding,errors},null,2));
 }finally{await browser.close()}

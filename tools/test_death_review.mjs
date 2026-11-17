@@ -23,8 +23,8 @@ assert.match(css, /\.death-review[\s\S]*margin-left:\s*auto;[\s\S]*margin-right:
   'wide screens keep the review card clear of the centered killer marker');
 assert.match(css, /\.hud\.dead-state \.hud-bottom-left[\s\S]*\.hud-shortcuts/,
   'death state removes irrelevant lower combat HUD');
-assert.match(main, /weaponIconSvg\(weaponId, "death-weapon-svg"\)/,
-  'death review uses the local weapon silhouette library');
+assert.match(main, /combatWeaponIcon\([\s\S]*?weaponId, "death-weapon-svg", byEnemy \? killer\.gunSkin : null\)/,
+  'death review uses the same model-derived silhouette and actual killer skin as the HUD');
 assert.match(main, /剩余生命 \$\{Math\.max\(0, Math\.ceil\(killer\.health \|\| 0\)\)\}/,
   'killer remaining health is based on live enemy state');
 assert.match(main, /距离 \$\{distance\.toFixed\(1\)\} 米/,

@@ -1,6 +1,16 @@
+import { AWM_DRAW_DURATION } from './awm_nature_draw.js?v=draw-6';
+import { CF_VANILLA } from './cf_vanilla_catalog.js';
 // User-approved local gameplay imports. Assets remain gitignored because their
 // CC BY-NC-ND / original-game rights do not permit public redistribution here.
 export const ADMITTED_GAMEBANANA = Object.freeze({
+  ...Object.fromEntries(CF_VANILLA.map(spec => [spec.id, {
+    ...spec, base: `./assets/local/cf_vanilla/${spec.sourceId}/`,
+    fireClips: spec.sourceId === 'elite' ? ['prefire', 'prefire_L'] : spec.fireClips,
+  }])),
+  awm_nature: Object.freeze({
+    base: './assets/local/awm_nature/', selectDuration: AWM_DRAW_DURATION, reloadDuration: 2.9,
+    fireClips: Object.freeze(['fire']),
+  }),
   kn57: Object.freeze({
     base: './assets/local/kn57/', selectDuration: 37/42, reloadDuration: 91/37,
     fireClips: Object.freeze(['shoot1','shoot2','shoot3']),
@@ -19,7 +29,7 @@ export async function loadAdmittedGameBananaView(id) {
   const spec = ADMITTED_GAMEBANANA[id];
   if (!spec) throw Error('未知的本地枪械：' + id);
   const [{ ClassicView }, THREE] = await Promise.all([
-    import('./classic_view.js?v=kn57-source-4'), import('three'),
+    import('./classic_view.js?v=awm-source-1'), import('three'),
   ]);
   const base = new URL('../' + spec.base.replace(/^\.\//, ''), import.meta.url);
   const url = name => new URL(name + '?v=kn57-source-4', base).href;
@@ -38,7 +48,7 @@ export async function loadAdmittedGameBananaView(id) {
   };
   const [bytes, textures] = await Promise.all([
     get('view.bin'),
-    Promise.all(data.parts.map(async part => ({ map: await loadTexture(part.map), normalMap: part.normalMap ? await loadTexture(part.normalMap) : null, emissiveMap: part.emissiveMap ? await loadTexture(part.emissiveMap) : null, roughnessMap: part.roughnessMap ? await loadTexture(part.roughnessMap) : null, specularIntensityMap: part.specularIntensityMap ? await loadTexture(part.specularIntensityMap) : null, phongMap: part.phongMap ? await loadTexture(part.phongMap) : null }))),
+    Promise.all(data.parts.map(async part => ({ map: await loadTexture(part.map), normalMap: part.normalMap ? await loadTexture(part.normalMap) : null, emissiveMap: part.emissiveMap ? await loadTexture(part.emissiveMap) : null, roughnessMap: part.roughnessMap ? await loadTexture(part.roughnessMap) : null, specularIntensityMap: part.specularIntensityMap ? await loadTexture(part.specularIntensityMap) : null, phongMap: part.phongMap ? await loadTexture(part.phongMap) : null, maskMap: part.maskMap ? await loadTexture(part.maskMap) : null }))),
   ]);
   const view = new ClassicView(data, bytes, textures, false);
   view.root.name = `${id}-first-person`;

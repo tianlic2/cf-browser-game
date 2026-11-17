@@ -25,12 +25,17 @@ assert.match(map, /weaponbox\.png/, 'normal weapon crates use their Source textu
 assert.match(map, /supplybox\.png/, 'airdrop crates use their Source texture');
 assert.match(map, /addStaticProps[\s\S]*staticProps/, 'formal map instantiates converted vehicles and lights');
 assert.match(map, /canMoveSegment/, 'formal map exposes wall-safe segment movement');
-assert.match(map, /grounded && !walk\.canTraverse/,
-  'airborne box approaches are not rejected by the grounded foot-support ring');
+assert.match(map, /orientedBoxCollider/,
+  'rotated Source props and crates use oriented collision instead of world-aligned air walls');
 assert.match(map, /hasVerticalClearance: spatialCollision\.hasVerticalClearance/,
   'the formal map exposes stance-height ceiling checks');
 assert.match(map, /supportSurfaceAt: spatialCollision\.supportSurfaceAt/,
   'visible crate and slab tops remain standing support even when NAV omits them');
+assert.match(map, /ceilingSurfaceAt: spatialCollision\.ceilingSurfaceAt/,
+  'visible BSP ceilings and box undersides stop rising actors');
+assert.ok(walk.propColliders.every((collider) => collider.planes?.length === 6 &&
+  collider.preciseEscape && collider.roundedFootprint),
+  'all generated static props carry tight oriented planes and rounded capsule corners');
 assert.match(main, /const CROUCH_TOP = 1\.12/,
   'crouching has a real reduced collision hull');
 assert.match(main, /staticStepHeight, actorHeight, PLAYER_RADIUS, player\.onGround/,
@@ -39,10 +44,10 @@ assert.match(map, /createZone13SpatialCollision/, 'formal map builds a local BSP
 assert.match(map, /lineClear: spatialCollision\.lineClear/, 'bio LOS shares the accelerated collision index');
 assert.doesNotMatch(map, /intersectObjects\(obstacles/, 'actor movement no longer raycasts the complete render mesh');
 assert.match(map, /while \(spawns\.length < 12/, 'formal bio population receives twelve distinct starts');
-assert.match(main, /bio: \(\) => import\('\.\/zone13_map\.js\?v=zone13-jump-2'/,
+assert.match(main, /bio: \(\) => import\('\.\/zone13_map\.js\?v=zone13-collision-alignment-1'/,
   'the game bio route loads Zone 13');
-assert.match(main, /Zone 13（生化）/, 'the game metadata names the playable map');
-assert.match(html, /<b>Zone 13（生化）<\/b>/, 'the lobby displays Zone 13');
+assert.match(main, /bio: \{ name: '13号地区'/, 'the game metadata names the playable map');
+assert.match(html, /<b>13号地区<\/b>/, 'the lobby displays Zone 13');
 assert.ok((main.match(/mapData\?\.canMoveSegment/g) || []).length >= 2,
   'player movement checks Zone 13 wall segments on both axes');
 assert.ok((bio.match(/this\.map\.canMoveSegment/g) || []).length >= 2,

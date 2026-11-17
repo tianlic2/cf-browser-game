@@ -78,7 +78,7 @@ assert.match(main, /ClassicView\.load\('barrett'\)/);
 assert.match(main, /if\(barrettView&&vid==='barrett'\)/);
 assert.match(main, /BARRETT_VIEW_POSE = Object\.freeze\(\{[\s\S]*?\.\.\.WEAPON_TUNING\.barrett\.pose,[\s\S]*?\}\)/,
   'the Barrett should use the approved exported position, scale and three-axis angle');
-assert.match(main, /const pose=viewmodelPoseLive\.barrett;[\s\S]*?barrettView\.root\.position\.set\(pose\.x\+bobX,[\s\S]*?pose\.y\+bobY[\s\S]*?pose\.z/,
+assert.match(main, /const pose=viewmodelPoseLive\.barrett;[\s\S]*?barrettView\.root\.position\.set\(pose\.x\+bobX\+swDx,[\s\S]*?pose\.y\+bobY[\s\S]*?pose\.z/,
   'the Barrett view uses its calibrated pose without changing internal proportions');
 assert.match(main, /ClassicView\.load\('barrett'\)\.then\(v=>\{[\s\S]*?v\.root\.scale\.setScalar\(viewmodelPoseLive\.barrett\.scale\)/,
   'the Barrett uses one uniform root scale instead of distorting gun-to-hand proportions');
@@ -95,7 +95,7 @@ assert.match(main, /key: "scale"[^\n]*min: \.001[^\n]*step: \.001, digits: 3/,
   'the tuner preserves the Desert Eagle authored scale at millesimal precision');
 assert.doesNotMatch(main, /vid === "awm"|vid === "pistol"/,
   'removed AWM and USP no longer participate in standard viewmodel posing');
-assert.match(main, /const pose=viewmodelPoseLive\.deagle;[\s\S]*?deagleFestaView\.root\.scale\.setScalar\(pose\.scale\);[\s\S]*?deagleFestaView\.root\.position\.set\(pose\.x\+bobX,[\s\S]*?deagleFestaView\.root\.rotation\.set\(pose\.pitch\+\(deploy\?0:swRx\),[\s\S]*?pose\.yaw\+\(deploy\?0:swRy\),pose\.roll\+\(deploy\?0:swRz\)\)/,
+assert.match(main, /const pose=viewmodelPoseLive\.deagle;[\s\S]*?deagleFestaView\.root\.scale\.setScalar\(pose\.scale\);[\s\S]*?deagleFestaView\.root\.position\.set\(pose\.x\+bobX\+swDx,[\s\S]*?deagleFestaView\.root\.rotation\.set\(pose\.pitch\+\(deploy\?0:swRx\),[\s\S]*?pose\.yaw\+\(deploy\?0:swRy\),pose\.roll\+\(deploy\?0:swRz\)\)/,
   'the Desert Eagle applies all seven live pose fields to the complete authored rig');
 assert.match(main, /ak: WEAPON_TUNING\.ak\.pose/,
   'the AK uses the user-approved live-tuned pose');

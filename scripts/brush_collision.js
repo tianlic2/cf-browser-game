@@ -22,6 +22,40 @@ export function brushSupportIsExposed(colliders, source, x, z, surface,
   return true;
 }
 
+// A circle swept around an axis-aligned box has rounded quarter-circle
+// corners. Expanding every BSP half-space by the actor radius instead produces
+// a larger, square/mitered corner: an invisible wedge that catches players and
+// makes bots alternate between forward and sideways movement. Maps opt in to
+// the exact footprint after this structural check; other authored convex BSP
+// leaves keep their existing conservative collision.
+export function hasCardinalBoxFootprint(c, epsilon = 1e-6) {
+  if (!c?.planes?.length) return false;
+  let posX = 0, negX = 0, posZ = 0, negZ = 0;
+  for (const [nx, ny, nz] of c.planes) {
+    if (Math.abs(ny) > epsilon) {
+      if (Math.abs(nx) > epsilon || Math.abs(nz) > epsilon) return false;
+      continue;
+    }
+    if (Math.abs(nx) > epsilon && Math.abs(nz) > epsilon) return false;
+    if (nx > epsilon) posX++;
+    else if (nx < -epsilon) negX++;
+    else if (nz > epsilon) posZ++;
+    else if (nz < -epsilon) negZ++;
+    else return false;
+  }
+  return posX === 1 && negX === 1 && posZ === 1 && negZ === 1;
+}
+
+function outsideBoxDistance(c, x, z) {
+  const yaw = c.yaw || 0, cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const worldX = x - c.x, worldZ = z - c.z;
+  const localX = worldX * cos - worldZ * sin;
+  const localZ = worldX * sin + worldZ * cos;
+  const dx = Math.max(0, Math.abs(localX) - (c.localHx ?? c.hx));
+  const dz = Math.max(0, Math.abs(localZ) - (c.localHz ?? c.hz));
+  return { dx, dz, distance: Math.hypot(dx, dz), localX, localZ, cos, sin };
+}
+
 export function intersectsBrush(c, x, z, feet = 0, radius = .45, step = .5,
     height = 1.78, solidSet = null, surfaceAt = null, blockerAt = null) {
   if (c.active === false) return false;
@@ -35,7 +69,14 @@ export function intersectsBrush(c, x, z, feet = 0, radius = .45, step = .5,
     if (!c.localStep || (brushSupportIsExposed(solidSet, c, x, z, c.h) &&
         Number.isFinite(visible) && Math.abs(visible-c.h)<.08)) return false;
   }
-  if (!c.planes) return !c.localStep||!blockerAt||blockerAt(x,z,feet,radius,step,height);
+  if (!c.planes) {
+    if (c.roundedFootprint) {
+      const outside = outsideBoxDistance(c, x, z);
+      if (outside.dx > 0 && outside.dz > 0 && outside.distance >= radius - 1e-5)
+        return false;
+    }
+    return !c.localStep||!blockerAt||blockerAt(x,z,feet,radius,step,height);
+  }
   // A BSP solid leaf below a ramp can span from the ramp's lowest point all
   // the way to its highest point.  Its global AABB top (`c.h`) therefore says
   // “wall” even when the authored surface directly under the actor is within
@@ -48,6 +89,15 @@ export function intersectsBrush(c, x, z, feet = 0, radius = .45, step = .5,
   if (Number.isFinite(localTop) && localTop <= feet + step + 1e-5 &&
       brushSupportIsExposed(solidSet, c, x, z, localTop) &&
       Number.isFinite(visibleTop) && Math.abs(visibleTop-localTop)<.08) return false;
+  // Transport Ship explicitly admits cardinal box brushes to the exact
+  // circle-vs-box footprint. On a diagonal outside the visible corner, only
+  // the radial distance matters; the old per-plane expansion filled the whole
+  // radius-by-radius square and felt like a tiny air wall.
+  if (c.roundedFootprint) {
+    const outside = outsideBoxDistance(c, x, z);
+    if (outside.dx > 0 && outside.dz > 0 && outside.distance >= radius - 1e-5)
+      return false;
+  }
   const cy=feet+(step+height)*.5, hy=(height-step)*.5;
   const hit=c.planes.every(([nx,ny,nz,d]) => nx*x+ny*cy+nz*z < d+radius*Math.hypot(nx,nz)+Math.abs(ny)*hy-1e-5);
   return hit&&(!c.localStep||!blockerAt||blockerAt(x,z,feet,radius,step,height));
@@ -60,6 +110,11 @@ function horizontalDepth(c, x, z, radius, feet, step, height) {
   if(c.preciseEscape&&c.planes){
     const push=brushHorizontalEscape(c,x,z,radius,feet,step,height);
     return Math.hypot(push.x,push.z);
+  }
+  if (c.roundedFootprint) {
+    const outside = outsideBoxDistance(c, x, z);
+    if (outside.dx > 0 || outside.dz > 0)
+      return Math.max(0, radius - outside.distance);
   }
   return Math.max(0, Math.min(
     c.hx + radius - Math.abs(x - c.x),
@@ -106,6 +161,23 @@ export function canMoveThroughBrushes(colliders, fromX, fromZ, toX, toZ,
 export function brushHorizontalEscape(c, x, z, radius = .45, feet = 0,
     step = 0, height = 1.78) {
   const eps = 2e-5;
+  if (c.roundedFootprint) {
+    const outside = outsideBoxDistance(c, x, z);
+    const ox = Math.abs(outside.localX) - (c.localHx ?? c.hx);
+    const oz = Math.abs(outside.localZ) - (c.localHz ?? c.hz);
+    if (ox > 0 && oz > 0) {
+      const distance = Math.hypot(ox,oz);
+      if (distance > 1e-8 && distance < radius) {
+        const move = radius + eps - distance;
+        const localPushX = Math.sign(outside.localX) * ox / distance * move;
+        const localPushZ = Math.sign(outside.localZ) * oz / distance * move;
+        return {
+          x: localPushX * outside.cos + localPushZ * outside.sin,
+          z: -localPushX * outside.sin + localPushZ * outside.cos,
+        };
+      }
+    }
+  }
   // Long diagonal boardwalk solids have enormous empty AABB corners. Recover
   // against their actual radius-expanded convex planes, not that whole box.
   // Keep the legacy crate/BSP recovery unchanged unless explicitly admitted.
@@ -143,7 +215,7 @@ export function brushClusterEscape(colliders, x, z, feet = 0, radius = .45,
   const eps = 3e-5;
   const xs = [], zs = [], candidates = [];
   for (const c of overlaps) {
-    if (c.preciseEscape && c.planes) {
+    if ((c.preciseEscape && c.planes) || c.roundedFootprint) {
       const push = brushHorizontalEscape(c, x, z, radius, feet, step, height);
       if (push?.x || push?.z) candidates.push({ x: x + push.x, z: z + push.z });
     }

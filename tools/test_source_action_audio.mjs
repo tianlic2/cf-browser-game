@@ -3,7 +3,7 @@ import vm from "node:vm";
 import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../scripts/audio.js", import.meta.url), "utf8");
-const executable = source.replace("export class SFX", "class SFX") + "\nglobalThis.SFX = SFX;";
+const executable = source.replace(/^import .*cf_vanilla_catalog\.js.*;$/m, 'const CF_VANILLA=[];').replace("export class SFX", "class SFX") + "\nglobalThis.SFX = SFX;";
 const context = vm.createContext({ addEventListener() {} });
 vm.runInContext(executable, context);
 const { SFX } = context;

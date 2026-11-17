@@ -182,6 +182,12 @@
   position: absolute; left: 6vw; bottom: 13vh; z-index: 1; margin: 0;
   background: rgba(26, 34, 36, .9);
 }
+.map-load-screen .map-load-enter {
+  border-color: rgba(234, 211, 154, .78);
+  background: rgba(18, 33, 38, .94);
+  color: #f2dfab;
+  cursor: pointer;
+}
 .map-load-screen.is-error .boot-status-dot { background: #f38465; animation: none; }
 .map-load-screen .boot-main { padding-bottom: 15vh; }
 .map-load-screen .boot-status { width: min(700px, 65vw); }

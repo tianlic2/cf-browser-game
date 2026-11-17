@@ -14,14 +14,14 @@ try {
     null, { timeout: 120000 });
 
   const expected = [
-    { bp: 0, id: 'ak', mag: 36, reserve: 108, dmg: 37, reload: 2.43 },
-    { bp: 1, id: 'm4', mag: 30, reserve: 90, dmg: 33, reload: 3.1 },
-    { bp: 2, id: 'barrett', mag: 15, reserve: 30, dmg: 300, reload: 3.85 },
-    { bp: 3, id: 'm4', mag: 41, reserve: 123, dmg: 35, reload: 3.1 },
-    { bp: 4, id: 'scar', mag: 41, reserve: 123, dmg: 35, reload: 2.47 },
+    { bp: 0, id: 'ak', mag: 40, reserve: 120, dmg: 38, reload: 2.43 },
+    { bp: 1, id: 'm4', mag: 40, reserve: 120, dmg: 33, reload: 3.1 },
+    { bp: 2, id: 'barrett', mag: 15, reserve: 30, dmg: 306, reload: 3.85 },
+    { bp: 3, id: 'm4', mag: 41, reserve: 123, dmg: 36, reload: 3.1 },
+    { bp: 4, id: 'scar', mag: 41, reserve: 123, dmg: 37, reload: 2.47 },
     { bp: 5, id: 'm200', mag: 15, reserve: 30, dmg: 220, reload: 3.42 },
-    { bp: 6, id: 'akgold', mag: 41, reserve: 123, dmg: 37, reload: 2.71 },
-    { bp: 7, id: 'kn57', mag: 70, reserve: 210, dmg: 500, reload: 91/37 },
+    { bp: 6, id: 'akgold', mag: 50, reserve: 150, dmg: 38, reload: 2.71 },
+    { bp: 7, id: 'kn57', mag: 50, reserve: 150, dmg: 60, reload: 91/37 },
   ];
   const actual = [];
   for (const item of expected) {
@@ -41,6 +41,16 @@ try {
     assert.equal(a.reload, e.reload, `${e.id} reload duration`);
     assert.equal(a.loopErrors, 0, `${e.id} runtime loop errors`);
   }
+  const scarPose = await page.evaluate(() => {
+    const t=__tactical;t.switchBackpack(4);t.clearSwitch();t.pause();t.clearSwitch();
+    const v=t.scarLightView();return {scale:v.root.scale.x,z:v.root.position.z,yaw:v.root.rotation.y,
+      tracer:t.playerTracerEnabled(),stats:t.weaponStats('scar')};
+  });
+  assert.ok(Math.abs(scarPose.scale-.965)<1e-6, 'SCAR uses the approved viewmodel scale');
+  assert.ok(Math.abs(scarPose.z-.15)<1e-6, 'SCAR uses the approved viewmodel depth');
+  assert.ok(Math.abs(scarPose.yaw+.17)<1e-6, 'SCAR uses the approved viewmodel yaw');
+  assert.equal(scarPose.tracer,false, 'SCAR player tracer is disabled');
+  assert.equal(scarPose.stats.dmg,37, 'SCAR damage remains the approved value');
   const deagle = await page.evaluate(() => {
     const t = __tactical; t.switchWeapon('deagle'); t.clearSwitch();
     return { ammo: t.getAmmo(), stats: t.weaponStats('deagle') };

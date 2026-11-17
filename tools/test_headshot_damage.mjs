@@ -14,12 +14,12 @@ const {
   rollBodyshotDamage,
 } = await import(damageModuleUrl);
 
-const expected = { ak: 140, m4: 104, ironbeast: 104, scar: 104, m200: 500,
-  akgold: 130, kn57: 1000, barrett: 750, deagle: 120 };
+const expected = { ak: 140, m4: 104, ironbeast: 120, scar: 115, m200: 500,
+  akgold: 130, kn57: 200, awm_nature: 1000, barrett: 750, deagle: 120 };
 assert.deepEqual({ ...HEADSHOT_DAMAGE_AVERAGES }, expected, 'configured averages');
 assert.equal(HEADSHOT_DAMAGE_MIN_FACTOR, .9, 'minimum factor');
 assert.equal(HEADSHOT_DAMAGE_MAX_FACTOR, 1.1, 'maximum factor');
-assert.deepEqual({ ...BODYSHOT_DAMAGE_AVERAGES }, { barrett: 300 },
+assert.deepEqual({ ...BODYSHOT_DAMAGE_AVERAGES }, { barrett: 306 },
   'Barrett has an authored body-shot average');
 
 for (const [id, average] of Object.entries(expected)) {
@@ -42,23 +42,23 @@ for (const [id, average] of Object.entries(expected)) {
 assert.equal(rollHeadshotDamage('unknown', .5), null, 'unknown weapons have no authored headshot value');
 assert.equal(rollHeadshotDamage('ak', -10), 126, 'random input clamps at the lower bound');
 assert.equal(rollHeadshotDamage('ak', 10), 154, 'random input clamps at the upper bound');
-assert.equal(rollBodyshotDamage('barrett', 0), 270, 'Barrett body lower endpoint');
-assert.equal(rollBodyshotDamage('barrett', .5), 300, 'Barrett body midpoint');
-assert.equal(rollBodyshotDamage('barrett', 1), 330, 'Barrett body upper endpoint');
+assert.equal(rollBodyshotDamage('barrett', 0), 275, 'Barrett body lower endpoint');
+assert.equal(rollBodyshotDamage('barrett', .5), 306, 'Barrett body midpoint');
+assert.equal(rollBodyshotDamage('barrett', 1), 337, 'Barrett body upper endpoint');
 let barrettBodyTotal = 0;
 for (let i = 0; i <= 10000; i++) {
   const damage = rollBodyshotDamage('barrett', i / 10000);
-  assert.ok(damage >= 270 && damage <= 330, 'Barrett body sample stays inside 270-330');
+  assert.ok(damage >= 275 && damage <= 337, 'Barrett body sample stays inside 275-337');
   barrettBodyTotal += damage;
 }
-assert.ok(Math.abs(barrettBodyTotal / 10001 - 300) < .01,
-  'Barrett body samples average to 300');
+assert.ok(Math.abs(barrettBodyTotal / 10001 - 306) < .01,
+  'Barrett body samples average to 306');
 assert.equal(rollBodyshotDamage('ak', .5), null,
   'other firearms keep their existing body-damage path');
 
 const main = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
 const fire = main.slice(main.indexOf('function fire()'), main.indexOf('// 黄金爆头'));
-assert.match(main, /import \{ rollHeadshotDamage, rollBodyshotDamage \} from "\.\/headshot_damage\.js\?v=approved-20261029";/,
+assert.match(main, /import \{ rollHeadshotDamage, rollBodyshotDamage \} from "\.\/headshot_damage\.js\?v=awm-nature-1";/,
   'game imports the shared headshot and Barrett body rollers');
 assert.match(main, /function bodyshotDamage\(def, dist, randomValue = Math\.random\(\)\)[\s\S]*rollBodyshotDamage\(def\.id, randomValue\)[\s\S]*rolled \?\? damageAt\(def, dist\)/,
   'only authored body values bypass ordinary distance falloff');
@@ -69,4 +69,4 @@ assert.match(fire, /baseDamage \* \(h\.damageMultiplier \?\? 1\)/,
 assert.doesNotMatch(fire, /Math\.max\(enemy\.maxHealth, directDamage\)|directDamage \* \(head \? 2\.2 : 1\)/,
   'legacy guaranteed-kill and bio 2.2x headshot rules are removed');
 
-console.log('PASS: approved firearm headshot averages and Barrett 300 body damage roll uniformly within 90%-110%; wood attenuation remains a later multiplier.');
+console.log('PASS: approved firearm headshot averages and Barrett 306 body damage roll uniformly within 90%-110%; wood attenuation remains a later multiplier.');

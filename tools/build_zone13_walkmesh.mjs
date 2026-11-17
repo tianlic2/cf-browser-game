@@ -8,6 +8,26 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = path.join(root, 'assets/local/cf_bio_candidates/zone13/graybox');
 const nav = JSON.parse(fs.readFileSync(path.join(dir, 'zone13-navmesh.json'), 'utf8'));
 const graybox = JSON.parse(fs.readFileSync(path.join(dir, 'zone13-graybox.json'), 'utf8'));
+const staticDir = path.join(dir, 'static-models');
+const staticManifest = JSON.parse(fs.readFileSync(path.join(staticDir, 'manifest.json'), 'utf8'));
+const renderedBounds = new Map();
+for (const model of staticManifest.models) {
+  const bytes = fs.readFileSync(path.join(staticDir, model.binary));
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (const part of model.parts) {
+    const packed = new Float32Array(buffer, part.byteOffset, part.byteLength / 4);
+    for (let offset = 0; offset + 2 < packed.length; offset += 8) for (let axis = 0; axis < 3; axis++) {
+      min[axis] = Math.min(min[axis], packed[offset + axis]);
+      max[axis] = Math.max(max[axis], packed[offset + axis]);
+    }
+  }
+  renderedBounds.set(model.model.toLowerCase(), { min, max });
+}
+const boundsFor = (item) => renderedBounds.get(item.model.toLowerCase()) || item.localBounds || {
+  min: [-item.size[0] / 2, 0, -item.size[2] / 2],
+  max: [item.size[0] / 2, item.size[1], item.size[2] / 2],
+};
 const main = nav.areas.filter((area) => area.component === 0);
 const surfaceTriangles = main.flatMap((area) => [[area.corners[0], area.corners[2], area.corners[1]], [area.corners[0], area.corners[3], area.corners[2]]]);
 function triangleHeight(x, z, [a, b, c]) {
@@ -21,7 +41,7 @@ function triangleHeight(x, z, [a, b, c]) {
 function nearbySurfaceHeight(item) {
   if (!/bus|car|dianxiangan|light3/i.test(item.model)) return null;
   const scale = item.scale || 1;
-  const bottom = item.position[1] + (item.localBounds?.min?.[1] || 0) * scale;
+  const bottom = item.position[1] + boundsFor(item).min[1] * scale;
   const candidates = [];
   for (const radius of [0, .6, 1.2, 2.2, 3.4]) for (let step = 0; step < (radius ? 12 : 1); step += 1) {
     const angle = step / 12 * Math.PI * 2;
@@ -36,7 +56,7 @@ function nearbySurfaceHeight(item) {
 }
 const staticPropPlacements = graybox.staticProps.map((item, index) => {
   const surfaceY = nearbySurfaceHeight(item);
-  const bottom = item.position[1] + (item.localBounds?.min?.[1] || 0) * (item.scale || 1);
+  const bottom = item.position[1] + boundsFor(item).min[1] * (item.scale || 1);
   const correctionY = surfaceY === null || Math.abs(surfaceY - bottom) > 3 ? 0 : surfaceY - bottom;
   return { index, correctionY };
 });
@@ -56,14 +76,25 @@ const propColliders = graybox.staticProps
   .map((item) => {
     const correctionY = staticPropPlacements[graybox.staticProps.indexOf(item)].correctionY;
     const scale = item.scale || 1, yaw = -item.angles[1] * Math.PI / 180;
-    const min = item.localBounds?.min || [-item.size[0] / 2, 0, -item.size[2] / 2];
-    const max = item.localBounds?.max || [item.size[0] / 2, item.size[1], item.size[2] / 2];
+    const { min, max } = boundsFor(item);
     const localX = (min[0] + max[0]) * .5 * scale, localZ = (min[2] + max[2]) * .5 * scale;
-    return { model: item.model,
-      x: item.position[0] + localX * Math.cos(yaw) + localZ * Math.sin(yaw),
-      z: item.position[2] - localX * Math.sin(yaw) + localZ * Math.cos(yaw),
-      y0: item.position[1] + correctionY + min[1] * scale, h: item.position[1] + correctionY + max[1] * scale,
-      hx: (max[0] - min[0]) * .5 * scale, hz: (max[2] - min[2]) * .5 * scale, yaw };
+    const x = item.position[0] + localX * Math.cos(yaw) + localZ * Math.sin(yaw);
+    const z = item.position[2] - localX * Math.sin(yaw) + localZ * Math.cos(yaw);
+    const localHx = (max[0] - min[0]) * .5 * scale;
+    const localHz = (max[2] - min[2]) * .5 * scale;
+    const cos = Math.cos(yaw), sin = Math.sin(yaw);
+    const hx = Math.abs(cos) * localHx + Math.abs(sin) * localHz;
+    const hz = Math.abs(sin) * localHx + Math.abs(cos) * localHz;
+    const y0 = item.position[1] + correctionY + min[1] * scale;
+    const h = item.position[1] + correctionY + max[1] * scale;
+    const axisX = [cos, 0, -sin], axisZ = [sin, 0, cos];
+    const side = (axis, half) => [axis[0], 0, axis[2], axis[0] * x + axis[2] * z + half];
+    return { model: item.model, x, z, y0, h, hx, hz, localHx, localHz, yaw,
+      preciseEscape: true, roundedFootprint: true,
+      planes: [side(axisX, localHx), side(axisX.map(value => -value), localHx),
+        side(axisZ, localHz), side(axisZ.map(value => -value), localHz),
+        [0, 1, 0, h], [0, -1, 0, -y0]],
+    };
   });
 const payload = {
   format: 'zone13-preview-walkmesh-v1',

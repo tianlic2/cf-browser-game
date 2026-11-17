@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createZone13SpatialCollision } from '../scripts/zone13_collision.js';
+import { intersectsBrush } from '../scripts/brush_collision.js';
 
 const root = new URL('../assets/local/cf_bio_candidates/zone13/graybox/', import.meta.url);
 const world = JSON.parse(readFileSync(new URL('zone13-graybox.json', root), 'utf8'));
@@ -9,6 +10,21 @@ const walk = JSON.parse(readFileSync(new URL('zone13-walkmesh.json', root), 'utf
 const bytes = readFileSync(new URL('zone13-graybox.bin', root));
 const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 const collision = createZone13SpatialCollision(world, buffer, walk.propColliders);
+
+assert.ok(walk.propColliders.every((collider) => collider.planes?.length === 6 &&
+  Number.isFinite(collider.localHx) && Number.isFinite(collider.localHz)),
+  'every visible static prop has an oriented collision hull');
+const rotatedCar = walk.propColliders.find((collider) => /car\.mdl$/i.test(collider.model));
+assert.ok(rotatedCar && Math.abs(rotatedCar.yaw) > .1, 'the real map contains a rotated car audit target');
+const carCos = Math.cos(rotatedCar.yaw), carSin = Math.sin(rotatedCar.yaw);
+const carPoint = (lx, lz) => ({ x: rotatedCar.x + lx * carCos + lz * carSin,
+  z: rotatedCar.z - lx * carSin + lz * carCos });
+const carSide = carPoint(rotatedCar.localHx + .2, 0);
+assert.equal(intersectsBrush(rotatedCar, carSide.x, carSide.z, rotatedCar.y0, .38, 0, 1.72), true,
+  'the rotated car blocks at its visible side');
+const carCorner = carPoint(rotatedCar.localHx + .34, rotatedCar.localHz + .34);
+assert.equal(intersectsBrush(rotatedCar, carCorner.x, carCorner.z, rotatedCar.y0, .38, 0, 1.72), false,
+  'the rotated car corner uses radial capsule contact instead of a square air-wall wedge');
 
 assert.ok(collision.stats.triangleCount > world.stats.triangles * .9 &&
   collision.stats.triangleCount <= world.stats.triangles,
@@ -112,12 +128,19 @@ assert.equal(windowCollision.hasVerticalClearance(0, 0, 0, 1.78, .38), false,
 const thinFloor = syntheticCollision(quadY(1.25));
 assert.ok(Math.abs(thinFloor.landingSurfaceAt(.2, 0, 2.4, .38) - 1.25) < 1e-6,
   'a descending foot finds a thin BSP platform even when it is absent from NAV');
+assert.ok(Math.abs(thinFloor.ceilingSurfaceAt(.2, 0, 1.1, 1.4, .38) - 1.25) < 1e-6,
+  'the same thin BSP platform stops a rising head from clipping through below');
 const propTop = createZone13SpatialCollision({ groups: [] }, new ArrayBuffer(0),
-  [{ x: 0, z: 0, y0: 0, h: 1.1, hx: .7, hz: .5, yaw: Math.PI / 4 }]);
+  [{ x: 0, z: 0, y0: 0, h: 1.1, hx: 1, hz: 1, localHx: .7, localHz: .5,
+    yaw: Math.PI / 4 }]);
 assert.ok(Math.abs(propTop.landingSurfaceAt(0, 0, 2, .38) - 1.1) < 1e-6,
   'a descending foot finds the top of a rotated static prop collider');
 assert.ok(Math.abs(propTop.supportSurfaceAt(0, 0, 1.12, .38) - 1.1) < 1e-6,
   'a prop top remains persistent support after the landing frame');
+assert.equal(propTop.lineClear({ x: -2, y: -.6, z: -2 }, { x: 2, y: -.6, z: 2 }, .8), false,
+  'line of sight crosses the actual rotated prop box');
+assert.equal(propTop.lineClear({ x: -1.1, y: -.6, z: .9 }, { x: -.9, y: -.6, z: 1.1 }, .8), true,
+  'the empty corner of a rotated prop world AABB is no longer an air wall');
 
 const crateTop = syntheticCollision([
   ...quadY(1.05, -.7, .7, -.7, .7), ...quadX(-.7, 0, 1.05, -.7, .7),
@@ -125,6 +148,10 @@ const crateTop = syntheticCollision([
 ]);
 assert.ok(Math.abs(crateTop.supportSurfaceAt(0, 0, 1.08, .38) - 1.05) < 1e-6,
   'a visible BSP crate top omitted from NAV remains valid standing support');
+assert.equal(crateTop.blocksMovement(-1.2, -1.2, -.55, -.55, 0, .38, 0, 1.72), true,
+  'an exact swept capsule catches a visible BSP crate corner between the legacy sample rays');
+assert.equal(crateTop.blocksMovement(-1.2, -1.2, -1, -1, 0, .38, 0, 1.72), false,
+  'the same crate corner does not create collision beyond the capsule radius');
 
 // Real-map second-floor opening near NAV area 813: at jump height the crouch
 // hull clears the opening while the standing hull meets the upper frame.

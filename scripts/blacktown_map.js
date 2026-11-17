@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { configureMapTexture } from './map_texture_quality.js';
-import { prepareGoldsrcCollision } from './goldsrc_surface.js?v=visible-wall-1';
+import { prepareGoldsrcCollision } from './goldsrc_surface.js?v=visible-alpha-2';
 import { fetchChunkedMap } from './chunked_asset.js?v=github-publish-1';
 
 const BASE = new URL('../assets/classic/blacktown/', import.meta.url).href;

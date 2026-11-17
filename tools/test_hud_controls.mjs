@@ -31,6 +31,8 @@ const context = vm.createContext({ document, console, state: 'playing', matchPau
   hud: node('hud'), menu: node('menu'), gameover: node('gameover'), viewport: node('viewport'),
   backpackResumePending: false, closeBackpack() {}, toggleBackpack() {}, chat: { open() {} },
   clearBackpackInput() { inputClears++; }, requestLock() { lockRequests++; }, showToast() {},
+  cancelFoldingCoverPreview() {}, cancelAllSkillPreviews() {},
+  releasePointerLock() { document.exitPointerLock(); },
   sfx: { muted: false, cancelStreak() {}, setMuted(value) { this.muted = value; return value; } },
 });
 vm.runInContext(main.slice(main.indexOf('function gameMenuOpen()'), main.indexOf('function toggleMatchPause()')) +

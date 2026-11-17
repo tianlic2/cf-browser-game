@@ -18,15 +18,26 @@ try {
       const c=canvas.getContext('2d');c.drawImage(image,0,0);const p=c.getImageData(0,0,canvas.width,canvas.height).data;
       let minX=canvas.width,maxX=0,minY=canvas.height,maxY=0,count=0;
       for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++)if(p[(y*canvas.width+x)*4+3]>25){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);count++;}
-      return {name:cards[0].querySelector('.bp-weapon-name').textContent, width:maxX-minX,height:maxY-minY,count,melee:!!cards[2].querySelector('img')};
+      const secondary=cards[1].querySelector('img');
+      return {name:cards[0].querySelector('.bp-weapon-name').textContent, width:maxX-minX,height:maxY-minY,count,
+        secondarySource:secondary?.dataset.previewSource,melee:!!cards[2].querySelector('img')};
     },i);
     assert.ok(data&&data.count>500&&data.width>data.height*1.25,`backpack ${i+1} shows a legible side-on primary weapon: ${JSON.stringify(data)}`);
+    assert.equal(data.secondarySource,'deagle-ui-original',
+      `backpack ${i+1} uses the Festa CFS 2019 Desert Eagle source model`);
     assert.equal(data.melee,true,'melee thumbnail renders');previews.push(data);
   }
+  const kn57BackpackView=await page.evaluate(()=>{const img=document.querySelector('.bp-slot-primary img');return {side:img?.dataset.previewSide,source:img?.dataset.previewSource,mirrored:img?.classList.contains('is-mirrored')}});
+  assert.deepEqual(kn57BackpackView,{side:'default',source:'kn57-ui-original',mirrored:false},
+    'KN-57 backpack preview is baked from the original 94-bone view model, not its AK world mesh');
+  assert.ok(previews[7].height>100&&previews[7].count>15000,
+    `KN-57 preview contains the complete attached rifle without a detached reload magazine: ${JSON.stringify(previews[7])}`);
+  await page.screenshot({path:'/private/tmp/kn57-backpack-direction.png'});
+  await page.screenshot({path:'/private/tmp/deagle-backpack.png'});
   await page.keyboard.press('b');
   const drops=await page.evaluate(async()=>{
     const t=window.__tactical; const THREE=await import('/vendor/three/build/three.module.js');
-    const catalog=await import('/scripts/guncatalog.js?v=weapon-world-3');const result=[];
+    const catalog=await import('/scripts/guncatalog.js?v=enemy-eight-guns-1');const result=[];
     for(let i=0;i<t.BACKPACKS.length;i++) {
       t.switchBackpack(i);t.clearSwitch();const {primary:id,skin}=t.BACKPACKS[i];
       const template=catalog.worldModel(id,skin);const size=new THREE.Box3().setFromObject(template).getSize(new THREE.Vector3());
@@ -44,6 +55,10 @@ try {
     assert.equal(entry.held?.skin,entry.skin,`backpack ${i+1} preserves the dropped skin after pickup`);
     assert.ok(entry.size[2]>entry.size[0] && entry.size[2]>entry.size[1],`backpack ${i+1} rigid model is aligned to the gun barrel: ${entry.size}`);
   }
+  await page.waitForFunction(()=>document.querySelector('#hudWeaponIcon img[data-preview-side="default"]'));
+  const kn57HudView=await page.evaluate(()=>{const img=document.querySelector('#hudWeaponIcon img');return {side:img?.dataset.previewSide,source:img?.dataset.previewSource,mirrored:img?.classList.contains('is-mirrored')}});
+  assert.deepEqual(kn57HudView,{side:'default',source:'kn57-ui-original',mirrored:false},
+    'KN-57 HUD silhouette uses the same original source model as the backpack');
   assert.ok(drops[3].materials.some(name=>/IronBeast/i.test(name)),`Iron Beast must use its source model: ${drops[3].materials}`);
   assert.deepEqual(errors,[]);assert.deepEqual(failed,[]);
   console.log('PASS: eight backpack images and matching aligned dropped weapons.',{previews,drops});

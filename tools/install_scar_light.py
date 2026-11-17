@@ -35,10 +35,12 @@ def world_glb(source, output):
     r = get('64sif10i', model)
     meshes, mesh_at, nv, vi, vertices, nn, ni, normals = r[3:11]
     assert not any(b[vi:vi+nv]) and not any(b[ni:ni+nn])
-    # The single root bone only places the dropped gun on its side. Export its
-    # local mesh upright for the shared catalog (local Y barrel -> game -Z,
-    # local Z height -> game Y). The drop system owns its final floor pose.
-    def axis(v): return (v[0], v[2], -v[1])
+    # The single root bone only places the dropped gun on its side. Its narrow
+    # muzzle is at local -Y (verified from the two endpoint cross-sections), so
+    # rotate the rigid mesh into the catalog convention: muzzle -> game -Z and
+    # local Z height -> game +Y. This is a proper 180-degree rigid correction,
+    # not a texture/geometry mirror; the drop system owns the final floor pose.
+    def axis(v): return (-v[0], v[2], v[1])
     positions = [axis(get('3f', vertices+i*12)) for i in range(nv)]
     norms = [axis(get('3f', normals+i*12)) for i in range(nn)]
     rows = []

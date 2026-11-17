@@ -9,7 +9,7 @@ const [enemies, main] = await Promise.all([
 
 assert.match(main, /enemyManager\.loseTarget\(killer, player\.pos\)/,
   'death handoff includes the killer and the downed position');
-assert.match(enemies, /_postKillDestination\(e, killer = false\)/,
+assert.match(enemies, /_postKillDestination\(e, killer = false, role = e\.postKillRole\)/,
   'enemy manager provides a tactical post-kill destination');
 assert.match(enemies, /e\.update\(dt, \{ pos: goal \}, this\.enemies, true, false, goal\)/,
   'dead-player interval keeps relocation simulation active while shooting stays gated');
@@ -17,7 +17,13 @@ assert.doesNotMatch(enemies, /if \(!targetAlive\) \{ e\.update\(dt, player, this
   'the old stand-still branch is removed');
 assert.match(enemies, /!blind && !canSee && walkingDist <= \.75/,
   'arrived searchers preserve heading instead of snapping to world yaw zero');
-assert.match(enemies, /this\.vel\.multiplyScalar\(\.55\)/,
-  'kill transition preserves some movement momentum');
+assert.match(enemies, /this\.vel\.multiplyScalar\(role === 'killer' \? \.58 : \.82\)/,
+  'kill transition preserves role-dependent movement momentum');
+assert.match(enemies, /const role = e === killer \? 'killer' : sawDown \? 'witness' : 'unaware'/,
+  'post-kill reactions distinguish killer, witnesses and unaware soldiers');
+assert.match(enemies, /const delay = e === killer \? \.03 : sawDown \? \.18 \+ phase \* \.58 : \.72 \+ phase \* 1\.18/,
+  'post-kill replans are staggered instead of synchronized on one frame');
+assert.match(enemies, /e\.postKillDelay <= 0 && !e\.postKillCommitted/,
+  'each soldier commits its new plan only after its individual delay');
 
 console.log('PASS: post-kill relocation and stable search heading are connected.');

@@ -82,6 +82,13 @@ def static_world_glb(candidate, output, node_name, target_length):
                 (node_name.startswith('akgold') and bone_name in ('bone-box002', 'bone-mac03')))
             if node_name.startswith(('akgold', 'ironbeast')) and reload_only:
                 continue
+            # KN-57 stores a second full magazine and cartridge on animation
+            # helper bones for the reload sequence.  They are deliberately
+            # parked away from the rifle during idle; a static UI bake must
+            # retain tag_clip/tag_bullet_animate and omit only these spares.
+            if node_name.startswith('kn57-ui') and bone_name in (
+                    'tag_clip_full_animate', 'tag_bullet_full_animate'):
+                continue
             skinned = sum((skin[int(row[8+j])] * row[12+j] for j in range(4) if row[12+j]), np.zeros((4,4)))
             if not np.any(skinned): skinned = np.eye(4)
             posed = matrix @ skinned
@@ -118,6 +125,22 @@ def static_world_glb(candidate, output, node_name, target_length):
     rx=np.array([[1,0,0],[0,cx,-sx],[0,sx,cx]])
     rotate=rx@ry
     rotated=np.einsum('ij,kj->ik',cloud,rotate)
+    if node_name.startswith('cf-vanilla-'):
+        # GoldSrc world weapons in this pack are authored lying on a side at
+        # various yaw angles. Restore the long axis to -Z and the broad side to
+        # vertical before the ordinary world/thumbnail camera sees them.
+        # Some assets have the opposite authored side facing upwards, and
+        # Galil's stock/barrel direction is reversed in the source world pose.
+        ident=node_name.removeprefix('cf-vanilla-').removesuffix('-world')
+        xz=rotated[:,[0,2]]
+        cov=np.cov(xz.T)
+        a=.5*np.arctan2(2*cov[0,1],cov[0,0]-cov[1,1])
+        ax,az=np.cos(a),np.sin(a)
+        s=-1 if ident in {'famas','mac10','mp5','galil'} else 1
+        q=1 if ident == 'galil' else -1
+        upright=np.array([[0,s,0],[-s*q*az,0,s*q*ax],[q*ax,0,q*az]])
+        rotate=upright@rotate
+        rotated=np.einsum('ij,kj->ik',cloud,rotate)
     magazine_shift=0.
     if np.any(magazine_flags):
         mag=rotated[magazine_flags]; body=rotated[~magazine_flags]

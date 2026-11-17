@@ -37,7 +37,8 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 assert.equal(manifest.format, 'zone13-graybox-v1');
 assert.equal(manifest.sourceVersion, 21);
 assert.ok(manifest.stats.triangles > 1000);
-assert.ok(manifest.stats.materials >= 3 && manifest.stats.materials <= 7);
+assert.equal(manifest.stats.materials, 2,
+  'the complete opaque world is atlased while Source patch glass remains separate');
 assert.ok(manifest.groups.some((group) => group.id === 'atlas' && group.vertexCount > 0));
 assert.ok(manifest.stats.entities > 100);
 assert.ok(manifest.stats.staticProps > 20);
@@ -46,7 +47,7 @@ assert.ok(manifest.staticProps.some((prop) => /bus\.mdl$/i.test(prop.model)));
 assert.ok(manifest.staticProps.filter((prop) => /bus\.mdl$/i.test(prop.model)).every((prop) => prop.scale > 20), 'Zone13 v11 trailing prop scale must be preserved');
 assert.ok(manifest.staticProps.filter((prop) => /car\.mdl$/i.test(prop.model)).every((prop) => prop.size[0] > 5), 'vehicle bounds must stay at world scale');
 const atlas = JSON.parse(fs.readFileSync(atlasManifestPath, 'utf8'));
-assert.equal(atlas.slots.length, 16);
+assert.equal(atlas.slots.length, 70);
 assert.deepEqual([...fs.readFileSync(atlasPath).subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
 const nav = JSON.parse(fs.readFileSync(navPath, 'utf8'));
 assert.equal(nav.majorVersion, 16);

@@ -6,6 +6,8 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const failures = [];
   const errors = [];
+  const restrictedRequests = [];
+  page.on('request', request => { if(request.url().includes('/assets/local/awm_nature/')) restrictedRequests.push(request.url()); });
   page.on('response', (response) => {
     if (response.status() >= 400 && !response.url().endsWith('/favicon.ico')) {
       failures.push([response.status(), response.url()]);
@@ -28,10 +30,14 @@ try {
     bioHidden: document.querySelector('[data-mode="bio"]')?.hidden,
   }));
   assert.deepEqual(state.maps.filter((map) => !map.hidden).map((map) => map.id),
-    ['transport', 'blacktown', 'lingyin']);
+    ['transport', 'blacktown']);
+  await page.locator('[data-mode="browse"]').click();
+  assert.deepEqual(await page.locator('[data-map]').evaluateAll(nodes=>nodes.filter(n=>!n.hidden).map(n=>n.dataset.map)),
+    ['transport','blacktown','lingyin']);
   assert.equal(state.bioHidden, true);
   assert.deepEqual(errors, []);
   assert.deepEqual(failures, []);
+  assert.deepEqual(restrictedRequests, [], 'public mode must not request the local AWM package');
   console.log('PASS: public browser boot exposes only publishable maps and makes no failed asset requests.');
 } finally {
   await browser.close();

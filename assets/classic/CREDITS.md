@@ -99,6 +99,7 @@
 - 模型由用户随本地目录 `Festa CFS 2019 WS/models/v_deagle.mdl` 提供，SHA-256 `b007dbaa0b8ae9dc67a9480c8f8d102cf5f7d367218147b720ebc8ee537af1d2`。目录没有附带可核验的授权说明；仅按用户要求用于本地转换，不据此推定公开再分发或商用权。
 - GoldSrc v10 MDL 含 49 根骨骼、完整手/指/手臂和 Festa CFS 2019 沙鹰枪身，保留 `idle_0 / fire / prefire / postfire / reload / select` 六段完整动作。`tools/import_ironbeast_view.py` 以 `forward-axis=x` 重复转换到 `assets/classic/deagle_festa/`：该模型在动画待机姿势下枪管沿源 `+X`，导入时映射到游戏相机 `-Z`，不能套步枪的源 `+Y` 轴。
 - 第一人称画面现在显示这套完整源骨骼，不再使用上一节 `motions/deagle_view.glb` 与程序化经典袖管；旧 GLB 仅保留为加载失败回退。世界中的敌人持枪、掉落物及大厅静态模型继续使用 `deagle/desert_eagle.glb`，因为用户提供的是 `v_` 第一人称模型而非 `w_` 世界模型。
+- 背包图片与右下角武器标识使用 `tools/build_weapon_ui_models.py` 从同一 Festa 视模的 `idle_0` 烘焙 `deagle_festa/ui.glb`，只保留原枪体（1889 三角面），排除手臂和手套。旧 `deagle/desert_eagle.glb` 不再作为 UI 外观来源，仍只服务于既有世界掉落/持枪链。
 - MDL 的换弹/拔枪事件引用 `DesertEagleSilence_*.WAV`；这些文件位于用户目录的 `sound/SND/Desert Eagle-Silence/`。现将 `Select / BlowBack / ClipOut / ClipIn / DelBlowBack` 五段 WAV 原样接入，并严格按 MDL 的 5004 事件时刻播放；两份开火 WAV 同样原样接入，详情见 `audio/CREDITS.txt`。
 
 ## 经典手雷 / 闪光弹 / 烟雾弹
@@ -151,3 +152,10 @@
 - `assets/lingyin/runtime-textures/` 中的林地漫反射/法线 WebP 派生自上节同一套 Forest Ground 01 CC0 源图，保留 1K 分辨率。`forest-atlas.webp` 是现有原创叶片绘图与上节松针/阔叶照片裁片的离线合成；`gate-atlas.webp`、`gate-paving.webp` 是项目原有 Canvas 叶片与石板绘图的离线烘焙。由 `tools/build_lingyin_runtime_textures.mjs` 生成，源图仍保留。
 - 山门与院墙木构、灰泥，以及山门瓦面复用前述建筑材质照片；竹林的竹节/纤维贴图由项目生成，无新增外部素材。
 - 第二轮参考图美化中的栈道木板图由既有 Fine Grained Wood 照片与项目绘制的板缝/钉头合成；细波法线和白色瀑流均由项目生成的小纹理。叶片图集改用清洁枝叶裁片并剔除原 UV 灰色岛屿，未引入额外高面数植被模型。
+
+## 运输船实拍环境与甲板（2026-11-13）
+
+- 运输船的可见云层、暖色天际和线性环境光取自同一份工业日落 HDR，主光与云隙按同一方位和仰角对齐。[Industrial Sunset (Pure Sky)](https://polyhaven.com/a/industrial_sunset_puresky)
+- 甲板的旧漆、钢板接缝、划痕和粗糙度来自 Rob Tuytel 的 Blue Metal Plate，游戏版本经过调色与粗糙度重映射。[Blue Metal Plate](https://polyhaven.com/a/blue_metal_plate)
+- 货箱面板、撑条的木纹与表面凹凸使用项目内已有的 Fine Grained Wood 扫描，按板条重新取样并与本地绘制的锯痕、开裂和旧漆合成。[Fine Grained Wood](https://polyhaven.com/a/fine_grained_wood)
+- 上述扫描素材均由 Poly Haven 以 CC0 发布。[Poly Haven 许可](https://polyhaven.com/license)

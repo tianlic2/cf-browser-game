@@ -1,4 +1,4 @@
-import { WEAPON_TUNING } from './weapon_tuning.js?v=approved-2026-10-24';
+import { WEAPON_TUNING } from './weapon_tuning.js?v=approved-20261031';
 
 // Festa axe: alternate the two authored light attacks and use bigshot for heavy.
 // Range is measured from the camera to the first hit surface, in scene metres.

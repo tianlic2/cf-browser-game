@@ -31,7 +31,7 @@ try {
     };
   });
   assert.deepEqual(errors, [], 'formal Zone 13 loads without browser/runtime errors');
-  assert.equal(audit.state.name, 'Zone 13（生化）');
+  assert.equal(audit.state.name, '13号地区');
   assert.equal(audit.worldBatches, 2, 'the textured BSP atlas and Source glass batch are visible');
   assert.deepEqual(audit.atlasSize, [2048, 2304], 'the expanded 70-texture atlas loaded at runtime');
   assert.ok(audit.propBatches >= 4, 'vehicles, lamps and street props are instantiated');
@@ -50,15 +50,19 @@ try {
     ];
     return actors.map((actor) => {
       const p = actor.group.position;
-      const floor = t.bioMode.map.navigation.heightAt(p.x, p.z,
+      const navFloor = t.bioMode.map.navigation.heightAt(p.x, p.z,
         p.y + (t.bioMode.map.stepHeight || .5) + .04);
-      return { finite: [p.x, p.y, p.z, floor].every(Number.isFinite),
+      const detailFloor = t.bioMode.map.supportSurfaceAt?.(p.x, p.z, p.y + .06, .45) ?? -Infinity;
+      const floor = Math.max(navFloor, detailFloor);
+      return { position: p.toArray(), navFloor, detailFloor,
+        finite: [p.x, p.y, p.z, floor].every(Number.isFinite),
         attached: !!actor.group.parent, delta: Math.abs(p.y - floor) };
     });
   });
   assert.ok(mobility.length > 0, 'long simulation retains active NPCs');
+  console.log('Zone 13 long mobility:', mobility);
   assert.ok(mobility.every((actor) => actor.finite && actor.attached && actor.delta < .08),
-    'NPCs remain attached to their current NAV floor instead of falling through stacked floors');
+    'NPCs remain attached to their NAV or visible-detail support instead of falling through stacked floors and crates');
   await page.screenshot({ path: '/private/tmp/zone13-formal-game.png' });
   console.log('PASS: playable Zone 13 loaded in the formal bio game.', audit);
 } finally {

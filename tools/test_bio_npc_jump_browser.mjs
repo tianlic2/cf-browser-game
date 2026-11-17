@@ -27,9 +27,13 @@ try {
           if (!m._canMove(x,z,floor,.45,actor)) continue;
           let triggered = kind === 'zombie' && m._tryLeap(actor, sign, 0);
           if (kind === 'zombie' && !triggered) continue;
-          let peak = floor, maxX = x, minX = x, landedOnTop = false;
+          let peak = floor, maxX = x, minX = x, landedOnTop = false, nativeJump = false;
           for (let i = 0; i < 120; i++) {
-            if (kind === 'human') m._moveHuman(actor, sign, 0, 1/60, 5.6);
+            if (kind === 'human') {
+              const motion = m._moveHuman(actor, sign, 0, 1/60, 5.6);
+              m._animateHuman(actor, 1/60, motion, true);
+              nativeJump ||= actor.airborne && actor.rig.baseName === 'jump';
+            }
             else { m._updateLeap(actor, 1/60); m._move(actor, sign * 5.6, 0, 1/60); }
             const p=actor.group.position;
             if (actor.airborne) triggered = true;
@@ -37,7 +41,7 @@ try {
             if (!actor.airborne && Math.abs(p.y-c.h)<.08) landedOnTop=true;
           }
           result={kind, triggered, peak, floor, top:c.h, crossed: sign > 0 ? maxX > c.x+c.hx : minX < c.x-c.hx,
-            landedOnTop, final: actor.group.position.toArray()};
+            landedOnTop, nativeJump, final: actor.group.position.toArray()};
           actor.group.position.set(c.x, c.h, c.z);
           actor.lastSafePosition = [c.x, c.h, c.z];
           actor.airborne = false; actor.moveX = actor.moveZ = 0;
@@ -68,6 +72,8 @@ try {
     assert.equal(result.crossed, true, `${result.kind} moves across the crate`);
     assert.equal(result.stableTop, true, `${result.kind} remains supported on the crate top`);
     assert.equal(result.leftTop, true, `${result.kind} can walk off the crate and land`);
+    if (result.kind === 'human')
+      assert.equal(result.nativeJump, true, 'human airborne physics drives the native Fox jump action');
   }
   console.log('PASS: human and zombie NPC controllers jump across real Zone 13 crates.');
 } finally { await browser.close(); }

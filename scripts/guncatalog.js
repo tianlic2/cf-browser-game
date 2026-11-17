@@ -17,16 +17,29 @@
 // （这一点与 main.js 里 grenadePool 的「用完即 dispose」正好相反）。
 
 import * as THREE from "three";
+import { CF_VANILLA } from './cf_vanilla_catalog.js';
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RIFLE_LEN } from "./enemy_model.js";
-import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=weapon-world-3";
+import { paintSkin, skinsFor, findSkin, DEFAULT_SKIN } from "./skins.js?v=hbr7-1";
 
-// 会出现在世界里的枪。普通团队竞技包含少量巴雷特。
-const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle", "knife", "scar", "m200", "akgold", "kn57"];
-export const ENEMY_GUN_IDS = ["ak", "m4", "barrett"];
-// 每五次普通敌人出生覆盖三种主武器，同时让栓动狙保持稀有。
-const ENEMY_GUN_BAG = ["ak", "ak", "m4", "m4", "barrett"];
-let remainingEnemyGuns = [];
+// 会出现在世界里的枪。团队竞技按玩家八个背包的主武器配置抽取；
+// M4A1 与炫金雷神共用 gunId，但 skin 不同，所以抽取单位必须是 id+skin。
+const WORLD_GUN_IDS = ["ak", "m4", "barrett", "deagle", "knife", "scar", "m200", "akgold", "kn57", "awm_nature", "hbr7"];
+WORLD_GUN_IDS.push(...CF_VANILLA.map(s => s.id));
+export const ENEMY_GUN_LOADOUTS = Object.freeze([
+  Object.freeze({ id: "ak", skin: "classic" }),
+  Object.freeze({ id: "m4", skin: "classic" }),
+  Object.freeze({ id: "barrett", skin: "stock" }),
+  Object.freeze({ id: "m4", skin: "ironbeastgold" }),
+  Object.freeze({ id: "scar", skin: "stock" }),
+  Object.freeze({ id: "m200", skin: "stock" }),
+  Object.freeze({ id: "akgold", skin: "stock" }),
+  Object.freeze({ id: "kn57", skin: "stock" }),
+]);
+export const ENEMY_GUN_IDS = Object.freeze([...new Set(ENEMY_GUN_LOADOUTS.map(load => load.id))]);
+// 每种“允许配置集合”各自保存一只洗牌袋。调试/公开部署的过滤抽取不会
+// 消耗普通本地对局的八武器袋；默认八人开局则恰好每个背包配置出现一次。
+const enemyGunBags = new Map();
 
 const cache = {}; // id → { world: {skinId: Object3D}, enemy: {skinId: Object3D} }
 let built = false;
@@ -220,19 +233,22 @@ export function enemyModel(id, skinId) {
   return pick(id, skinId, "enemy");
 }
 
-// Classic battlefield palette, including enemy drops. Catalog entries for the
-// modern skins remain available, but do not enter the default match pool.
-export function randomGunRoll(allowedIds = ENEMY_GUN_IDS) {
-  let id;
-  if (allowedIds === ENEMY_GUN_IDS) {
-    if (!remainingEnemyGuns.length) {
-      remainingEnemyGuns = ENEMY_GUN_BAG.slice();
-      for (let i = remainingEnemyGuns.length - 1; i > 0; i--) {
-        const j = (Math.random() * (i + 1)) | 0;
-        [remainingEnemyGuns[i], remainingEnemyGuns[j]] = [remainingEnemyGuns[j], remainingEnemyGuns[i]];
-      }
+// Draw from complete backpack configurations, not merely weapon IDs. This is
+// what keeps ordinary M4A1-C and Iron Beast visually/audio-distinct in one bag.
+export function randomGunRoll(allowedLoadouts = ENEMY_GUN_LOADOUTS) {
+  const source = allowedLoadouts?.length ? allowedLoadouts : ENEMY_GUN_LOADOUTS;
+  const normalized = source.map(load => typeof load === 'string'
+    ? { id: load, skin: DEFAULT_SKIN[load] }
+    : { id: load.id, skin: load.skin || DEFAULT_SKIN[load.id] });
+  const key = normalized.map(load => `${load.id}:${load.skin}`).join('|');
+  let bag = enemyGunBags.get(key);
+  if (!bag?.length) {
+    bag = normalized.map(load => ({ ...load }));
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [bag[i], bag[j]] = [bag[j], bag[i]];
     }
-    id = remainingEnemyGuns.pop();
-  } else id = allowedIds[(Math.random() * allowedIds.length) | 0];
-  return { id, skin: DEFAULT_SKIN[id] };
+    enemyGunBags.set(key, bag);
+  }
+  return { ...bag.pop() };
 }

@@ -1,4 +1,4 @@
-import { intersectsBrush, brushSupport, brushSupportIsExposed } from './brush_collision.js?v=goldsrc-visible-wall-1';
+import { intersectsBrush, brushSupport, brushSupportIsExposed } from './brush_collision.js?v=zone13-collision-alignment-1';
 
 // A shared flow field with separate nodes for stacked floors. A tunnel and the
 // deck above it must never become the same node merely because X/Z coincide.
@@ -153,6 +153,6 @@ export class GroundNavigation {
       waypoint=p;i=best;
     }
     const dx=waypoint.x-position.x,dz=waypoint.z-position.z,len=Math.hypot(dx,dz);
-    return len>.04 ? {x:dx/len,z:dz/len} : null;
+    return len>.04 ? {x:dx/len,z:dz/len,waypointX:waypoint.x,waypointY:waypoint.y,waypointZ:waypoint.z} : null;
   }
 }

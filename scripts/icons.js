@@ -12,14 +12,18 @@
 // `userData.baseMat` 里的 Color/Texture 就是这么丢的）。图标只活在 DOM 里。
 
 // 武器 id → 图标形态。**刻意是一张静态表，不从 WEAPON_DEFS 派生** ——
+import { CF_VANILLA } from './cf_vanilla_catalog.js';
 // 从那里读要 import main.js，而这个模块必须保持「谁都能 import」的独立性
 // （chat.js 同理）。代价是加新武器时要在这里补一行；兜底是 "rifle"，不会出现空图标。
 export const ICON_KIND = {
+  ...Object.fromEntries(CF_VANILLA.map(s=>[s.id,s.type==='shotgun'?'rifle':s.type])),
   ak: "rifle",
   m4: "rifle",
+  ironbeast: "rifle",
   scar: "rifle",
   akgold: "rifle",
   kn57: "rifle",
+  awm_nature: "sniper", hbr7: "sniper",
   awm: "sniper",
   barrett: "sniper",
   m200: "sniper",
@@ -83,6 +87,68 @@ const ICON_BODY = {
     '<rect x="16.4" y="6.2" width="1.2" height="3.4" rx="0.6"/>',
 };
 
+// 右下角 HUD 使用的逐枪侧面剪影。这里刻意使用 120×48 的宽画布，而不是旧版
+// 24×24 通用小图：长枪的枪托、机匣、弹匣、瞄具和枪口比例需要足够的横向采样，
+// 才能在 132×60 的 HUD 区域里认出具体型号。仍然是内联 currentColor SVG，零请求、
+// 零模型解析，不会为了图标拖慢对局。
+const WEAPON_ICON_BODY = {
+  ak:
+    '<path d="M2 24 18 15l8 2v14l-8 3-16-4 9-3Z"/>' +
+    '<path d="M24 18h39l8 5v8H25Z"/><path d="M37 13h26l8 8H54Z"/>' +
+    '<path d="M68 19h37v3H68ZM103 18h15v5h-15Z"/>' +
+    '<path d="M51 30h13l-2 16H51c7-5 7-10 0-16Z"/><path d="M39 30h9l-3 10h-7Z"/>',
+  m4:
+    '<path d="M2 20h18v3H2Zm4-6h4v18H6Zm8 3h14v12H14Z"/>' +
+    '<path d="M25 18h43v15H25Z"/><path d="M33 12h24l8 6H37Z"/>' +
+    '<path d="M67 20h42v4H67Zm39-3h4v10h-4Zm3 4h10v3h-10Z"/>' +
+    '<path d="M48 32h12l-2 14H47Z"/><path d="M34 32h9l-3 10h-7Z"/>',
+  ironbeast:
+    '<path d="M2 25 17 13l12 5-5 16-12 2Z"/><path d="M23 17h47l8 6-5 10H27Z"/>' +
+    '<path d="M34 11 48 7l18 10H36Z"/><path d="M67 18h39l-6 5 18 2-18 3H70Z"/>' +
+    '<path d="m48 31 15 1-5 14H46Z"/><path d="m33 31 10 1-4 10h-8Z"/>' +
+    '<path d="M78 13h4v8h-4Zm9 5 9-8 4 2-7 8Z"/>',
+  scar:
+    '<path d="M2 18h20l8 5-7 11H9l-7-5 12-3Z"/><path d="M25 18h45l7 6-5 9H27Z"/>' +
+    '<path d="M31 13h42v5H31Z"/><path d="M69 20h39v4H69Zm37-4h4v11h-4Zm3 5h10v3h-10Z"/>' +
+    '<path d="M50 32h12l-1 14H49Z"/><path d="M37 32h9l-3 10h-8Z"/>',
+  akgold:
+    '<path d="M2 24 18 15l8 2v14l-8 3-16-4 9-3Z"/><path d="M24 18h39l8 5v8H25Z"/>' +
+    '<path d="M37 13h26l8 8H54Z"/><path d="M68 19h37v3H68Zm35-2h16v6h-16Z"/>' +
+    '<path d="M51 30h13l-2 16H51c7-5 7-10 0-16Z"/><path d="M39 30h9l-3 10h-7Z"/>' +
+    '<path d="m87 23 30 8-2 3-30-9Z"/>',
+  kn57:
+    '<path d="M2 25 15 15h20l8 8-8 12H16Z"/><path d="m31 16 42-3 11 8-9 13H36Z"/>' +
+    '<path d="m43 9 28 1 8 6-39 2Z"/><path d="M75 19h33l10 4-10 5H74Z"/>' +
+    '<path d="M56 32h14l-4 14H54Z"/><path d="M38 32h10l-4 10h-8Z"/>' +
+    '<path d="m88 14 12 2 5 4H86Z"/>',
+  barrett:
+    '<path d="M2 24 18 16h17l-5 17H12Z"/><path d="M29 18h51l8 7-8 9H29Z"/>' +
+    '<path d="M39 9h34l7 4-7 4H39l-6-4Z"/><path d="M43 16h4v4h-4Zm25 0h4v4h-4Z"/>' +
+    '<path d="M79 21h31v4H79Zm29-3h10v10h-10Z"/><path d="M48 33h14l-2 13H47Z"/>' +
+    '<path d="m84 32 4 1-8 13h-3Zm8 0 4-1 6 15h-3Z"/>',
+  m200:
+    '<path d="M2 25 14 14h20l11 8-10 13H17l7-7Z"/><path d="M33 18h47l9 7-9 8H34Z"/>' +
+    '<path d="M43 8h35l8 5-8 4H43l-7-4Z"/><path d="M47 16h4v4h-4Zm27 0h4v4h-4Z"/>' +
+    '<path d="M79 21h39v4H79Z"/><path d="M52 32h14l-3 14H50Z"/>' +
+    '<path d="m88 31 4 1-8 14h-3Zm8 0 4-1 7 16h-3Z"/>',
+  deagle:
+    '<path d="M16 10h70l13 7-10 10H18L9 20Z"/><path d="M25 27h40L56 46H31Z"/>' +
+    '<path d="M66 28h13l-3 7H64Z"/><path d="M85 13h25v10H88Z"/><path d="M30 7h48v4H30Z"/>',
+  knife:
+    '<path d="M4 12h48l17 8-14 8H5l20-5Z"/><path d="M49 18 73 3l17 5-18 12Z"/>' +
+    '<path d="M53 27h31v5H53Z"/><path d="M78 31h31l9 5-10 6H78Z"/>',
+  kukri:
+    '<path d="M4 13c35 2 63 5 94-8 6-3 13-2 18 1-16 2-24 9-31 17-15 18-42 18-66 10Z"/>' +
+    '<path d="M5 12h13v23H5Z"/><path d="M2 33h22v5H2Z"/>',
+  frag:
+    '<path d="M45 13h30v7h-30Z"/><path d="M39 20h42l8 9-6 17H37l-6-17Z"/>' +
+    '<path d="M55 4h14v10H55Zm13 2h21v5H68Z"/>',
+  flash:
+    '<path d="M43 8h38v7H43Z"/><path d="M39 15h46v31H39Z"/><path d="M51 3h15v7H51Zm14 2h22v5H65Z"/>',
+  smoke:
+    '<path d="M44 7h36v8H44Z"/><path d="M40 15h44v31H40Z"/><path d="M55 2h14v7H55Zm13 2h19v5H68Z"/>',
+};
+
 // 爆头徽记：骷髅。**用 `fill-rule="evenodd"` 把眼窝与鼻洞挖成镂空**（不是画成深色块）——
 // 深色块在金色底上会读成三个黑洞，镂空才是「徽记」的正确语汇，也自动适配任何底色。
 //
@@ -110,7 +176,10 @@ function svg(inner, cls, fillRule) {
 
 // 武器剪影。`cls` 由调用方给（DOM 里靠它挂尺寸与颜色）。
 export function weaponIconSvg(weaponId, cls) {
-  return svg(ICON_BODY[iconKindFor(weaponId)] || ICON_BODY.rifle, cls || "ico-gun");
+  const inner = WEAPON_ICON_BODY[weaponId] || ICON_BODY[iconKindFor(weaponId)] || ICON_BODY.rifle;
+  const viewBox = WEAPON_ICON_BODY[weaponId] ? "0 0 120 48" : "0 0 24 24";
+  return '<svg class="' + (cls || "ico-gun") + '" viewBox="' + viewBox +
+    '" fill="currentColor" preserveAspectRatio="xMidYMid meet" aria-hidden="true">' + inner + '</svg>';
 }
 
 // 爆头徽记。`golden` 只影响 class，颜色/发光全部交给 CSS

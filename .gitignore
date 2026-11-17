@@ -55,6 +55,7 @@ counter-strike-in-browser-main/
 # 漏放行的话线上会 404、数字掉回 monospace、大厅两块阵营标题变空白。
 /assets/*
 !/assets/classic/
+!/assets/transport-materials/
 !/assets/hud/
 !/assets/ui/
 !/assets/bio/
@@ -66,6 +67,7 @@ counter-strike-in-browser-main/
 !/assets/local/fox_npc/body.png
 !/assets/local/fox_npc/face.png
 !/assets/local/fox_npc/ddfcd20.png
+!/assets/local/fox_npc/visit-surface.png
 /assets/preview/
 # BaiHu is approved for local gameplay, not public redistribution.
 /assets/local/scar_light/
@@ -73,7 +75,9 @@ counter-strike-in-browser-main/
 /assets/local/m200/
 /assets/local/akgold/
 /assets/local/kn57/
+/assets/local/awm_nature/
 /assets/local/cf_bio_candidates/
+/assets/local/cf_vanilla/
 /Unity/
 /人物动作/
 /角色/
@@ -184,3 +188,11 @@ logs/
 # CodeGraph index
 .codegraph
 .codegraph/
+
+# High-detail weapons remain available only in the local game.
+/scripts/harbor_*.js
+/audio/weapons/hbr7/
+/assets/classic/m4_ironbeast/
+/assets/classic/kukri_dragon/
+/audio/classic/ironbeast/
+/audio/classic/kukri_dragon/

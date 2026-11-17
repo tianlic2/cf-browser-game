@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { WEAPON_TUNING } from '../scripts/weapon_tuning.js';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
@@ -64,16 +65,16 @@ assert.equal(barrett[2].penetratedWood, true,
 
 const defs = source.slice(source.indexOf('const WEAPON_DEFS ='), source.indexOf('const PRIMARY_IDS'));
 const expected = { ak: .40, m4: .85, barrett: .80, deagle: .35 };
-const baseDamage = { ak: 36, m4: 33, barrett: 300, deagle: 54 };
-const expectedAfterOneBox = { ak: 14, m4: 28, barrett: 240, deagle: 19 };
+const expectedAfterOneBox = { ak: 15, m4: 28, barrett: 245, deagle: 19 };
 for (const [id, ratio] of Object.entries(expected)) {
   const from = defs.indexOf(`  ${id}:`);
   const to = defs.indexOf('\n  },', from);
   const block = defs.slice(from, to);
-  const match = block.match(/woodPenetration:\s*([.\d]+)/);
-  assert.ok(match, `${id} must opt into wood penetration`);
-  assert.equal(Number(match[1]), ratio, `${id} wood multiplier`);
-  assert.equal(Math.round(baseDamage[id] * ratio), expectedAfterOneBox[id],
+  assert.ok(block.includes(`woodPenetration: WEAPON_TUNING.${id}.stats.wood`),
+    `${id} uses its approved wood attenuation in the live weapon definition`);
+  const stats = WEAPON_TUNING[id].stats;
+  assert.equal(stats.wood, ratio, `${id} wood multiplier`);
+  assert.equal(Math.round(stats.dmg * stats.wood), expectedAfterOneBox[id],
     `${id} one-box close-range body damage`);
 }
 

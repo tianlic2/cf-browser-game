@@ -1,10 +1,10 @@
 import * as THREE from '../vendor/three/build/three.module.js';
 
-// The source idle1 is a 0.17 s loop with pelvis and foot motion. Preserve its
-// first-frame stance, then animate only the chest at a natural breathing rate.
+// The source idle stances are 0.17 s loops with pelvis and foot motion. Preserve
+// the first frame, then animate only the chest at a natural breathing rate.
 export const FOX_BREATH_PERIOD = 4.2;
 
-export function createFoxBreathingIdle(sourceClip) {
+export function createFoxBreathingIdle(sourceClip, name = 'idle-calm') {
   const quarter = FOX_BREATH_PERIOD / 4;
   const times = [0, quarter, quarter * 2, quarter * 3, FOX_BREATH_PERIOD];
   const wave = [0, 1, 0, -1, 0];
@@ -27,5 +27,5 @@ export function createFoxBreathingIdle(sourceClip) {
     return new track.constructor(track.name, [0, FOX_BREATH_PERIOD],
       [...first, ...first]);
   });
-  return new THREE.AnimationClip('idle-calm', FOX_BREATH_PERIOD, tracks);
+  return new THREE.AnimationClip(name, FOX_BREATH_PERIOD, tracks);
 }

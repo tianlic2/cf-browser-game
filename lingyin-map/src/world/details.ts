@@ -8,9 +8,9 @@ export class Details {
   readonly smokeOrigin = new THREE.Vector3(-2, 7.4, 22);
   readonly lanterns: THREE.Vector3[] = [];
 
-  constructor() {
+  constructor(options: { omitBridge?: boolean } = {}) {
     this.group.name = 'details';
-    this.bridge();
+    if (!options.omitBridge) this.bridge();
     this.lanternsAlongPath();
     this.censer();
     this.lions();

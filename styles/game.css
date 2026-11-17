@@ -370,6 +370,61 @@ body {
     0 0 5px rgba(255, 28, 28, .88);
 }
 
+/* ===== SCAR Light 白虎反射瞄具 =====
+   单级低倍率、矩形镜窗、外围战场完整可见。实际枪模在视模通道中移到画面中心；
+   这里只画轻暗角和固定在屏幕几何中心的金色光点，不用狙击枪圆镜。 */
+.scar-scope {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  isolation: isolate;
+}
+.scar-scope.hidden { display: none; }
+.scar-scope::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 38% 46% at 50% 50%,
+    transparent 0 48%, rgba(3, 11, 13, .055) 70%, rgba(0, 5, 7, .20) 100%);
+}
+.scar-scope .ss-lens {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(54px, 6.2vmin, 88px);
+  height: clamp(90px, 10.4vmin, 148px);
+  transform: translate(-50%, -50%);
+  border-radius: 10px 10px 14px 14px;
+  /* 镜片视野由真实世界画面直接透出，禁止再叠蓝色滤层。 */
+  background: transparent;
+  box-shadow: none;
+}
+.scar-scope .ss-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 251, 216, .98);
+  border-radius: 50%;
+  background: #ffd85c;
+  box-shadow: 0 0 2px rgba(0, 0, 0, .92), 0 0 8px rgba(255, 214, 74, .95);
+}
+.scar-scope .ss-label {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + clamp(48px, 5.8vmin, 82px));
+  transform: translateX(-50%);
+  color: rgba(234, 248, 243, .60);
+  font: 700 9px/1 Consolas, monospace;
+  letter-spacing: .13em;
+  text-shadow: 0 1px 4px #000;
+  white-space: nowrap;
+}
+
 /* ===== HUD ===== */
 /* z-index 7：要盖在狙击镜（6）的黑场之上 —— CF 开镜后血量/弹药/击杀信息照常可见。
    顶层的闪光白屏（.fx-layer 8）和菜单（.menu 10）仍在它上面。 */
@@ -709,6 +764,8 @@ body {
 .sb-colhead span:not(:first-child),
 .sb-row span:not(:first-child) { text-align: center; }
 .sb-row { color: #cbd5e1; }
+.sb-row .sb-name { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sb-rank-icon { flex: 0 0 25px; width: 25px; height: 20px; object-fit: cover; border: 1px solid #70808d; background: #27313e; box-shadow: 0 1px 2px #000; }
 .sb-row .sb-k { color: #e5e7eb; font-weight: 700; font-variant-numeric: tabular-nums; }
 .sb-row .sb-d { color: #94a3b8; font-variant-numeric: tabular-nums; }
 /* 自己那一行高亮（CF 同样会标出玩家本人） */
@@ -1045,6 +1102,46 @@ body {
 .hud-toast.show { opacity: 1; }
 .hud-toast.red { color: #ef4444; }
 
+/* ---- 单机玩家技能：轻量机甲 HUD，颜色与游戏现有青金 HUD 保持一致 ---- */
+.skill-hud {
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  display: flex; gap: 8px; align-items: flex-end; z-index: 3;
+}
+.skill-hud[hidden] { display: none; }
+.skill-card {
+  --skill-fill: 0%; position: relative; width: 126px; height: 46px; box-sizing: border-box;
+  display: grid; grid-template-columns: 24px 30px 1fr; align-items: center; gap: 6px;
+  padding: 5px 8px 6px; overflow: hidden; color: #70858a;
+  border: 1px solid rgba(114,145,150,.34); background: linear-gradient(145deg,rgba(8,19,24,.9),rgba(12,27,33,.68));
+  clip-path: polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);
+  filter: saturate(.55);
+}
+.skill-card::after { content:""; position:absolute; inset:0; pointer-events:none; opacity:.22;
+  background:repeating-linear-gradient(115deg,transparent 0 10px,rgba(120,239,255,.1) 10px 11px); }
+.skill-card > i { position:absolute; left:0; bottom:0; width:var(--skill-fill); height:3px;
+  background:linear-gradient(90deg,#28b8e1,#a9f7ff); box-shadow:0 0 8px #42dcff; }
+.skill-card.ready { color:#d8f8f7; border-color:rgba(91,225,244,.7); filter:none; box-shadow:inset 0 0 18px rgba(44,190,216,.1); }
+.skill-card.active { color:#fff7d1; border-color:#ffd66a; box-shadow:0 0 18px rgba(255,190,51,.3),inset 0 0 18px rgba(255,181,42,.15); }
+.skill-card.ultimate.ready { border-color:rgba(255,193,61,.75); color:#ffe8a4; }
+.skill-card kbd { width:22px;height:22px;display:grid;place-items:center;border:1px solid currentColor;border-radius:3px;
+  font:700 12px/1 Arial;background:rgba(0,0,0,.36);box-shadow:inset 0 0 6px rgba(255,255,255,.08); }
+.skill-copy { display:flex;min-width:0;flex-direction:column;gap:3px; }
+.skill-copy b { font:700 11px/1 "Microsoft YaHei","PingFang SC",sans-serif;white-space:nowrap; }
+.skill-copy small { font:10px/1 "Tactical HUD",monospace;color:currentColor;opacity:.82; }
+.skill-icon { position:relative;width:28px;height:28px;display:block;filter:drop-shadow(0 0 5px currentColor); }
+.dash-icon::before,.dash-icon::after { content:"";position:absolute;background:currentColor;clip-path:polygon(0 35%,62% 35%,62% 0,100% 50%,62% 100%,62% 65%,0 65%); }
+.dash-icon::before { inset:5px 1px 5px 7px; }.dash-icon::after { inset:9px 9px 9px 0;opacity:.45; }
+.cover-icon::before { content:"";position:absolute;left:4px;top:3px;width:19px;height:22px;border:2px solid currentColor;
+  border-radius:50% 50% 7px 7px;clip-path:polygon(0 0,100% 0,88% 100%,12% 100%);box-shadow:inset 0 0 8px currentColor; }
+.ultimate-icon::before { content:"";position:absolute;left:3px;top:5px;width:20px;height:19px;
+  border:2px solid currentColor;background:repeating-linear-gradient(90deg,transparent 0 4px,currentColor 4px 5px);
+  box-shadow:inset 0 0 7px rgba(255,214,106,.28);transform:skewY(-4deg); }
+.ultimate-icon::after { content:"";position:absolute;left:5px;top:1px;width:19px;height:8px;
+  border:2px solid currentColor;border-bottom-width:1px;transform:skewX(-28deg); }
+@media (max-width: 980px) {
+  .skill-hud { bottom: 8px; gap: 4px; transform:translateX(-50%) scale(.82); transform-origin:center bottom; }
+}
+
 /* ===== 阵亡回顾（死亡视角 3 秒）===== */
 /* 挂在 #hud 内部，所以这里的 z-index 4 是相对 .hud(7) 的层内值：
    压得住准星与血条弹药，又低于战绩面板(5)、狙击镜(.scope 6 在 hud 之下)、
@@ -1264,7 +1361,8 @@ body {
 /* 阵亡视角保留比分、时间、雷达与聊天；当前生命/弹药、快捷提示和第一人称枪械没有意义。 */
 .hud.dead-state .hud-bottom-left,
 .hud.dead-state .hud-bottom-right,
-.hud.dead-state .hud-shortcuts {
+.hud.dead-state .hud-shortcuts,
+.hud.dead-state .skill-hud {
   opacity: 0;
 }
 
@@ -1783,6 +1881,7 @@ body {
 #backpack .bp-heading-icon { color: #86c1da; font-size: 16px; }
 #backpack .bp-title { position: absolute; left: 50%; transform: translateX(-50%); }
 #backpack .bp-list {
+  overflow-x: auto;
   display: flex; flex-direction: row; gap: 6px; padding: 10px 13px 9px;
   border-bottom: 1px solid #101a17;
   background: linear-gradient(90deg, #23312e88, #61716a22);
@@ -2323,6 +2422,205 @@ body {
 .lv-hint b { color: #ffb64d; font-weight: 700; }
 
 /* ---------- 个人仓库 ---------- */
+.inventory-layout {
+  display: grid;
+  grid-template-columns: minmax(246px,285px) minmax(0,1fr);
+  gap: 11px;
+  align-items: start;
+}
+.inventory-pack,
+.inventory-collection {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #59645d;
+  background: linear-gradient(180deg,rgba(31,40,36,.98),rgba(13,19,17,.98));
+  box-shadow: inset 0 0 0 1px #080d0b,0 6px 16px #0006;
+}
+.inventory-section-title {
+  margin: 0;
+  color: #e5dfc4;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.inventory-pack > .inventory-section-title { margin-bottom: 10px; }
+.inventory-collection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-bottom: 8px;
+}
+.inventory-collection-head > small { color: #7f8e84;font-size: 9px;letter-spacing: .08em; }
+.inventory-pack-tabs { display: flex;flex-wrap: nowrap;gap: 3px;margin-bottom: 9px; }
+.inventory-pack-tab {
+  flex: 1 1 26px;
+  min-width: 0;
+  max-width: 30px;
+  height: 29px;
+  padding: 0;
+  border: 1px solid #4c5851;
+  background: linear-gradient(#35423b,#202a25);
+  color: #bdc7bf;
+  font: 700 11px/1 sans-serif;
+  cursor: pointer;
+}
+.inventory-pack-tab.active,
+.inventory-slot.active,
+.inventory-item.active {
+  border-color: #e1bf5b;
+  box-shadow: inset 3px 0 #e1bf5b,inset 0 0 0 1px #8b7439;
+}
+.inventory-pack-tab.active {
+  background: linear-gradient(#70613a,#37301f);
+  color: #fff1b8;
+  box-shadow: inset 0 -3px #e1bf5b,inset 0 0 0 1px #8b7439;
+}
+.inventory-slot {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 78px;
+  margin-bottom: 6px;
+  padding: 6px;
+  border: 1px solid #4e5b54;
+  background: linear-gradient(110deg,#2b3732,#171f1c);
+  color: #e6ebe6;
+  text-align: left;
+  cursor: pointer;
+}
+.inventory-weapon-image {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 46%,rgba(217,226,219,.42),rgba(105,121,111,.26) 42%,rgba(23,32,28,.78) 76%),
+    linear-gradient(135deg,#55645c,#1b2521);
+}
+.inventory-weapon-image::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg,rgba(255,255,255,.08),transparent 34%,rgba(0,0,0,.12));
+  box-shadow: inset 0 0 0 1px rgba(220,229,220,.12);
+}
+.inventory-weapon-image img {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: brightness(1.36) contrast(1.07) saturate(1.08) drop-shadow(0 8px 7px #0009);
+}
+.inventory-slot .inventory-weapon-image { flex: 0 0 43%;height: 64px; }
+.inventory-slot-info { display: grid;gap: 6px;padding-left: 9px;min-width: 0; }
+.inventory-slot-info small,
+.inventory-item small { color: #96a49b;font-size: 10px; }
+.inventory-slot-info strong,
+.inventory-item strong { overflow-wrap: anywhere;font-size: 12px;line-height: 1.3; }
+.inventory-focus-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0,1.35fr) minmax(190px,.65fr);
+  min-height: 178px;
+  margin-bottom: 9px;
+  overflow: hidden;
+  border: 1px solid #6a746b;
+  background: linear-gradient(105deg,#34423b,#151d1a 68%);
+  box-shadow: inset 0 0 0 1px #101613;
+}
+.inventory-focus-stage::before {
+  content: "DISPLAY / 01";
+  position: absolute;
+  z-index: 3;
+  top: 9px;
+  left: 11px;
+  color: #d9c47f;
+  font: 700 8px/1 sans-serif;
+  letter-spacing: .18em;
+}
+.inventory-focus-visual { min-width: 0;padding: 12px 16px 5px; }
+.inventory-focus-visual .inventory-weapon-image {
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(ellipse at 52% 52%,rgba(235,240,235,.55),rgba(125,140,130,.28) 42%,rgba(24,34,29,.84) 76%),
+    linear-gradient(140deg,#66766d,#202b26);
+}
+.inventory-focus-visual .inventory-weapon-image img {
+  padding: 11px 4%;
+  filter: brightness(1.5) contrast(1.08) saturate(1.1) drop-shadow(0 14px 10px #000a);
+}
+.inventory-focus-copy {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 22px 18px;
+  border-left: 1px solid #525e56;
+  background: linear-gradient(110deg,rgba(19,27,23,.65),rgba(8,13,11,.94));
+}
+.inventory-focus-copy::after {
+  content: "";
+  position: absolute;
+  top: 21px;
+  bottom: 21px;
+  left: 0;
+  width: 3px;
+  background: #d8b64f;
+  box-shadow: 0 0 10px #d8b64f66;
+}
+.inventory-focus-copy small { color: #a79157;font-size: 8px;letter-spacing: .13em; }
+.inventory-focus-copy strong {
+  margin-top: 8px;
+  color: #fff6d5;
+  font-size: clamp(18px,2vw,29px);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-shadow: 0 2px 4px #000;
+}
+.inventory-focus-copy span { margin-top: 12px;color: #9ba89f;font-size: 10px;letter-spacing: .08em; }
+.inventory-grid { display: grid;grid-template-columns: repeat(auto-fill,minmax(142px,1fr));gap: 6px; }
+.inventory-item {
+  display: grid;
+  grid-template-rows: 72px auto auto;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid #4f5d55;
+  background: linear-gradient(#2b3832,#171f1c);
+  color: #e7ece7;
+  text-align: left;
+  cursor: pointer;
+}
+.inventory-item.active { background: linear-gradient(#48442f,#24241c); }
+.inventory-item.active > small { color: #e7ca72; }
+.inventory-item:disabled { opacity: .72;cursor: default; }
+.inventory-item:not(:disabled):hover,
+.inventory-slot:hover,
+.inventory-pack-tab:hover { border-color: #dec36e; }
+.inventory-item:not(:disabled):hover .inventory-weapon-image img,
+.inventory-slot:hover .inventory-weapon-image img { filter: brightness(1.52) contrast(1.07) saturate(1.1) drop-shadow(0 8px 7px #0009); }
+.inventory-item:focus-visible,
+.inventory-slot:focus-visible,
+.inventory-pack-tab:focus-visible { outline: 2px solid #eee0a7;outline-offset: 2px; }
+@media (max-width:1000px) {
+  .inventory-layout { grid-template-columns: minmax(220px,255px) minmax(0,1fr); }
+  .inventory-focus-stage { grid-template-columns: minmax(0,1fr) minmax(160px,.55fr);min-height: 150px; }
+  .inventory-focus-copy strong { font-size: 19px; }
+  .inventory-grid { grid-template-columns: repeat(auto-fill,minmax(125px,1fr)); }
+}
+@media (max-width:700px) {
+  .inventory-layout { grid-template-columns: 1fr; }
+  .inventory-focus-stage { grid-template-columns: minmax(0,1.25fr) minmax(140px,.75fr);min-height: 140px; }
+  .inventory-focus-copy { padding: 18px 12px; }
+  .inventory-grid { grid-template-columns: repeat(auto-fill,minmax(130px,1fr)); }
+}
 .lv-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
@@ -2582,6 +2880,12 @@ body {
 /* CF 的枪影在弹药右侧、与数字同一排；不再叠在数字上方。 */
 .hud-weapon-shape { grid-area: gun; height: 60px; padding-right: 0; color: #eef0e3; filter: drop-shadow(0 1px 1px #141a18); }
 .hud-gun-icon { width: 132px; height: 60px; }
+.weapon-model-icon {
+  display: block;
+  object-fit: contain;
+  /* 实际枪模缩略图只保留透明度与轮廓，颜色继续跟随 CF HUD 的灰白枪影。 */
+  filter: brightness(0) saturate(100%) invert(94%) sepia(7%) saturate(227%) hue-rotate(31deg) brightness(103%);
+}
 .hud-ammo-row { grid-area: ammo; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-right: 0; }
 /* CF 的右下角没有背包号徽章；元素保留给调试/测试读，只在对局 HUD 里隐藏。 */
 .hud .bp-badge { display: none; width: 17px; height: 19px; box-sizing: border-box; padding: 0; margin: 0; border: 1px solid #d6d9ca; border-radius: 5px 5px 3px 3px; background: rgba(20,31,32,.42); color: #dedfce; font: 11px/1 "Tactical HUD", monospace; letter-spacing: 0; }
@@ -2844,6 +3148,13 @@ body {
 .game-menu-settings.hidden { display: none; }
 .game-menu-settings h3 { margin: 0 0 6px; color: #e0d3ac; font-size: 15px; letter-spacing: 1px; }
 .game-menu-settings > p { margin: 0 0 12px; color: #9da99b; font-size: 11px; line-height: 1.5; }
+.skill-setting-toggle { width:100%; min-height:52px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 10px; margin-bottom:6px; border:1px solid #536153; background:#1a211e; color:#dce3d5; text-align:left; cursor:pointer; }
+.skill-setting-toggle span { display:flex; flex-direction:column; gap:4px; }
+.skill-setting-toggle b { font-size:12px; }
+.skill-setting-toggle small { color:#9da99b; font-size:10px; }
+.skill-setting-toggle strong { min-width:42px; padding:5px 7px; border:1px solid #667266; color:#adb9ac; text-align:center; font-size:11px; }
+.skill-setting-toggle[aria-pressed="true"] strong { color:#e8f5cf; border-color:#b6c77c; background:#536038; }
+.skill-setting-toggle:focus-visible { outline:2px solid #c6d9d8; outline-offset:2px; }
 .crosshair-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .crosshair-choice { min-height: 74px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border: 1px solid #536153; color: #cbd4c5; background: #1a211e; font: 11px Arial, "Microsoft YaHei", "PingFang SC", sans-serif; cursor: pointer; }
 .crosshair-choice:hover, .crosshair-choice:focus-visible { border-color: #b0bd9f; outline: none; }
@@ -3210,4 +3521,384 @@ body.bio-low-health #viewport {
 }
 @keyframes bioHealthWarning {
   50% { filter: brightness(1.9) saturate(1.8); opacity: .48; }
+}
+
+/* ========================================================================
+   Approved lobby direction A: classic CrossFire room
+   The previous modern shell remains above for HUD/nickname compatibility;
+   this final, tightly scoped layer only restyles #menu.lobby-classic-a.
+   ======================================================================== */
+#menu.lobby-classic-a {
+  position: fixed; inset: 0; z-index: 10; display: block; padding: 0; overflow: hidden;
+  color: #d7dac9; font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+  background:
+    repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,.12) 3px 4px),
+    radial-gradient(circle at 50% 36%, rgba(54,67,59,.28), transparent 44%),
+    #060a0b;
+}
+#menu.lobby-classic-a.hidden { display: none; }
+#menu.lobby-classic-a .lobby-shell {
+  width: 100%; height: 100%; margin: 0; display: grid; grid-template-rows: 54px minmax(0,1fr) 32px;
+  border: 0; background: rgba(6,11,12,.9); box-shadow: inset 0 0 80px #0008;
+}
+#menu.lobby-classic-a .lobby-top {
+  min-height: 0; height: 54px; padding: 0; gap: 0; align-items: stretch;
+  border: 0; border-bottom: 1px solid #7b806f; background: #111817;
+  box-shadow: 0 3px 12px #000a, inset 0 -1px #080b0a;
+}
+#menu.lobby-classic-a .lobby-id {
+  flex: 0 0 250px; display: flex; align-items: center; gap: 11px; padding: 0 17px;
+  border-right: 1px solid #59605a; background: #222925;
+}
+#menu.lobby-classic-a .lobby-logo {
+  width: 36px; height: 36px; display: grid; place-items: center; border: 2px solid #c3aa62;
+  color: #f0d58b; background: #141b19; font: 900 italic 15px/1 Impact,Arial,sans-serif;
+  transform: skew(-9deg); border-radius: 0;
+}
+#menu.lobby-classic-a .lobby-title {
+  margin: 0; color: #efedda; -webkit-text-fill-color: currentColor;
+  font: 800 18px/1.1 Arial,sans-serif; letter-spacing: 1px; text-shadow: 1px 2px #000;
+}
+#menu.lobby-classic-a .lobby-brand {
+  display: block; margin-top: 3px; color: #969d90; font-size: 8px; letter-spacing: 2px;
+}
+#menu.lobby-classic-a .classic-a-channel {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 0 18px;
+  border-right: 1px solid #3a413e; color: #aeb7aa; font-size: 10px;
+}
+#menu.lobby-classic-a .classic-a-channel i {
+  width: 7px; height: 7px; background: #91d066; box-shadow: 0 0 8px #91d066;
+}
+#menu.lobby-classic-a .classic-a-channel b { color: #f0d58b; }
+#menu.lobby-classic-a .lobby-rail {
+  flex: 1 1 auto; width: auto; min-width: 0; align-self: stretch; display: flex; align-items: stretch;
+  padding: 0; gap: 0; border: 0; background: transparent; overflow: hidden;
+}
+#menu.lobby-classic-a .lobby-tab {
+  flex: 0 1 100px; min-width: 72px; margin: 0; padding: 0 12px; border: 0; border-right: 1px solid #343b37;
+  border-radius: 0; clip-path: none; background: #18201e; box-shadow: none; color: #aeb6ab;
+  font-size: 11px; letter-spacing: 0; text-shadow: 1px 1px #000;
+}
+#menu.lobby-classic-a .lobby-tab::before { display: none; }
+#menu.lobby-classic-a .lobby-tab:hover { border: 0; border-right: 1px solid #343b37; background: #2a332e; color: #fff; }
+#menu.lobby-classic-a .lobby-tab.active {
+  border: 0; border-right: 1px solid #4b524b; background: #394036; color: #fff0c0;
+  box-shadow: inset 0 -3px #d5b24f; font-weight: 700;
+}
+#menu.lobby-classic-a .lobby-profile {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 0 17px;
+  color: #b9c2b8; font-size: 10px;
+}
+#menu.lobby-classic-a .lobby-credit { color: #8f998f; }
+#menu.lobby-classic-a .lobby-credit b { color: #f0d58b; }
+#menu.lobby-classic-a .lobby-rank {
+  width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid #9fa994;
+  border-radius: 0; background: #26302b; color: #e3ca75; font-weight: 900;
+}
+#menu.lobby-classic-a .lobby-rename,
+#menu.lobby-classic-a .modern-rename {
+  border: 1px solid #626d63; border-radius: 0; background: #303a34; color: #c4cbbf; font-size: 9px;
+}
+#menu.lobby-classic-a .lobby-rename { padding: 5px 7px; }
+#menu.lobby-classic-a .lobby-body { min-height: 0; display: block; overflow: hidden; }
+#menu.lobby-classic-a .lobby-content { height: 100%; padding: 8px 10px; overflow: hidden; background: transparent; }
+#menu.lobby-classic-a .lobby-pane { max-width: none; height: 100%; margin: 0; }
+#menu.lobby-classic-a .lobby-pane.hidden { display: none; }
+#menu.lobby-classic-a .lobby-pane:not([data-pane="play"]) {
+  min-height: 0; height: 100%; padding: 18px; overflow-y: auto; border: 1px solid #687064;
+  background: rgba(14,21,18,.96);
+}
+#menu.lobby-classic-a .classic-a-workspace {
+  height: 100%; min-height: 0; display: grid;
+  grid-template-columns: minmax(360px,420px) minmax(430px,1fr) minmax(224px,274px); gap: 8px;
+}
+#menu.lobby-classic-a .classic-a-panel,
+#menu.lobby-classic-a .classic-a-side {
+  min-height: 0; border: 1px solid #747b6d; background: rgba(15,21,19,.96);
+  box-shadow: inset 0 0 0 1px #080c0b, 0 8px 22px #0007;
+}
+#menu.lobby-classic-a .classic-a-panel-title,
+#menu.lobby-classic-a .modern-room-side > .classic-a-panel-title {
+  flex: 0 0 28px; height: 28px; display: flex; flex-direction: row; align-items: center; gap: 8px;
+  padding: 0 9px; border: 0; border-bottom: 1px solid #111; color: #e0dec9;
+  background: linear-gradient(#52584d,#242b27 52%,#1a201e 52%,#353c35);
+  font-size: 10px; text-shadow: 1px 1px #000;
+}
+#menu.lobby-classic-a .classic-a-panel-title b { color: #e0dec9; font-size: 10px; }
+#menu.lobby-classic-a .classic-a-panel-title span { margin-left: auto; padding: 0; border: 0; color: #98a095; font-size: 8px; letter-spacing: 1px; }
+#menu.lobby-classic-a .classic-a-intel { display: flex; flex-direction: column; overflow: hidden; }
+#menu.lobby-classic-a .classic-a-room-meta { flex: 0 0 auto; padding: 9px 10px; border-bottom: 1px solid #3f4741; background: #0d1412; }
+#menu.lobby-classic-a .classic-a-room-meta > strong { display: block; color: #f2d36e; font-size: 20px; }
+#menu.lobby-classic-a .classic-a-room-meta > b { display: block; margin-top: 5px; color: #dedbc4; font-size: 13px; }
+#menu.lobby-classic-a .classic-a-room-meta dl {
+  display: grid; grid-template-columns: 62px 1fr; margin: 8px 0 0; font-size: 10px; line-height: 1.55;
+}
+#menu.lobby-classic-a .classic-a-room-meta dt { color: #78837b; }
+#menu.lobby-classic-a .classic-a-room-meta dd { margin: 0; color: #c8cfc4; }
+#menu.lobby-classic-a .classic-a-room-meta dd.is-ready { color: #a7d36e; }
+#menu.lobby-classic-a .classic-a-room-meta > span { display: block; margin-top: 5px; color: #8f9a90; font-size: 9px; }
+#menu.lobby-classic-a .classic-a-poster {
+  position: relative; flex: 0 0 clamp(180px, 26vh, 250px); margin: 0; overflow: hidden;
+  border-bottom: 1px solid #4e5750; background: #080d0c;
+}
+#menu.lobby-classic-a .classic-a-poster img { width: 100%; height: 100%; object-fit: cover; filter: saturate(.8) contrast(1.05); }
+#menu.lobby-classic-a .classic-a-poster::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(transparent 42%,rgba(4,8,7,.94)); box-shadow: inset 0 0 34px #000;
+}
+#menu.lobby-classic-a .classic-a-poster figcaption { position: absolute; z-index: 1; left: 11px; right: 11px; bottom: 8px; }
+#menu.lobby-classic-a .classic-a-poster small { display: block; color: #cfbd83; font-size: 8px; letter-spacing: 1.7px; }
+#menu.lobby-classic-a .classic-a-poster strong { display: block; margin-top: 3px; color: #f5eed1; font-size: 26px; text-shadow: 0 2px 4px #000; }
+#menu.lobby-classic-a .room-map-select {
+  flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; gap: 4px;
+  margin: 0; padding: 6px 7px; border: 0; border-bottom: 1px solid #424a44; background: #0c1211;
+}
+#menu.lobby-classic-a .room-map-caption {
+  grid-column: 1 / -1; flex: none; display: flex; flex-direction: row; align-items: center; justify-content: space-between;
+  padding: 0 1px 2px; color: #d8d1b2; font-size: 9px;
+}
+#menu.lobby-classic-a .room-map-caption small { color: #77827a; font-size: 7px; }
+#menu.lobby-classic-a .room-map-option {
+  min-width: 0; min-height: 42px; display: grid; align-content: center; padding: 5px 8px;
+  border: 1px solid #465048; border-radius: 0; background: #202825; box-shadow: none;
+  color: #aab4aa; text-align: left; cursor: pointer;
+}
+#menu.lobby-classic-a .room-map-option b { font-size: 11px; }
+#menu.lobby-classic-a .room-map-option small { margin-top: 2px; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#menu.lobby-classic-a .room-map-option.active {
+  border-color: #d2b459; background: #4a4430; color: #fff0b7; box-shadow: inset 3px 0 #f0cf6c;
+}
+#menu.lobby-classic-a .room-map-option:disabled { opacity: .35; }
+#menu.lobby-classic-a .bio-mode-select {
+  flex: 0 0 auto; display: grid; grid-template-columns: repeat(3,1fr); gap: 4px; margin: 0; padding: 6px 7px;
+  border: 0; border-bottom: 1px solid #424a44; background: #121815;
+}
+#menu.lobby-classic-a .bio-mode-select button {
+  min-width: 0; padding: 6px 2px; border: 1px solid #515a51; background: #242c27; color: #89948b; font-size: 8px;
+}
+#menu.lobby-classic-a .bio-mode-select button.active { border-color: #c3a951; background: #4f4831; color: #f1df9c; box-shadow: none; }
+#menu.lobby-classic-a .room-match-info {
+  flex: 1 1 auto; align-content: start; display: grid; grid-template-columns: 1fr 1fr; gap: 0 8px;
+  margin: 0; padding: 6px 10px; border: 0; background: #0d1412; color: #77837b; font-size: 8px;
+}
+#menu.lobby-classic-a .room-match-info > div { display: flex; justify-content: space-between; gap: 5px; padding: 3px 0; border-bottom: 1px dotted #303934; }
+#menu.lobby-classic-a .room-match-info > div > span:first-child { color: #77837b; }
+#menu.lobby-classic-a .room-match-info b,
+#menu.lobby-classic-a .room-match-info #lobbyGoal { color: #cbd2c7; font-weight: normal; }
+#menu.lobby-classic-a .room-local { grid-column: 1 / -1; margin: 4px 0 0; padding-top: 4px; border-top: 1px dotted #3b443f; color: #93a08f; }
+#menu.lobby-classic-a .classic-a-roster {
+  display: grid; grid-template-rows: 82px minmax(0,1fr) 112px 55px; overflow: hidden;
+}
+#menu.lobby-classic-a .room-teams-heading {
+  position: relative; height: auto; display: grid; grid-template-columns: 1fr 1fr;
+  border: 0; border-bottom: 1px solid #777d6f; box-shadow: none;
+}
+#menu.lobby-classic-a .room-team-title { display: flex; align-items: center; justify-content: center; gap: 11px; overflow: hidden; }
+#menu.lobby-classic-a .room-team-title.room-bl { background: #3f251f; }
+#menu.lobby-classic-a .room-team-title.room-gr { background: #1f3541; }
+#menu.lobby-classic-a .room-team-title img { width: 54px; height: 54px; opacity: 1; filter: drop-shadow(0 3px 4px #000); }
+#menu.lobby-classic-a .room-team-title h2 {
+  margin: -6px 0 0; color: #e9debd; -webkit-text-stroke: 0; text-shadow: 2px 2px #101;
+  font: 800 25px/1 "Microsoft YaHei",sans-serif;
+}
+#menu.lobby-classic-a .room-team-title.room-gr h2 { color: #c5e4ed; }
+#menu.lobby-classic-a .room-team-title small,
+#menu.lobby-classic-a .room-gr small {
+  position: absolute; left: 0; right: 0; bottom: 9px; margin: 0 0 0 55px; color: #b0a994;
+  font-size: 7px; letter-spacing: 2.5px; text-align: center;
+}
+#menu.lobby-classic-a .room-gr small { margin: 0 55px 0 0; color: #9db0b4; }
+#menu.lobby-classic-a .room-versus {
+  position: absolute; z-index: 2; left: 50%; top: 22px; transform: translateX(-50%) rotate(-7deg);
+  color: #f4c34e; -webkit-text-stroke: 0; text-shadow: 2px 3px #7d1e17;
+  font: italic 900 34px/1 Impact,Arial,sans-serif;
+}
+#menu.lobby-classic-a .room-roster {
+  min-height: 0; max-height: none; height: auto; display: grid; grid-template-columns: 1fr 1fr;
+  margin: 0; overflow: hidden; border: 0; box-shadow: none;
+}
+#menu.lobby-classic-a .room-team { min-width: 0; background: repeating-linear-gradient(135deg,#111716 0 7px,#171e1b 7px 9px); }
+#menu.lobby-classic-a .room-team + .room-team { border-left: 1px solid #7b8172; }
+#menu.lobby-classic-a .room-team::before {
+  display: block; inset: 24% 18%; z-index: 0; opacity: .04; filter: grayscale(1);
+}
+#menu.lobby-classic-a .room-team-list {
+  position: relative; z-index: 1; height: 100%; display: grid;
+  grid-template-rows: repeat(8,minmax(32px,40px)); align-content: start;
+}
+#menu.lobby-classic-a .room-member {
+  height: auto; min-height: 0; display: grid; grid-template-columns: 30px minmax(0,1fr) auto auto;
+  align-items: center; gap: 6px; padding: 0 7px; border: 0; border-bottom: 1px solid #343d37;
+  color: #d6d9c8; font-size: 9px; text-shadow: none;
+}
+#menu.lobby-classic-a .room-member.occupied { background: linear-gradient(90deg,rgba(118,92,41,.2),transparent); }
+#menu.lobby-classic-a .room-member.is-host { background: rgba(119,107,53,.28); box-shadow: inset 3px 0 #e3c45f; }
+#menu.lobby-classic-a .room-rank {
+  width: 26px; height: 21px; display: grid; place-items: center; border: 1px solid #7f897d;
+  background: #2c3533; box-shadow: none; color: #e9d985; font-size: 10px;
+}
+#menu.lobby-classic-a .room-rank.has-military-rank { overflow: hidden; border-color: #737b76; background: #2a333f; }
+#menu.lobby-classic-a .room-rank.has-military-rank img { width: 100%; height: 100%; object-fit: cover; }
+#menu.lobby-classic-a .room-member-name { color: #d6d9c8; }
+#menu.lobby-classic-a .is-host .room-member-name { color: #f4e9a1; }
+#menu.lobby-classic-a .room-member-role { color: #89958c; font-size: 9px; }
+#menu.lobby-classic-a .room-member-status { color: #a7d36e; font-size: 8px; }
+#menu.lobby-classic-a .room-member.empty { grid-template-columns: 30px 1fr; opacity: .35; }
+#menu.lobby-classic-a .classic-a-lower { min-height: 0; display: grid; grid-template-columns: minmax(0,1.35fr) minmax(180px,1fr); border-top: 1px solid #70776a; }
+#menu.lobby-classic-a .room-chat { min-width: 0; margin: 0; display: grid; grid-template-rows: minmax(0,1fr) 31px; border: 0; border-right: 1px solid #697064; background: #091214; box-shadow: none; }
+#menu.lobby-classic-a .room-chat-log { height: auto; min-height: 0; padding: 6px 8px; overflow-y: auto; background: transparent; box-shadow: none; }
+#menu.lobby-classic-a .room-chat-log p { margin: 0 0 2px; color: #9eb3ad; font-size: 8px; line-height: 1.35; }
+#menu.lobby-classic-a .room-message-system { color: #c8ce8d; }
+#menu.lobby-classic-a .room-message-hint { color: #8eaeae; }
+#menu.lobby-classic-a .room-chat-compose { min-width: 0; display: flex; align-items: center; gap: 5px; padding: 3px 5px; border: 0; border-top: 1px solid #4d5851; background: #121c1e; }
+#menu.lobby-classic-a .room-chat-compose label { color: #d6bd62; font-size: 8px; }
+#menu.lobby-classic-a .room-chat-caret { color: #6aadb0; font-size: 8px; }
+#menu.lobby-classic-a .room-chat-compose input { flex: 1; min-width: 0; padding: 4px 5px; border: 1px solid #3c4b4a; background: #071012; color: #dce4dc; font-size: 8px; }
+#menu.lobby-classic-a .room-chat-compose button { padding: 4px 8px; border: 1px solid #7a8374; border-radius: 0; background: #3a4741; color: #dfe4d2; font-size: 8px; }
+#menu.lobby-classic-a .classic-a-loadout { min-width: 0; padding: 8px 9px; background: #171d1b; overflow: hidden; }
+#menu.lobby-classic-a .classic-a-loadout > span { display: block; color: #8d978e; font-size: 7px; letter-spacing: 1px; }
+#menu.lobby-classic-a .classic-a-loadout > strong { position: relative; z-index: 1; display: block; margin-top: 8px; color: #e4d48c; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#menu.lobby-classic-a .classic-a-loadout > small { display: block; margin-top: 3px; color: #7d8980; font-size: 7px; }
+#menu.lobby-classic-a .classic-a-bag-tabs { display: flex; gap: 3px; margin-top: 9px; }
+#menu.lobby-classic-a .classic-a-bag-tabs span { min-width: 18px; padding: 3px 0; border: 1px solid #555e55; background: #252d29; color: #89938b; font-size: 7px; text-align: center; }
+#menu.lobby-classic-a .classic-a-bag-tabs span.on { border-color: #d2b85b; background: #4d4630; color: #f2d98a; }
+#menu.lobby-classic-a .room-actions {
+  margin: 0; min-height: 0; display: flex; align-items: stretch; justify-content: space-between; gap: 8px;
+  padding: 7px; border: 0; border-top: 1px solid #7a806f; background: #242b27; box-shadow: none;
+}
+#menu.lobby-classic-a .menu-setup { min-width: 0; display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+#menu.lobby-classic-a .ml-row { display: flex; align-items: center; gap: 5px; padding: 0; border: 0; }
+#menu.lobby-classic-a .ml-label { color: #a0aaa0; font-size: 8px; white-space: nowrap; }
+#menu.lobby-classic-a .ml-step-btn { width: 24px; height: 29px; border: 1px solid #616b61; border-radius: 0; background: #1b2421; color: #aeb9af; }
+#menu.lobby-classic-a .ml-step-val { min-width: 24px; color: #f1dc8b; font-size: 11px; }
+#menu.lobby-classic-a .ml-seg { gap: 3px; }
+#menu.lobby-classic-a .ml-seg-btn { padding: 6px 7px; border: 1px solid #616b61; border-radius: 0; background: #1b2421; color: #aeb9af; font-size: 8px; }
+#menu.lobby-classic-a .ml-seg-btn.active { border-color: #c5aa55; background: #4a4430; color: #f1d982; }
+#menu.lobby-classic-a .menu-btn {
+  flex: 0 0 178px; width: auto; margin: 0; padding: 0 16px; border: 2px solid #181c18; border-radius: 0;
+  background: linear-gradient(#e1c46b,#8d6d20 49%,#735217 51%,#c49b3e);
+  box-shadow: 0 0 0 1px #d5bd6c, inset 0 1px #fff7bd; color: #151b18; text-shadow: none;
+  font-size: 17px; font-weight: 900; clip-path: none;
+}
+#menu.lobby-classic-a .menu-btn:hover { transform: none; filter: brightness(1.12); }
+#menu.lobby-classic-a .classic-a-side { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+#menu.lobby-classic-a .classic-a-room-list { flex: 0 0 auto; padding: 5px; border-bottom: 1px solid #4e5750; background: #0d1413; }
+#menu.lobby-classic-a .classic-a-room-list > div {
+  height: 32px; display: grid; grid-template-columns: 27px minmax(0,1fr) auto; align-items: center; gap: 5px;
+  padding: 0 5px; border-bottom: 1px solid #343c37; color: #9fa99f; font-size: 8px;
+}
+#menu.lobby-classic-a .classic-a-room-list b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d2d8cc; font-size: 9px; }
+#menu.lobby-classic-a .classic-a-room-list em { color: #91a194; font-style: normal; }
+#menu.lobby-classic-a .classic-a-room-list > .active { border: 1px solid #c8ad5b; background: #514832; color: #f1e3af; }
+#menu.lobby-classic-a .classic-a-room-list > .active b,
+#menu.lobby-classic-a .classic-a-room-list > .active em { color: #e9d17d; }
+#menu.lobby-classic-a .modern-player-card {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; margin: 7px; padding: 8px;
+  border: 1px solid #4d584f; background: #171f1b;
+}
+#menu.lobby-classic-a .modern-avatar { width: 28px; height: 28px; border: 1px solid #9da590; border-radius: 0; background: #2c3533; color: #e9d985; font-size: 10px; }
+#menu.lobby-classic-a .modern-player-card div { flex: 1; min-width: 0; }
+#menu.lobby-classic-a .modern-player-card b { color: #e5e5d2; font-size: 9px; }
+#menu.lobby-classic-a .modern-player-card small { color: #7e8981; font-size: 7px; }
+#menu.lobby-classic-a .modern-player-card .modern-rename { padding: 5px 6px; font-size: 7px; }
+#menu.lobby-classic-a .modern-room-side > p { flex: 0 0 auto; margin: 0; padding: 0 8px 7px; color: #7d8981; font-size: 8px; line-height: 1.45; }
+#menu.lobby-classic-a .modern-room-state {
+  flex: 0 0 auto; display: grid; grid-template-columns: 1fr auto; gap: 5px; margin: 0 7px; padding: 7px 0;
+  border-top: 1px solid #464f48; color: #7f8b82; font-size: 8px;
+}
+#menu.lobby-classic-a .modern-room-state span { color: #7f8b82; }
+#menu.lobby-classic-a .modern-room-state b { color: #cbd2c7; }
+#menu.lobby-classic-a .modern-room-state .is-ready { color: #a7d36e; }
+#menu.lobby-classic-a .online-room {
+  flex: 0 0 auto; margin: 0 7px 7px; padding: 7px; border: 1px solid #515b52; background: #0a1110; box-shadow: inset 0 0 12px #0008;
+}
+#menu.lobby-classic-a .online-room header {
+  height: auto; min-height: 0; display: flex; flex-direction: row; align-items: center; justify-content: space-between;
+  margin: 0 0 6px; padding: 0; border: 0; background: none; color: #d9dfc8;
+}
+#menu.lobby-classic-a .online-room header b { font-size: 9px; }
+#menu.lobby-classic-a .online-room header span { color: #f2c25b; font-size: 9px; letter-spacing: 1px; }
+#menu.lobby-classic-a .online-room label { gap: 2px; color: #78847c; font-size: 7px; }
+#menu.lobby-classic-a .online-room input { padding: 5px 6px; border-color: #455148; background: #070d0c; color: #d4dacf; font-size: 8px; }
+#menu.lobby-classic-a .online-room-join,
+#menu.lobby-classic-a .online-room-actions { gap: 4px; margin-top: 4px; }
+#menu.lobby-classic-a .online-room button { padding: 5px 6px; border-color: #5c675c; background: #303a33; color: #c6cec0; font-size: 8px; }
+#menu.lobby-classic-a .classic-a-statusbar {
+  display: flex; align-items: center; gap: 18px; padding: 0 14px; border-top: 1px solid #667069;
+  background: #111817; color: #818d85; font-size: 8px;
+}
+#menu.lobby-classic-a .classic-a-statusbar b { color: #d8c477; }
+#menu.lobby-classic-a .classic-a-statusbar span:last-child { margin-left: auto; color: #aab4aa; }
+
+@media (max-height: 800px) and (min-width: 1001px) {
+  #menu.lobby-classic-a .lobby-shell { grid-template-rows: 48px minmax(0,1fr) 27px; }
+  #menu.lobby-classic-a .lobby-top { height: 48px; }
+  #menu.lobby-classic-a .lobby-id { flex-basis: 225px; }
+  #menu.lobby-classic-a .lobby-logo { width: 31px; height: 31px; font-size: 12px; }
+  #menu.lobby-classic-a .lobby-title { font-size: 15px; }
+  #menu.lobby-classic-a .classic-a-workspace { grid-template-columns: minmax(340px,390px) minmax(400px,1fr) minmax(218px,252px); }
+  #menu.lobby-classic-a .classic-a-room-meta { padding: 6px 8px; }
+  #menu.lobby-classic-a .classic-a-room-meta > strong { font-size: 14px; }
+  #menu.lobby-classic-a .classic-a-room-meta dl { margin-top: 4px; line-height: 1.35; }
+  #menu.lobby-classic-a .classic-a-poster { flex-basis: 180px; }
+  #menu.lobby-classic-a .room-map-select { padding: 4px 6px; gap: 3px; }
+  #menu.lobby-classic-a .room-map-option { min-height: 36px; padding: 4px 6px; }
+  #menu.lobby-classic-a .bio-mode-select { padding: 4px 6px; }
+  #menu.lobby-classic-a .bio-mode-select button { padding: 4px 2px; }
+  #menu.lobby-classic-a .room-match-info { padding: 4px 8px; }
+  #menu.lobby-classic-a .classic-a-roster { grid-template-rows: 68px minmax(0,1fr) 92px 48px; }
+  #menu.lobby-classic-a .room-team-title img { width: 44px; height: 44px; }
+  #menu.lobby-classic-a .room-team-title h2 { font-size: 21px; }
+  #menu.lobby-classic-a .room-versus { top: 18px; font-size: 29px; }
+  #menu.lobby-classic-a .classic-a-room-list > div { height: 27px; }
+  #menu.lobby-classic-a .modern-player-card { margin: 5px 7px; padding: 6px; }
+  #menu.lobby-classic-a .modern-room-side > p { padding-bottom: 5px; line-height: 1.3; }
+  #menu.lobby-classic-a .modern-room-state { padding: 5px 0; }
+  #menu.lobby-classic-a .online-room { padding: 5px 6px; }
+  #menu.lobby-classic-a .menu-btn { flex-basis: 165px; font-size: 15px; }
+}
+@media (max-width: 1100px) {
+  #menu.lobby-classic-a .classic-a-channel { display: none; }
+  #menu.lobby-classic-a .classic-a-workspace { grid-template-columns: minmax(280px,340px) minmax(430px,1fr); }
+  #menu.lobby-classic-a .classic-a-side { display: none; }
+}
+@media (max-width: 760px) {
+  #menu.lobby-classic-a { overflow-y: auto; }
+  #menu.lobby-classic-a .lobby-shell { min-height: 760px; grid-template-rows: 48px minmax(0,1fr) 27px; }
+  #menu.lobby-classic-a .lobby-top { height: 48px; }
+  #menu.lobby-classic-a .lobby-id { display: none; }
+  #menu.lobby-classic-a .lobby-profile { display: none; }
+  #menu.lobby-classic-a .lobby-tab { flex: 1 1 25%; padding: 0 4px; }
+  #menu.lobby-classic-a .classic-a-workspace { grid-template-columns: 1fr; grid-template-rows: auto minmax(440px,1fr); }
+  #menu.lobby-classic-a .classic-a-intel { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 28px auto auto; }
+  #menu.lobby-classic-a .classic-a-intel > .classic-a-panel-title { grid-column: 1 / -1; }
+  #menu.lobby-classic-a .classic-a-poster { min-height: 150px; }
+  #menu.lobby-classic-a .room-map-select { grid-column: 1 / -1; grid-template-columns: repeat(4,1fr); }
+  #menu.lobby-classic-a .room-map-caption { display: none; }
+  #menu.lobby-classic-a .bio-mode-select { grid-column: 1 / -1; }
+  #menu.lobby-classic-a .room-match-info { display: none; }
+  #menu.lobby-classic-a .classic-a-statusbar span:nth-child(2),
+  #menu.lobby-classic-a .classic-a-statusbar span:nth-child(3) { display: none; }
+  #menu.lobby-classic-a .classic-a-statusbar span:last-child { font-size: 0; }
+}
+
+
+#menu.lobby-classic-a .bio-mode-select { grid-template-columns: repeat(auto-fit, minmax(20%, 1fr)); }
+#menu.lobby-classic-a .room-map-option[hidden], #menu.lobby-classic-a .bio-mode-select button[hidden],
+.browse-guide, #browseHint { display: none; }
+#menu.lobby-classic-a.browse-room .room-teams-heading, #menu.lobby-classic-a.browse-room .room-roster,
+#menu.lobby-classic-a.browse-room .classic-a-lower, #menu.lobby-classic-a.browse-room .menu-setup { display: none; }
+#menu.browse-room .browse-guide {
+  display: block; grid-row: 1 / 4; align-self: center; padding: 0 clamp(16px, 5vw, 64px);
+  color: #cdd2c7; line-height: 1.6;
+}
+.browse-guide h2 { margin: 0; color: #eedcae; font-size: 22px; }
+.browse-guide dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; }
+.browse-guide dt { color: #e5cc89; } .browse-guide dd { margin: 0; }
+body.browse-playing #hud > :not(#browseHint),
+body.browse-playing #gameMenuSettingsOpen, body.browse-playing #fx-layer { display: none !important; }
+body.browse-playing #browseHint {
+  display: block; position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 90vw; padding: 5px 12px; text-align: center;
+  background: rgba(17,20,18,.65); border-radius: 4px; color: #eee; font: 13px/1.5 sans-serif;
 }

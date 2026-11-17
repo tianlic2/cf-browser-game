@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createZone13SpatialCollision } from './zone13_collision.js?v=zone13-jump-2';
+import { createZone13SpatialCollision } from './zone13_collision.js?v=zone13-collision-alignment-1';
 import { createZone13EventDirector } from './zone13_events.js';
 
 const ROOT = new URL('../assets/local/cf_bio_candidates/zone13/graybox/', import.meta.url);
@@ -10,6 +10,29 @@ const assetUrl = (name) => {
   url.searchParams.set('v', VERSION);
   return url;
 };
+
+// Static Source props carry local model bounds plus a world yaw. Treating
+// those local bounds as a world-aligned box creates large invisible wedges at
+// rotated cars/buses and leaves the opposite corners non-solid. Keep a tight
+// world AABB only for broad-phase rejection; the six planes remain the
+// authoritative oriented box and roundedFootprint supplies capsule corners.
+function orientedBoxCollider(source) {
+  const yaw = source.yaw || 0, cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const localHx = source.localHx ?? source.hx;
+  const localHz = source.localHz ?? source.hz;
+  const hx = Math.abs(cos) * localHx + Math.abs(sin) * localHz;
+  const hz = Math.abs(sin) * localHx + Math.abs(cos) * localHz;
+  const axisX = [cos, 0, -sin], axisZ = [sin, 0, cos];
+  const plane = (nx, ny, nz, padding = 0) => [nx, ny, nz,
+    nx * source.x + nz * source.z + ny * (ny > 0 ? source.h : (source.y0 ?? 0)) + padding];
+  return { ...source, hx, hz, localHx, localHz, preciseEscape: true,
+    roundedFootprint: true,
+    planes: [
+      plane(axisX[0], 0, axisX[2], localHx), plane(-axisX[0], 0, -axisX[2], localHx),
+      plane(axisZ[0], 0, axisZ[2], localHz), plane(-axisZ[0], 0, -axisZ[2], localHz),
+      [0, 1, 0, source.h], [0, -1, 0, -(source.y0 ?? 0)],
+    ] };
+}
 
 async function fetchJson(name, label) {
   const response = await fetch(assetUrl(name));
@@ -272,16 +295,16 @@ export async function buildZone13Map(scene, onProgress = () => {}) {
   }));
   scene.add(root);
   const walk = createWalkSurface(walkData);
-  const colliders = walkData.propColliders.map((c) => ({ ...c, walkable: false }));
+  const colliders = walkData.propColliders.map((c) => orientedBoxCollider({ ...c, walkable: false }));
   for (const crate of weaponCrates) {
     const [x, y, z] = crate.position;
-    crate.collider = { x, z, y0: y, h: y + .72, hx: .525, hz: .41,
-      active: true, walkable: false, model: 'weaponbox' };
+    crate.collider = orientedBoxCollider({ x, z, y0: y, h: y + .72, hx: .525, hz: .41,
+      active: true, walkable: false, model: 'weaponbox' });
     colliders.push(crate.collider);
   }
   for (const wave of supplyWaves) {
-    wave.collider = { x: 0, z: 0, y0: 0, h: .72, hx: .525, hz: .41,
-      active: false, walkable: false, model: 'supplybox' };
+    wave.collider = orientedBoxCollider({ x: 0, z: 0, y0: 0, h: .72, hx: .525, hz: .41,
+      active: false, walkable: false, model: 'supplybox' });
     colliders.push(wave.collider);
   }
   const spatialCollision = createZone13SpatialCollision(worldData, buffer, colliders);
@@ -324,6 +347,7 @@ export async function buildZone13Map(scene, onProgress = () => {}) {
     hasVerticalClearance: spatialCollision.hasVerticalClearance,
     landingSurfaceAt: spatialCollision.landingSurfaceAt,
     supportSurfaceAt: spatialCollision.supportSurfaceAt,
+    ceilingSurfaceAt: spatialCollision.ceilingSurfaceAt,
     lineClear: spatialCollision.lineClear,
     collisionPerformance: spatialCollision.stats,
     voidY: min[1] - 2,

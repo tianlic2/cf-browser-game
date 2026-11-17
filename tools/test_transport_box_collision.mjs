@@ -1,20 +1,34 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { intersectsBrush, canMoveThroughBrushes, brushHorizontalEscape,
-  brushClusterEscape } from '../scripts/brush_collision.js';
+  brushClusterEscape, hasCardinalBoxFootprint } from '../scripts/brush_collision.js';
 
 const mainSource = readFileSync(new URL('../scripts/main.js', import.meta.url), 'utf8');
+const enemySource = readFileSync(new URL('../scripts/enemies.js', import.meta.url), 'utf8');
+const mapSource = readFileSync(new URL('../scripts/classic_map.js', import.meta.url), 'utf8');
 assert.match(mainSource, /const staticStepHeight = player\.onGround \?[\s\S]*? : 0;/,
   'airborne movement must use zero step allowance');
 assert.ok((mainSource.match(/canMoveThroughBrushes\(/g) || []).length >= 2,
   'both horizontal player axes must use monotonic brush recovery');
 assert.match(mainSource, /depenetratePlayerFromBrushes\(0\)/,
   'vertical side overlap must be corrected before landing');
+assert.match(mapSource, /roundedFootprint = hasCardinalBoxFootprint\(c\)/,
+  'Transport must explicitly opt cardinal BSP boxes into rounded capsule corners');
+assert.match(enemySource, /canMoveThroughBrushes\(colliders,gp\.x,gp\.z,nx,gp\.z/,
+  'NPC X movement must use monotonic brush recovery');
+assert.match(enemySource, /canMoveThroughBrushes\(colliders,gp\.x,gp\.z,gp\.x,nz/,
+  'NPC Z movement must use monotonic brush recovery');
+assert.doesNotMatch(enemySource, /\(stuck \|\| !this\.blockedAt/,
+  'NPCs may not deepen a box overlap merely because they started stuck');
+// Committed detour duration, direction and progress are exercised by
+// test_transport_npc_unstuck_browser.mjs against actual NPC movement. Avoid
+// matching one historical spelling of the implementation here.
 
 const map = JSON.parse(readFileSync(new URL('../assets/classic/transport/map.json', import.meta.url)));
 for (const c of map.colliders) {
   c.x = -c.x;
   for (const plane of c.planes || []) plane[0] = -plane[0];
+  c.roundedFootprint = hasCardinalBoxFootprint(c);
 }
 
 const adjacent = [
@@ -57,6 +71,19 @@ for (const c of crates) {
     feet, radius, 0, height), false, 'side-fall recovery leaves the expanded crate bounds');
   assert.equal(intersectsBrush(c, c.x, c.z, c.h, radius, 0, height), false,
     'standing exactly on the crate top remains valid');
+
+  const clearCorner = radius * .72;
+  const blockedCorner = radius * .60;
+  assert.equal(intersectsBrush(c,c.x+c.hx+clearCorner,c.z+c.hz+clearCorner,
+    feet,radius,0,height),false,
+  'a point beyond the circular capsule radius does not hit a square air-wall corner');
+  assert.equal(intersectsBrush(c,c.x+c.hx+blockedCorner,c.z+c.hz+blockedCorner,
+    feet,radius,0,height),true,
+  'the real rounded capsule corner still blocks within its radius');
+  const cornerPush = brushHorizontalEscape(c,c.x+c.hx+blockedCorner,
+    c.z+c.hz+blockedCorner,radius,feet,0,height);
+  assert.ok(cornerPush.x>0&&cornerPush.z>0,
+    'corner recovery follows the outward radial direction instead of a square axis');
 }
 
 console.log(`PASS: ${crates.length} real transport crates block airborne side entry, allow outward recovery, and retain valid top landing.`);

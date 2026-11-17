@@ -1,3 +1,4 @@
+import { CF_VANILLA } from './cf_vanilla_catalog.js';
 // ===== 音效系统：采样 + 合成混合（Web Audio API）=====
 //
 // 架构（两句话）：
@@ -49,6 +50,12 @@
 // ---- 素材表：槽位 id → 一组 stem（每个 stem 展开成 .ogg + .m4a 两个候选 URL）----
 // 变体数 > 1 的槽位在每次播放时轮换（见 _pick），这是「同一段录音听不出在重复」的前提。
 const SAMPLES = {
+  awm_nature_fire: ['./assets/local/awm_nature/audio/awp1.wav'],
+  awm_nature_deploy: ['./assets/local/awm_nature/audio/awp_deploy_trimmed.wav'],
+  awm_nature_out: ['./assets/local/awm_nature/audio/awp_clipout.wav'],
+  awm_nature_in: ['./assets/local/awm_nature/audio/awp_clipin.wav'],
+  awm_nature_bolt: ['./assets/local/awm_nature/audio/awp_bolt.wav'],
+  awm_nature_forward: ['./assets/local/awm_nature/audio/awp_bolt_forward.wav'],
   m200_fire: ["./assets/local/m200/audio/awp1.wav"],
   m200_blowback: ["./assets/local/m200/audio/cheytac_blowback.wav"],
   m200_clipin: ["./assets/local/m200/audio/cheytac_clipin.wav"],
@@ -221,7 +228,31 @@ const M4A_ONLY = new Set([
 
 // 自动武器只播「初始爆裂声」，丢掉 1.7 s 的尾巴（不丢的话 0.09 s 的射击间隔会堆成一团糊音）。
 // window = 0 表示整段播完（巴雷特原声含较长的回响尾部）。
+// CC0 recorded firearm cues follow hand contact, seating and bolt travel.
+// Source excerpts and authors are documented in audio/weapons/hbr7/CREDITS.md.
+const HBR7_ATTACK_LEAD = {
+  unlock:.0213, extract:.0212, rear_stop:.0318, feed:.0276, lock:.0279,
+  release:.0235, mag_out:.0149, mag_in:.0260, seat:.0226,
+  shoulder:.0160, sling_stop:.0288, dry:.0239,
+};
+// These authored cues follow hand contact, magazine seating and bolt travel.
+// Times are seconds on the original clips. An adjusted clip duration changes
+// cue spacing while preserving the pitch of each mechanical impulse.
+const HBR7_ACTIONS = {
+  bolt: [[.27,'unlock'],[.362,'rearward'],[.52,'extract'],[.635,'forward'],[.78,'feed'],[.94,'lock']],
+  reload: [[.38,'release'],[.66,'mag_out'],[1.18,'spare'],[1.52,'mag_in'],[1.68,'seat']],
+  emptyRack: [[1.84,'unlock'],[1.907,'rearward'],[2.04,'rear_stop'],[2.105,'forward'],[2.22,'feed'],[2.37,'lock']],
+  deploy: [[.07,'draw'],[.44,'shoulder']],
+  holster: [[.05,'sling'],[.25,'sling_stop']],
+};
+for (const cue of new Set(['dry', ...Object.values(HBR7_ACTIONS).flat().map(event=>event[1])])) {
+  SAMPLES['hbr7_'+cue]=['weapons/hbr7/'+cue+'.wav'];
+}
+SAMPLES.hbr7_report=['weapons/hbr7/report_a.wav','weapons/hbr7/report_b.wav'];
+
 const GUN = {
+  hbr7: {sample:'hbr7_report',rate:1,window:0,vol:1,crack:0},
+  awm_nature: {sample:'awm_nature_fire',rate:1,window:0,vol:1,crack:0},
   kn57: { sample: "kn57_fire", rate: 1, window: 0, vol: 1, crack: 0 },
   m200:   { sample: "m200_fire", rate: 1.00, window: 0, vol: 1.00, crack: 0 },
   akgold: { sample: "akgold_fire", rate: 1.00, window: 0, vol: .92, crack: 0 },
@@ -234,6 +265,38 @@ const GUN = {
   deagle: { sample: "deagle_festa_fire", rate: 1.00, window: 0, vol: 0.95, crack: 0 },
 };
 const GUN_BY_TYPE = { rifle: "ak", sniper: "awm", pistol: "pistol" };
+const DEDICATED_GUN_SAMPLES = new Set(["hbr7", "scar", "m200", "akgold", "kn57", "awm_nature"]);
+const cfSample = (spec, path) => `${spec.id}:${path}`;
+const cfSpec = id => CF_VANILLA.find(s => s.id === id);
+for (const spec of CF_VANILLA) {
+  const files = new Set([spec.fireSound,...[...spec.selectEvents,...spec.reloadEvents,...spec.fireEvents].map(e=>e.audio)].filter(Boolean));
+  for (const file of files) SAMPLES[cfSample(spec,file)] = [`./assets/local/cf_vanilla/${spec.sourceId}/${file}`];
+  GUN[spec.id] = {sample:cfSample(spec,spec.fireSound),rate:1,window:0,vol:1,crack:0};
+  DEDICATED_GUN_SAMPLES.add(spec.id);
+}
+
+// Player and NPC shots resolve through this one table. NPC playback may add a
+// world-space panner and air absorption, but it must not silently substitute a
+// different recording (notably Iron Beast -> ordinary M4A1-C).
+function weaponShotProfile(kind, id, skin) {
+  const key = GUN[id] ? id : (GUN_BY_TYPE[kind] || "ak");
+  const gun = GUN[key];
+  const dedicated = DEDICATED_GUN_SAMPLES.has(id);
+  const exactM4C = id === "m4" && skin === "classic";
+  const ironbeast = id === "m4" && skin === "ironbeastgold";
+  return {
+    key, dedicated, syntheticFallback: !dedicated, crack: gun.crack,
+    options: {
+      id: id || kind || "rifle",
+      sample: ironbeast ? "ironbeast_fire" : gun.sample,
+      kind: kind || "rifle",
+      rate: gun.rate, window: gun.window, vol: gun.vol,
+      volJitter: dedicated || exactM4C ? 0 : undefined,
+      rateJitter: dedicated || key === "ak" || key === "barrett" || exactM4C ? 0 : .012,
+      wet: dedicated || key === "ak" || key === "barrett" || exactM4C ? 0 : 1,
+    },
+  };
+}
 
 const MAX_VOICES = 64;      // 普通音效并发上限；留出足够余量避免战斗声互相挤掉
 const KILL_VOICE_RESERVE = 16; // 击杀反馈专用余量，不被普通枪声/环境音占满
@@ -383,13 +446,33 @@ export class SFX {
     if (!dec) dec = this._decoder;
     if (!dec) { this._preloadDone = true; return this; }   // 浏览器连解码器都没有 —— 全部退回合成
     const jobs = [];
+    const publicDeploy = /\.github\.io$/i.test(globalThis.location?.hostname || '') ||
+      new URLSearchParams(globalThis.location?.search || '').has('publicDeploy');
     for (const [id, stems] of Object.entries(SAMPLES)) {
+      if (publicDeploy && (/^(cfv_|awm_nature_|hbr7_|ironbeast_|kukri_dragon_|bio_)/.test(id) ||
+        stems.some(stem=>stem.includes('/assets/local/')))) continue;
       for (const stem of stems) { this._total++; jobs.push(this._loadOne(dec, id, stem)); }
     }
     await Promise.all(jobs);
     this._preloadDone = true;
     if (this._musicOn && this.ctx && !this._music) this._startMusic();
     return this;
+  }
+
+  preloadShipSteps() {
+    if (!this._shipStepsPromise) this._shipStepsPromise=this.preload().then(async()=>{
+      const decoder=this.ctx || this._decoder;
+      if (!decoder) {this._shipStepsPromise=null;return;}
+      const jobs=[];
+      for (const material of ['steel','wood','wet']) {
+        for (let i=1;i<=3;i++) {
+          this._total++;
+          jobs.push(this._loadOne(decoder,'ship_'+material,'footsteps/transport/'+material+i+'.wav'));
+        }
+      }
+      await Promise.all(jobs);
+    });
+    return this._shipStepsPromise;
   }
 
   preloadBioExtras() {
@@ -434,8 +517,8 @@ export class SFX {
       try {
         // These two files were replaced in place. Version only their requests so
         // an already-played local build cannot reuse the old decoded HTTP body.
-        const request=(id==="sw_scope_in"||id==="sw_scope_out")
-          ? last+"?v=scope-210018-1":last;
+        const request = id.startsWith('hbr7_') ? last + "?v=hbr7-recordings-3"
+          : (id==="sw_scope_in"||id==="sw_scope_out") ? last+"?v=scope-210018-1" : last;
         const res = await fetch(request);
         if (!res.ok) throw new Error("HTTP " + res.status);
         const buf = await decode(dec, await res.arrayBuffer());
@@ -603,6 +686,7 @@ export class SFX {
       method,
       kind: (o && o.kind) || null,
       id: (o && o.id) || null,
+      sample: (o && (o.sample || o.id)) || null,
       dur: Math.round((dur || 0) * 1000) / 1000,
       reason,
     };
@@ -613,16 +697,37 @@ export class SFX {
     if (!this._scheduled.size) return;
     for (const h of Array.from(this._scheduled)) {
       if (method && h.method !== method) continue;
-      h.stop(fade);
+      if (h.hbr7 && h.at>this.ctx.currentTime) h.cancelPending();
+      else h.stop(fade);
     }
   }
   cancelReload() { this.cancelScheduled("reload"); }
+  cfEvents(id, events, lane, scale = 1) {
+    if (!this.ready()) return;
+    const spec = cfSpec(id);
+    if (!spec) return;
+    const hits = events.map(e => this._sample(cfSample(spec,e.audio), {
+      delay:Math.max(0,e.time*scale), vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:lane,
+    }));
+    this._note(lane,{id,kind:id,events:events.map(e=>e.time*scale)},hits.every(Boolean)?'sample':'missing',0);
+  }
+  _hbr7Action(lane, events, scale=1) {
+    let complete=true;
+    for (const [seconds,cue] of events) {
+      if (this._voices >= this.maxVoices) { complete=false; break; }
+      const h=this._sample('hbr7_'+cue,{delay:Math.max(0,seconds*scale-(HBR7_ATTACK_LEAD[cue]||0)),vol:1,volJitter:0,
+        rate:1,rateJitter:0,wet:0,schedule:lane});
+      if (h) h.hbr7=true;
+      else complete=false;
+    }
+    this._note(lane,{id:'hbr7',kind:'hbr7'},complete?'sample':'missing',events.at(-1)[0]*scale);
+  }
   cancelBolt() { this.cancelScheduled("bolt"); }
   cancelPendingDeploy() {
     if (!this._scheduled.size) return;
     const now = this.ctx?.currentTime ?? 0;
     for (const h of Array.from(this._scheduled)) {
-      if (h.method === "deploy" && h.at > now) h.cancelPending();
+      if ((h.method === "deploy" || h.method === "holster") && h.at > now) h.cancelPending();
     }
   }
   cancelStreak() { this.cancelScheduled("streak", 0.015); }
@@ -747,32 +852,14 @@ export class SFX {
   // `def.type` 都是 "rifle"。省略时按 type 兜底。
   shoot(kind, id, skin) {
     if (!this.ready()) return;
-    if (id === "scar") {
-      // Keep the reviewed source shot intact; no AK fallback or extra foley.
-      this._playMapped("shoot", {id, sample:"scar_fire", kind, rate:1,
-        rateJitter:0, vol:.92, volJitter:0, wet:0});
-      return;
-    }
-    if (id === "m200" || id === "akgold" || id === "kn57") {
-      const g=GUN[id];
-      this._playMapped("shoot", {id,sample:g.sample,kind,rate:1,window:g.window,
-        vol:g.vol,rateJitter:0,volJitter:0,wet:0});
-      return;
-    }
-    const key = GUN[id] ? id : (GUN_BY_TYPE[kind] || "ak");
-    const g = GUN[key];
-    const exactM4C = id === "m4" && skin === "classic";
-    this._playMapped("shoot", {
-      id: id || kind || "rifle",   // 记录的是**武器 id**，读口靠它区分 AK / M4
-      sample: id === "m4" && skin === "ironbeastgold" ? "ironbeast_fire" : g.sample,
-      kind: kind || "rifle",
-      rate: g.rate, window: g.window, vol: g.vol,
-      volJitter: exactM4C ? 0 : undefined,
-      rateJitter: (key==='ak' || key==='barrett' || exactM4C)?0:0.012,
-      wet: (key==='ak' || key==='barrett' || exactM4C)?0:1,
-    }, () => this._shootSynth(kind));
+    const profile = weaponShotProfile(kind,id,skin);
+    this._playMapped("shoot", profile.options,
+      profile.syntheticFallback ? () => this._shootSynth(kind) : undefined);
+    const spec = cfSpec(id);
+    if (spec?.fireEvents.length) this.cfEvents(id, spec.fireEvents, 'bolt');
     // 手枪仍由 AK 变调派生；M4A1-C 自带完整开火瞬态，无需合成爆音。
-    if (g.crack > 0) this._crackLayer(g.crack);
+    if (profile.crack > 0) this._crackLayer(profile.crack);
+    if (profile.dedicated) return;
     // 空弹壳：0.42s 后落地。**quiet** —— 这是子层，不该覆盖 lastAttempt
     this._playMapped("brass", {
       id: "brass", delay: 0.42, vol: 0.35, wet: 0.3, rateJitter: 0.06, quiet: true,
@@ -784,6 +871,18 @@ export class SFX {
   // AWM 的两个 take 是独立录音、随机选一个；巴雷特只有原枪专用的一段。
   bolt(id = "awm", options = {}) {
     if (!this.ready()) return;
+    if (id==='hbr7') {
+      const cues = options.eject === false
+        ? HBR7_ACTIONS.bolt.map(([at, cue]) => [at, cue === 'extract' ? 'rear_stop' : cue])
+        : HBR7_ACTIONS.bolt;
+      this._hbr7Action('bolt',cues,(options.duration || 1.2)/1.2); return;
+    }
+    if (cfSpec(id)) return; // Source fire events were scheduled with the shot.
+    if(id==='awm_nature'){
+      const times=options.delays||[1.3,1.6],ids=['awm_nature_bolt','awm_nature_forward'];
+      const hits=ids.map((sample,i)=>this._sample(sample,{delay:times[i],vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:'bolt'}));
+      this._note('bolt',{id,kind:id,events:times},hits.every(Boolean)?'sample':'missing',times[1]);return;
+    }
     const sample = id === "barrett" ? "barrett_bolt" : id === "m200" ? "m200_blowback" : "awp_bolt";
     const sourceDelay = id === "barrett" ? 50 / 35 : id === "m200" ? 41 / 100 : 0.2;
     const delay = Number.isFinite(options.delay) ? options.delay : sourceDelay;
@@ -800,6 +899,17 @@ export class SFX {
     if (!this.ready()) return;
     const dur = (o && o.dur) || 2.43;
     const wid = (o && o.id) || "reload";
+    if (wid==='hbr7') {
+      const cues=o.empty ? HBR7_ACTIONS.reload.concat(HBR7_ACTIONS.emptyRack) : HBR7_ACTIONS.reload;
+      this._hbr7Action('reload',cues,dur/2.65); return;
+    }
+    const spec = cfSpec(wid);
+    if (spec) { this.cfEvents(wid, spec.reloadEvents, 'reload', dur / spec.reloadDuration); return; }
+    if(wid==='awm_nature'){
+      const times=[14/30,37/30,67/30,79/30],ids=['awm_nature_out','awm_nature_in','awm_nature_bolt','awm_nature_forward'];
+      const hits=ids.map((id,i)=>this._sample(id,{delay:times[i]/2.9*dur,vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:'reload'}));
+      this._note('reload',{id:wid,kind:wid,events:times},hits.every(Boolean)?'sample':'missing',times[3]/2.9*dur);return;
+    }
     if (wid === "kn57") {
       const times=[.216216,.756757,1.351351], ids=["kn57_out","kn57_in","kn57_lock"];
       const hits=ids.map((id,i)=>this._sample(id,{delay:times[i]/(91/37)*dur,vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"reload"}));
@@ -890,8 +1000,11 @@ export class SFX {
   // 空枪：真枪干击（`sw/dryfire` = 725402 那一下，后面全是静音，所以窗口够干净）。
   // 这个声音出现得很频繁（空弹匣时按住左键每次都响），所以**故意压得比其它动作轻**、
   // 且 rate 抖动略大 —— 连响十下要像「同一个动作重复」，不能像十种不同的声音。
-  empty() {
+  empty(weaponId) {
     if (!this.ready()) return;
+    if (weaponId==='hbr7') {
+      this._playMapped('empty',{id:'hbr7_dry',kind:weaponId,vol:.72,volJitter:0,rateJitter:0,wet:0}); return;
+    }
     this._playMapped("empty", {
       id: "sw_dryfire", vol: 0.5, rateJitter: 0.07, wet: 0.12,
     }, () => this._emptySynth());
@@ -935,20 +1048,20 @@ export class SFX {
   // 敌人使用与玩家相同的枪型采样/变调/截窗；距离只改变空间听感，
   // 不再把 M4/AWM（或远处的 AK）替换成统一的 AK 远景录音。
   // gunId 缺省为 AK，兼容原有的三坐标调用。
-  enemyShoot(x, y, z, gunId = "ak") {
+  enemyShoot(x, y, z, gunId = "ak", gunSkin = null) {
     if (!this.ready()) return;
-    const key = GUN[gunId] ? gunId : "ak";
-    const g = GUN[key];
+    const profile = weaponShotProfile(null,gunId,gunSkin);
     const dist = this._dist3(x, y, z);
     const far = dist > 25;
     this._playMapped("enemyShoot", {
-      id: key, sample: g.sample,
+      ...profile.options,
       kind: far ? "far" : "near",
-      x, y, z, wet: 0, vol: g.vol * (far ? 0.72 : 1),
-      rate: g.rate, window: g.window, rateJitter: key === "ak" ? 0 : 0.012,
+      x, y, z, vol: profile.options.vol * (far ? 0.72 : 1),
       lowpass: this._absorb(dist),
-    }, () => this._enemyShootSynth(x, y, z, key));
-    if (g.crack > 0) this._crackLayer(g.crack, x, y, z, this._absorb(dist));
+    }, profile.syntheticFallback
+      ? () => this._enemyShootSynth(x, y, z, profile.key) : undefined);
+    if (profile.crack > 0)
+      this._crackLayer(profile.crack, x, y, z, this._absorb(dist));
   }
 
   // 爆头（奖励音调，但也换成了采样：那一声「叮」本来就是录音更好听）
@@ -973,6 +1086,22 @@ export class SFX {
   // 脚步。**玩家与敌人必须分档**：玩家的不带坐标 ⇒ 绕过 panner、全声级抵达耳边；
   // 敌人走 panner（refDistance 6 / rolloff 1.1）。采样峰值统一归一到 0.95，同声级播放
   // 会让**玩家自己的脚步盖掉敌人脚步**，而脚步方向是关键的 FPS 信息。
+  shipStep(surface, weight, landing, x, y, z) {
+    if (!this.ready() || this._voices>=this.maxVoices) return;
+    const local=x==null, wood=surface==='wood', cloth=surface==='canvas';
+    const id=cloth?'step':wood?'ship_wood':'ship_steel';
+    const level=(local?.54:.90)*(.42+.58*weight)*(landing?1.24:1);
+    const options={x,y,z,vol:level,rate:landing?.83:1,rateJitter:.055,
+      lowpass:cloth?1250:wood?3600:surface==='wet-steel'?8600:4300,
+      wet:wood?.10:surface==='dry-steel'?.30:.14};
+    const body=this._sample(id,options) || this._sample('step',options);
+    this._note(landing?'land':'footstep',{id,kind:local?'player':'enemy'},body?'sample':'missing',body?.dur||0);
+    if (surface==='wet-steel' && this._voices<this.maxVoices) {
+      this._sample('ship_wet',{x,y,z,vol:level*(landing?.37:.22)*weight,
+        rate:1.14,window:.14,lowpass:5500,wet:.06,delay:.016});
+    }
+  }
+
   footstep(x, y, z) {
     if (!this.ready()) return;
     const local = x === undefined || x === null;
@@ -1127,6 +1256,15 @@ export class SFX {
       () => this._explosionSynth());
   }
 
+  // 三项玩家技能使用独立的程序化机械/能量声，不借用枪声或爆炸采样。
+  skill(kind, position = null) {
+    if (!this.ready()) return;
+    const duration = { dash: .3, coverDeploy: .42, coverHit: .16, coverRepair: .18, coverBreak: .34,
+      cageDrop: .45, cageImpact: .58, cageHit: .18, cageBreak: .44 }[kind] || .25;
+    this._note("skill", { kind, x: position?.x, y: position?.y, z: position?.z }, "synth", duration);
+    this._skillSynth(kind, position);
+  }
+
   // ---- 页面交互声（只做点击与切换，不做悬停）----
   // 四个 kind：click（按钮）/ switch（页签）/ open / close（面板开合）
   //
@@ -1236,8 +1374,11 @@ export class SFX {
   }
 
   // 收枪没有武器素材包对应的独立事件，因此保持静音。
-  holster(type) {
+  holster(type, options={}) {
     if (!this.ready()) return;
+    if (options.weaponId==='hbr7') {
+      this._hbr7Action('holster',HBR7_ACTIONS.holster,(options.duration || .34)/.34); return;
+    }
     this._note("holster", { kind: type || null }, "silent", 0);
   }
 
@@ -1245,6 +1386,18 @@ export class SFX {
   // 其余武器没有对应源原声时静音，不再叠通用摆弄录音或合成扫频。
   deploy(type, options = {}) {
     if (!this.ready()) return;
+    if (options.weaponId==='hbr7') {
+      this._hbr7Action('deploy',HBR7_ACTIONS.deploy,(options.selectDur || .62)/.62); return;
+    }
+    const spec = cfSpec(options.weaponId);
+    if (spec) { this.cfEvents(spec.id, spec.selectEvents, 'deploy', (options.selectDur || spec.selectDuration) / spec.selectDuration); return; }
+    if(options.weaponId==='awm_nature'){
+      const duration=options.selectDur>0?options.selectDur:1.43;
+      const split=.24/1.43;
+      const phase=Number.isFinite(options.awmSelectPhase)?options.awmSelectPhase:split+(56/89-.5)/.5*(1-split);
+      this._playMapped('deploy',{id:'awm_nature_deploy',kind:type,delay:duration*phase,
+        vol:1,volJitter:0,rate:1.43/duration,rateJitter:0,wet:0,schedule:'deploy'});return;
+    }
     if (options.weaponId === "kn57") { this._playMapped("deploy", {id:"cf_ak_bolt",kind:type,delay:0,vol:1,volJitter:0,rate:1,rateJitter:0,wet:0,schedule:"deploy"}); return; }
     if (options.weaponId === "m200" || options.weaponId === "akgold") {
       const m200=options.weaponId === "m200";
@@ -1308,6 +1461,10 @@ export class SFX {
   // 原文件的瞬态已经标准化，不再随机音量，避免同一次开镜反馈忽强忽弱。
   scopeIn(weaponId = "awm", stage = 1) {
     if (!this.ready()) return;
+    if (weaponId==='hbr7') {
+      this._playMapped('scopeIn',{id:stage===2?'hbr7_release':'hbr7_shoulder',
+        kind:weaponId,vol:stage===2?.40:.56,volJitter:0,rateJitter:0,wet:0}); return;
+    }
     const heavy = weaponId === "barrett";
     this._playMapped("scopeIn", {
       id: "sw_scope_in", kind: weaponId + ":" + stage,
@@ -1318,6 +1475,9 @@ export class SFX {
   }
   scopeOut(weaponId = "awm") {
     if (!this.ready()) return;
+    if (weaponId==='hbr7') {
+      this._playMapped('scopeOut',{id:'hbr7_draw',kind:weaponId,vol:.47,volJitter:0,rateJitter:0,wet:0}); return;
+    }
     const heavy = weaponId === "barrett";
     this._playMapped("scopeOut", {
       id: "sw_scope_out", kind: weaponId,
@@ -1329,6 +1489,67 @@ export class SFX {
   // ==========================================================================
   // 合成回退 / 合成实现（下划线前缀 = 私有，绝不与上面的公开方法重名）
   // ==========================================================================
+
+  _skillSynth(kind, position) {
+    const ctx = this.ctx, t = ctx.currentTime;
+    const xyz = position || {};
+    const tone = (type, from, to, amp, start, duration, wet = .08) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = type; osc.frequency.setValueAtTime(Math.max(20, from), t + start);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + start + duration);
+      gain.gain.setValueAtTime(.0001, t + start);
+      gain.gain.exponentialRampToValueAtTime(amp, t + start + Math.min(.018, duration * .2));
+      gain.gain.exponentialRampToValueAtTime(.0001, t + start + duration);
+      osc.connect(gain); this.out3d(gain, xyz.x, xyz.y, xyz.z, wet);
+      osc.start(t + start); osc.stop(t + start + duration + .02);
+    };
+    const noise = (filterType, from, to, amp, start, duration, wet = .05) => {
+      const source = ctx.createBufferSource(), filter = ctx.createBiquadFilter(), gain = ctx.createGain();
+      source.buffer = this.noiseBuffer(duration + .03); filter.type = filterType; filter.Q.value = 1.1;
+      filter.frequency.setValueAtTime(from, t + start);
+      filter.frequency.exponentialRampToValueAtTime(to, t + start + duration);
+      gain.gain.setValueAtTime(.0001, t + start);
+      gain.gain.exponentialRampToValueAtTime(amp, t + start + .012);
+      gain.gain.exponentialRampToValueAtTime(.0001, t + start + duration);
+      source.connect(filter).connect(gain); this.out3d(gain, xyz.x, xyz.y, xyz.z, wet);
+      source.start(t + start); source.stop(t + start + duration + .02);
+    };
+    if (kind === 'dash') {
+      noise('bandpass', 380, 2600, .42, 0, .28, 0);
+      tone('sine', 115, 48, .32, 0, .18, .02);
+      tone('triangle', 980, 2100, .12, .02, .16, 0);
+    } else if (kind === 'coverDeploy') {
+      tone('square', 180, 95, .16, 0, .08, .12);
+      tone('triangle', 220, 1350, .3, .035, .34, .18);
+      noise('highpass', 1200, 4200, .13, .08, .3, .08);
+      this._click(t + .02, 540, .16); this._click(t + .19, 820, .12);
+    } else if (kind === 'coverHit') {
+      tone('sine', 2100, 620, .24, 0, .14, .05);
+      noise('highpass', 2600, 5200, .1, 0, .08, 0);
+    } else if (kind === 'coverRepair') {
+      tone('sine', 640, 1180, .16, 0, .08, .02);
+      tone('triangle', 1180, 1620, .13, .06, .1, .02);
+    } else if (kind === 'coverBreak') {
+      noise('bandpass', 2800, 420, .28, 0, .32, .16);
+      tone('triangle', 920, 130, .23, 0, .31, .2);
+    } else if (kind === 'cageDrop') {
+      noise('bandpass', 2600, 420, .27, 0, .43, .08);
+      tone('sawtooth', 560, 86, .18, 0, .42, .1);
+      this._click(t + .02, 720, .12); this._click(t + .13, 510, .1);
+    } else if (kind === 'cageImpact') {
+      noise('lowpass', 1700, 180, .45, 0, .5, .22);
+      tone('triangle', 118, 38, .52, 0, .42, .26);
+      tone('square', 440, 125, .13, .015, .18, .14);
+      this._click(t + .01, 290, .24); this._click(t + .075, 190, .16);
+    } else if (kind === 'cageHit') {
+      noise('bandpass', 4200, 900, .18, 0, .13, .03);
+      tone('triangle', 1540, 360, .2, 0, .16, .05);
+    } else if (kind === 'cageBreak') {
+      noise('bandpass', 3600, 260, .38, 0, .4, .18);
+      tone('sawtooth', 780, 74, .26, 0, .36, .2);
+      this._click(t + .025, 320, .2); this._click(t + .11, 210, .14);
+    }
+  }
 
   // 枪声（分武器类型：步枪/狙击/手枪），多层合成 + 混响。
   // 采样加载失败时走这里 —— 听感退化但绝不静音。

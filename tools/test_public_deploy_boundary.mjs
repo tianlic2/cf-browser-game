@@ -19,9 +19,17 @@ assert.match(main, /\.\.\.\(!PUBLIC_DEPLOY \? \[trackAsset\(loadScarLightView/,
 assert.match(main, /\.\.\.\(!PUBLIC_DEPLOY \? \[trackAsset\(loadBioZombieView/,
   'local zombie view is not fetched by the public boot sequence');
 
-for (const path of ['scar_light/', 'm200/', 'akgold/', 'kn57/', 'cf_bio_candidates/']) {
+for (const path of ['scar_light/', 'm200/', 'akgold/', 'kn57/', 'awm_nature/', 'cf_bio_candidates/']) {
   assert.match(ignore, new RegExp('/assets/local/' + path.replace('/', '\\/')),
     `${path} remains excluded from GitHub`);
 }
 
 console.log('PASS: GitHub Pages skips and hides all local-only weapon and bio-map packages.');
+
+assert.doesNotMatch(main,/^import .*from ["']\.\/harbor_/m,'high-detail rifle is not a static public dependency');
+for (const name of ['m4_ironbeast','kukri_dragon']) {
+  assert.ok(main.includes("...(!PUBLIC_DEPLOY ? [trackAsset(ClassicView.load('"+name+"')"),name+' is local only');
+  assert.ok(ignore.includes('/assets/classic/'+name+'/'),name+' is excluded from new Git additions');
+}
+const audio=readFileSync(new URL('../scripts/audio.js',import.meta.url),'utf8');
+assert.match(audio,/stems\.some\(stem=>stem\.includes\('\/assets\/local\/'\)\)/,'public audio skips local-only samples');

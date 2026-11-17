@@ -8,8 +8,8 @@ const VERSION = 1;
 const MATCH_MS = Number(process.env.MATCH_MS || 10 * 60 * 1000);
 const rooms = new Map();
 const clients = new Map();
-const FIRE_MS = Object.freeze({ ak:100, m4:90, scar:90, akgold:100, barrett:1550, m200:1455, deagle:240 });
-const DAMAGE = Object.freeze({ ak:[36,108], m4:[33,99], scar:[33,99], akgold:[36,108], barrett:[300,400], m200:[300,400], deagle:[54,162] });
+const FIRE_MS = Object.freeze({ ak:100, m4:90, scar:90, akgold:100, barrett:1550, hbr7:1200, m200:1455, deagle:240 });
+const DAMAGE = Object.freeze({ ak:[36,108], m4:[33,99], scar:[33,99], akgold:[36,108], barrett:[300,400], hbr7:[112,230], m200:[300,400], deagle:[54,162] });
 const SPAWNS = Object.freeze({ a:[0,0,27], b:[0,0,-27] });
 
 const cleanName = value => String(value || '玩家').replace(/[<>\u0000-\u001f]/g,'').trim().slice(0,16) || '玩家';

@@ -29,21 +29,21 @@ const sandbox = vm.createContext({ state: 'lobby', mapLoading: false,
   PUBLIC_DEPLOY: false,
   updateMapChoiceUi() {}, buildMenuMatch() {}, lobby: null, multiplayer: { active: () => false } });
 vm.runInContext(`${mapMeta}\nlet selectedMapId = 'transport';\nlet lastArenaMapId = 'transport';
-  let selectedModeId = 'tdm'; const bioMatch = () => selectedModeId === 'bio';\n${mapRule}\n${selectMode}`, sandbox);
+  let selectedModeId = 'tdm'; const bioMatch = () => selectedModeId === 'bio'; const browseMatch = () => selectedModeId === 'browse';\n${mapRule}\n${selectMode}`, sandbox);
 const arenaMaps = ['transport', 'blacktown', 'lingyin', 'bio'];
-for (const mode of ['tdm', 'training']) {
+for (const mode of ['tdm', 'training', 'browse']) {
   for (const map of arenaMaps) {
-    assert.equal(vm.runInContext(`mapAvailableForMode('${map}', '${mode}')`, sandbox), true,
-      `${mode} can select ${map}`);
+    assert.equal(vm.runInContext(`mapAvailableForMode('${map}', '${mode}')`, sandbox), map !== 'lingyin' || mode === 'browse',
+      `${mode} availability for ${map}`);
   }
 }
 assert.equal(vm.runInContext(`mapAvailableForMode('bio', 'bio')`, sandbox), true);
 assert.equal(vm.runInContext(`mapAvailableForMode('transport', 'bio')`, sandbox), false);
-vm.runInContext(`selectedMapId = 'lingyin'; selectMode('training')`, sandbox);
-assert.equal(vm.runInContext('selectedMapId', sandbox), 'lingyin',
-  'switching to Training Mode keeps the selected arena');
+vm.runInContext(`selectedMapId = 'blacktown'; selectMode('browse'); selectedMapId = 'lingyin'; selectMode('training')`, sandbox);
+assert.equal(vm.runInContext('selectedMapId', sandbox), 'blacktown',
+  'leaving a temple visit restores the previous combat map');
 vm.runInContext(`selectMode('bio'); selectMode('training')`, sandbox);
-assert.equal(vm.runInContext('selectedMapId', sandbox), 'lingyin',
+assert.equal(vm.runInContext('selectedMapId', sandbox), 'blacktown',
   'the selected arena is restored after visiting Bio Mode');
 assert.match(main, /const available = mapAvailableForMode\(button\.dataset\.map\)/,
   'lobby map buttons use the shared availability rule');

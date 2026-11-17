@@ -37,11 +37,18 @@ assert.equal((main.match(/isHeadshotIntersection\(h\)/g) || []).length, 3,
   'bullets, knife and rifle-butt attacks share the same headshot classification');
 assert.match(fox, /this\.mixer\.update\(/,
   'source actions drive the visible skeleton');
-assert.match(fox, /const move = speed > \.3 \? 'run\.001' : 'idle-calm'/,
-  'all moving directions use the authored run.001 clip');
+assert.match(fox, /const move = airborne \? 'jump' : crouching[\s\S]*?'crouchrun'[\s\S]*?'run\.001'/,
+  'native jump and crouch locomotion wrap the existing authored run clip');
+for (const clip of ['jump', 'crouch_idle', 'crouchrun', 'crouch_reload_ak47',
+  'crouch_reload_rifle'])
+  assert.match(fox, new RegExp(`['\"]${clip}['\"]`), `Fox wires its native ${clip} clip`);
+assert.match(bio, /airborne: h\.airborne,[\s\S]*jumpPhase:[\s\S]*crouching:/,
+  'Zone 13 human jump physics drives the native jump pose and crouched reload');
+assert.match(enemies, /crouching: this\.reloadT > 0/,
+  'team enemies use the authored crouched stance while reloading');
 assert.match(fox, /createFoxBreathingIdle\(clips\.get\('idle1'\)\)/,
   'the short source idle is replaced with a calm stance before spawning NPCs');
-assert.doesNotMatch(fox, /\? 'right'|\? 'left'|\? 'back'|\? 'walk'/,
+assert.doesNotMatch(fox, /const move[^;]*(?:'right'|'left'|'back'|'walk')/,
   'directional fall clips and the extra walk clip are not selected for locomotion');
 assert.doesNotMatch(fox, /bone\?\.rotateX|upperSpine\.rotateX/,
   'finger and spine bones are not incrementally rotated on every frame');

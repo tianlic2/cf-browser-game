@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeKn57SourceMaterial } from './kn57_source_material.js?v=source-4';
+import { makeKn57SourceMaterial } from './kn57_source_material.js?v=source-5';
 import { fetchJoinedAsset } from './chunked_asset.js?v=github-publish-1';
 
 // Original CF first-person AK: hands, fingers and gun share the authored rig.
@@ -25,7 +25,7 @@ export class ClassicView {
   }
   constructor(data,bytes,textures,extendSleeves=true) {
     this.root=new THREE.Group();this.root.name='cf-authored-first-person';
-    this.effects=[];
+    this.effects=[];this.partMeshes=[];
     const rigData=data.rigs||[{bones:data.bones,clips:data.clips}],rigStates=rigData.map((spec,index)=>{
       const rig=new THREE.Group();rig.name=`cf-authored-rig-${index}`;
       const bones=spec.bones.map(b=>{const o=new THREE.Bone();o.name=b.name;o.position.fromArray(b.pose);o.quaternion.fromArray(b.pose,3);return o;});
@@ -104,6 +104,7 @@ export class ClassicView {
       }
       const mesh=new THREE.SkinnedMesh(g,material);
       mesh.frustumCulled=false;rig.add(mesh);mesh.bind(skeleton,rig.matrixWorld);
+      this.partMeshes.push(mesh);
       if(maps.reflectionMap) {
         maps.reflectionMap.colorSpace=THREE.NoColorSpace;
         const reflectionMaterial=new THREE.MeshBasicMaterial({map:maps.reflectionMap,
@@ -145,6 +146,31 @@ export class ClassicView {
       });
       state.rig.updateMatrixWorld(true);state.skeleton.update();state.clip=name;state.seconds=t;
     }
+    this.root.updateMatrixWorld(true);this.clip=name;this.seconds=seconds;
+    this.sleeveExtension?.update();
+  }
+  // Blend an authored action back toward a base pose without resampling or
+  // replacing either source clip. Used by low-recoil ADS views where the
+  // weapon must still react to a shot, but the full hip-fire camera-space
+  // displacement would throw the optic far away from the fixed reticle.
+  sampleBlended(name,seconds,baseName='idle_0',baseSeconds=0,weight=1) {
+    const w=Math.max(0,Math.min(1,weight));
+    if(w>=.9999){this.sample(name,seconds);return;}
+    this.sample(name,seconds);
+    if(!this._blendTargets)this._blendTargets=this.rigStates.map(state=>new Float32Array(state.bones.length*7));
+    this._blendPosition||=new THREE.Vector3();this._blendQuaternion||=new THREE.Quaternion();
+    this.rigStates.forEach((state,ri)=>state.bones.forEach((bone,i)=>{
+      const o=i*7,a=this._blendTargets[ri];
+      a[o]=bone.position.x;a[o+1]=bone.position.y;a[o+2]=bone.position.z;
+      a[o+3]=bone.quaternion.x;a[o+4]=bone.quaternion.y;a[o+5]=bone.quaternion.z;a[o+6]=bone.quaternion.w;
+    }));
+    this.sample(baseName,baseSeconds);
+    this.rigStates.forEach((state,ri)=>state.bones.forEach((bone,i)=>{
+      const o=i*7,a=this._blendTargets[ri];
+      bone.position.lerp(this._blendPosition.set(a[o],a[o+1],a[o+2]),w);
+      bone.quaternion.slerp(this._blendQuaternion.set(a[o+3],a[o+4],a[o+5],a[o+6]),w);
+    }));
+    for(const state of this.rigStates){state.rig.updateMatrixWorld(true);state.skeleton.update();state.clip=name;state.seconds=seconds;}
     this.root.updateMatrixWorld(true);this.clip=name;this.seconds=seconds;
     this.sleeveExtension?.update();
   }

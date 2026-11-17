@@ -18,7 +18,11 @@ export function buildGoldsrcSurfaceIndex(data, binary) {
   for (const part of data.parts) {
     // Transparent water and unlit MDL scenery are visual effects/props, not
     // authoritative BSP walking surfaces.
-    if ((part.material.opacity ?? 1) < 1 || part.material.unlit) continue;
+    // GoldSrc's {invisible texture is completely transparent after alpha
+    // testing. Its triangles exist in the mesh but never draw a pixel; using
+    // them as visible floors or walls recreates phantom collision surfaces.
+    if ((part.material.opacity ?? 1) < 1 || part.material.unlit ||
+        part.material.name?.toLowerCase() === '{invisible') continue;
     const values = new Float32Array(binary, part.offset, part.count * 7);
     for (let i = 0; i < values.length; i += 21) {
       const ax=values[i], ay=values[i+1], az=values[i+2];

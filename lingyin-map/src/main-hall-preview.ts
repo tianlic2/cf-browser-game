@@ -102,18 +102,27 @@ async function load() {
   draco.setDecoderPath(new URL('./vendor/three/examples/jsm/libs/draco/', document.baseURI).href);
   const gltf = new GLTFLoader().setDRACOLoader(draco);
   const imageLoader = new THREE.TextureLoader();
-  const [scan, sideScan, coffer, paintedBeam, redLacquer, stoneFloor, carvedAltar, redRoof] = await Promise.all([
+  const [scan, coffer, paintedBeam, redLacquer, stoneFloor, carvedAltar, redRoof, sanctumCraft, giltLeaf, altarStone, chasedDetail, centralRobe, aureoleArt] = await Promise.all([
     gltf.loadAsync(new URL('./assets/lingyin/buddha-clay-scan.glb', document.baseURI).href),
-    gltf.loadAsync(new URL('./assets/lingyin/buddha-clay-scan-lod.glb', document.baseURI).href),
     imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/dragon-coffer.webp', document.baseURI).href),
     imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/painted-beam.webp', document.baseURI).href),
     imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/worn-red-lacquer.webp', document.baseURI).href),
     imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/aged-stone-floor.webp', document.baseURI).href),
     imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/carved-altar.webp', document.baseURI).href),
     imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/red-ceramic-roof.webp', document.baseURI).href),
+    imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/sanctum-craft.webp', document.baseURI).href),
+    imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/gilt-leaf-finish.webp', document.baseURI).href),
+    imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/altar-veined-stone.webp', document.baseURI).href),
+    imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/three-buddha-incisions.webp', document.baseURI).href),
+    imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/central-robe-normal.png?v=seated-folds-1', document.baseURI).href),
+    imageLoader.loadAsync(new URL('./assets/lingyin/hall-preview/aureole-scrollwork.webp', document.baseURI).href),
   ]);
   draco.dispose();
-  for (const texture of [coffer, paintedBeam, redLacquer, stoneFloor, carvedAltar, redRoof]) {
+  aureoleArt.colorSpace=THREE.SRGBColorSpace;aureoleArt.anisotropy=8;
+  centralRobe.channel=1;centralRobe.anisotropy=8;
+  giltLeaf.wrapS=giltLeaf.wrapT=THREE.RepeatWrapping;
+  giltLeaf.anisotropy=8;
+  for (const texture of [altarStone,coffer, paintedBeam, redLacquer, stoneFloor, carvedAltar, redRoof, sanctumCraft]) {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;
   }
@@ -126,8 +135,7 @@ async function load() {
     studyHallEave: 11, studyFacade: true });
   scene.add(temple.group);
   const study = createMainHallInterior(temple, {
-    coffer, paintedBeam, redLacquer, stoneFloor, carvedAltar, redRoof,
-    buddhaScan: scan.scene, buddhaSideLod: sideScan.scene,
+    coffer, paintedBeam, redLacquer, stoneFloor, carvedAltar, redRoof, sanctumCraft, giltLeaf, altarStone, chasedDetail, centralRobe, aureoleArt,
   });
   temple.group.add(study);
   let original: THREE.Group | null = null;

@@ -59,7 +59,14 @@ export function makeKn57SourceMaterial(part, maps) {
         reflectedLight.indirectSpecular += getIBLRadiance(geometryViewDir, normal, .08) * sourceEnvTint * envFr * (sourceEnvMask ? sourceAlpha : 1.0);
       #endif
     `);
+    if(maps.maskMap) {
+      shader.uniforms.sourcePackedMasks={value:maps.maskMap};
+      shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D sourcePackedMasks;')
+        .replace('texture2D(normalMap, vNormalMapUv).a','texture2D(sourcePackedMasks, vNormalMapUv).g');
+      if(part.sourceSelfIllum)shader.fragmentShader=shader.fragmentShader.replace('#include <opaque_fragment>',
+        'outgoingLight = mix(outgoingLight, diffuseColor.rgb, texture2D(sourcePackedMasks, vMapUv).r);\n#include <opaque_fragment>');
+    }
   };
-  mat.customProgramCacheKey=()=> 'kn57-source-phong-v1';
+  mat.customProgramCacheKey=()=> maps.maskMap ? `source-phong-v2-${!!part.sourceSelfIllum}` : 'kn57-source-phong-v1';
   return mat;
 }

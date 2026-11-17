@@ -11,7 +11,7 @@ function hull(points:Point[]) {
   return [...lower.slice(0,-1),...upper.slice(0,-1)];
 }
 
-/** Load-time CPU envelopes from the existing medium scan, never the 148k-face
+/** Load-time CPU envelopes from the authored medium LOD, never the detailed
  * near statue in per-frame collision. Bands preserve the seated silhouette
  * instead of turning the whole altar into one tall rectangular air wall. */
 export function mainHallStatueSolids(world:THREE.Group) {

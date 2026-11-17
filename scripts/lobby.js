@@ -38,8 +38,11 @@ const KEYBINDS = [
   { keys: ["3"], label: "切换到凤凰斧" },
   { keys: ["4"], label: "循环切换手雷 / 闪光弹 / 烟雾弹" },
   { keys: ["Q"], label: "切回上一把武器（与当前武器往返切换）" },
+  { keys: ["Z"], label: "特殊技：战术跃进（双充能）" },
+  { keys: ["X"], label: "特殊技：部署折叠掩体" },
+  { keys: ["C"], label: "绝招：超限状态" },
   { keys: ["Esc"], label: "游戏菜单：暂停 / 结束对局 / 刷新位置" },
-  { keys: ["B"], label: "背包：悬停编号预览，点击或 1–8 确认并关闭" },
+  { keys: ["B"], label: "背包：悬停编号预览，点击或 1–9 确认并关闭" },
   { keys: ["G"], label: "丢弃当前武器" },
   { keys: ["Tab"], label: "按住查看战绩" },
   { keys: ["Enter"], label: "聊天（再按一次发送）" },
@@ -47,6 +50,8 @@ const KEYBINDS = [
   { keys: ["N"], label: "训练模式：在准心位置放置静止 NPC" },
   { keys: ["Delete"], label: "训练模式：删除瞄准 NPC；Shift + Delete 清空" },
   { keys: ["F8"], label: "训练模式：清空伤害统计" },
+  { keys: ["F"], label: "浏览模式：自由飞行，再按返回起飞处" },
+  { keys: ["Space", "Ctrl", "Shift"], label: "飞行时上升、下降、加速" },
   { keys: ["Esc"], label: "释放鼠标，回到大厅" },
 ];
 
@@ -79,6 +84,9 @@ export class Lobby {
     this._startBtn = opts.startBtn || null;
     this._getData = typeof opts.getData === "function" ? opts.getData : null;
     this._onUiSound = typeof opts.onUiSound === "function" ? opts.onUiSound : null;
+    this._onEquip = typeof opts.onEquip === "function" ? opts.onEquip : null;
+    this._storagePack = 0;
+    this._storageSlot = 'primary';
 
     this._tab = "play";
     this._panes = new Map(); // data-pane -> element
@@ -163,10 +171,13 @@ export class Lobby {
   setMatch(match) {
     if (!this._ok || !match) return;
     const chip = this._root.querySelector("#lobbyMatchChip");
-    if (!chip) return;
-    const n = match.enemies;
-    chip.textContent = `${n} 名电脑 · ${match.difficulty || "普通"}`;
-    this._renderRoom((this._getData() || {}).room);
+    if (chip) {
+      const n = match.enemies;
+      chip.textContent = match.browsing ? "单人参观 · 不限时" : `${n} 名电脑 · ${match.difficulty || "普通"}`;
+    }
+    const data = this._getData() || {};
+    this._renderRoom(data.room);
+    this._renderClassicLoadout(data.storage);
   }
 
   /** 对局中按 Esc 回到大厅时，主按钮要改成「返回战场」——
@@ -178,6 +189,8 @@ export class Lobby {
     if (want === this._resume) return;
     this._resume = want;
     this._startBtn.textContent = want ? "返回战场" : "开始游戏";
+    const status = this._root?.querySelector("#classicRoomStatus");
+    if (status) status.textContent = want ? "对局中" : "等待开始";
   }
 
   /** 供 __tactical 读口用（`.lobbyState()`）。 */
@@ -199,7 +212,9 @@ export class Lobby {
     if (!pane) return;
     // 房间骨架和对局设置 id 留在 HTML；成员行从游戏数据即时生成。
     if (tab === "play") {
-      this._renderRoom((this._getData() || {}).room);
+      const data = this._getData() || {};
+      this._renderRoom(data.room);
+      this._renderClassicLoadout(data.storage);
       this._rendered.play = true;
       return;
     }
@@ -207,7 +222,7 @@ export class Lobby {
     pane.replaceChildren();
     if (tab === "manual") pane.append(this._renderManual());
     else if (tab === "arsenal") pane.append(this._renderArsenal(data.arsenal));
-    else if (tab === "storage") pane.append(this._renderStorage(data.storage));
+    else if (tab === "storage") pane.append(this._renderInventory(data.inventory));
     this._rendered[tab] = true;
   }
 
@@ -228,13 +243,55 @@ export class Lobby {
         const row = el("div", member ? "room-member occupied" : "room-member empty");
         if (member) {
           const rank = el("span", "room-rank", member.role === "房主" ? "★" : "»");
-          rank.setAttribute("aria-hidden", "true");
+          if (member.rank?.icon) {
+            rank.classList.add("has-military-rank");
+            rank.textContent = "";
+            rank.dataset.rankId = member.rank.id;
+            rank.setAttribute("aria-label", `军衔：${member.rank.name}`);
+            rank.title = `军衔：${member.rank.name}`;
+            const icon = document.createElement("img");
+            icon.src = member.rank.icon;
+            icon.alt = "";
+            rank.append(icon);
+          } else rank.setAttribute("aria-hidden", "true");
           row.append(rank, el("span", "room-member-name", member.name), el("span", "room-member-role", member.role), el("span", "room-member-status", member.status));
           if (member.role === "房主") row.classList.add("is-host");
         } else row.setAttribute("aria-label", "空位");
         list.append(row);
       }
     }
+    const enemies = Array.isArray(room?.enemies) ? room.enemies : [];
+    const players = Array.isArray(room?.players) ? room.players : [];
+    const population = `${Math.min(16, enemies.length + players.length)} / 16`;
+    for (const selector of ["#classicRoomPopulation", "#classicRoomListPopulation"]) {
+      const node = this._root.querySelector(selector);
+      if (node) node.textContent = population;
+    }
+    const host = players.find(member => member.role === "房主") || players[0];
+    const hostNode = this._root.querySelector("#classicRoomHost");
+    if (hostNode && host?.name) hostNode.textContent = host.name;
+    const status = this._root.querySelector("#classicRoomStatus");
+    if (status) {
+      const active = [...enemies, ...players].some(member => member.status === "对局中");
+      status.textContent = active || this._resume ? "对局中" : "等待开始";
+    }
+  }
+
+  _renderClassicLoadout(rows) {
+    if (!Array.isArray(rows)) return;
+    const bags = rows.filter(row => /^背包\s+\d+$/.test(row.slot || ""));
+    const current = bags.find(row => row.cur) || bags[0];
+    const name = this._root.querySelector("#classicLoadoutName");
+    const skin = this._root.querySelector("#classicLoadoutSkin");
+    const tabs = this._root.querySelector("#classicLoadoutTabs");
+    if (name) name.textContent = current?.gun || "未配置主武器";
+    if (skin) skin.textContent = current ? `${current.skin || "原厂"} · 当前配装` : "当前配装";
+    if (!tabs) return;
+    tabs.replaceChildren();
+    bags.forEach((row, index) => {
+      const tab = el("span", row.cur ? "on" : "", String(index + 1));
+      tabs.append(tab);
+    });
   }
 
   _renderManual() {
@@ -335,6 +392,52 @@ export class Lobby {
     }
     frag.append(cards);
     return frag;
+  }
+
+  _renderInventory(inventory) {
+    const frag=document.createDocumentFragment();
+    if (!inventory?.packs?.length) return frag;
+    this._storagePack=Math.min(this._storagePack,inventory.packs.length-1);
+    frag.append(this._head('个人仓库',inventory.editable ? '选择背包与装备槽，再从右侧武器中选择装备。配置会保存在本机。' : '对局进行中可查看配装；返回大厅结束对局后可修改。'));
+    const root=el('div','inventory-layout'),left=el('section','inventory-pack'),right=el('section','inventory-collection');
+    const packHeader=el('div','inventory-section-title','背包配置');left.append(packHeader);
+    const tabs=el('div','inventory-pack-tabs');
+    inventory.packs.forEach((pack,i)=>{
+      const b=el('button',i===this._storagePack?'inventory-pack-tab active':'inventory-pack-tab',String(i+1));
+      b.type='button';b.setAttribute('aria-label',`背包 ${i+1}`);b.setAttribute('aria-pressed',String(i===this._storagePack));
+      b.onclick=()=>{this._storagePack=i;this._renderPane('storage');};tabs.append(b);
+    });left.append(tabs);
+    const labels={primary:'主武器',secondary:'副武器',melee:'近身武器'};
+    const picture=(item,alt='')=>{const box=el('div','inventory-weapon-image');if(item.image){const img=document.createElement('img');img.src=item.image;img.alt=alt;box.append(img);}return box;};
+    for(const slot of Object.keys(labels)) {
+      const item=inventory.packs[this._storagePack][slot],button=el('button',slot===this._storageSlot?'inventory-slot active':'inventory-slot');
+      button.type='button';button.dataset.slot=slot;button.setAttribute('aria-pressed',String(slot===this._storageSlot));
+      const info=el('span','inventory-slot-info');info.append(el('small',null,labels[slot]),el('strong',null,item.name));
+      button.append(picture(item),info);button.onclick=()=>{this._storageSlot=slot;this._renderPane('storage');};left.append(button);
+    }
+    const selected=inventory.packs[this._storagePack][this._storageSlot];
+    const collectionHead=el('div','inventory-collection-head');
+    collectionHead.append(el('div','inventory-section-title',labels[this._storageSlot]+' · 可用武器'));
+    collectionHead.append(el('small',null,`已收录 ${(inventory.choices[this._storageSlot] || []).length} 件`));
+    right.append(collectionHead);
+    const focus=el('div','inventory-focus-stage');
+    const focusVisual=el('div','inventory-focus-visual');
+    focusVisual.append(picture(selected,selected.name));
+    const focusCopy=el('div','inventory-focus-copy');
+    focusCopy.append(el('small',null,`CURRENT LOADOUT · ${labels[this._storageSlot]}`));
+    focusCopy.append(el('strong',null,selected.name));
+    focusCopy.append(el('span',null,`背包 ${this._storagePack+1} · 当前装备`));
+    focus.append(focusVisual,focusCopy);right.append(focus);
+    const grid=el('div','inventory-grid');
+    for(const item of inventory.choices[this._storageSlot] || []) {
+      const equipped=item.id===selected.id&&item.skin===selected.skin;
+      const b=el('button',equipped?'inventory-item active':'inventory-item');b.type='button';
+      b.dataset.weapon=item.id;b.dataset.skin=item.skin;b.disabled=!inventory.editable;
+      b.setAttribute('aria-pressed',String(equipped));b.append(picture(item),el('strong',null,item.name),el('small',null,equipped?'已装备':'装备到背包 '+(this._storagePack+1)));
+      b.onclick=()=>{if(this._onEquip?.(this._storagePack,this._storageSlot,item.id,item.skin)){this._onUiSound?.('switch');this._renderPane('storage');}};
+      grid.append(b);
+    }
+    right.append(grid);root.append(left,right);frag.append(root);return frag;
   }
 
   /** 房间日志里的系统说明，保留 lobbyTicker 的既有接线。 */

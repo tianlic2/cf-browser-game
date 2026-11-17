@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { box, cyl, merge, projectedTempleUV } from './geom';
+import { porchBeamPainting, porchBrackets } from './main_hall_brackets';
+import { inlaidPaving, sanctumJoinery } from './main_hall_sanctum';
 import { WORLD } from './heightfield';
 import { woodMaterial, dougongMaterial } from './materials';
 import { bakeSurfaceFinish } from './surface_finish';
 import type { Temple } from './temple';
-import { MAIN_HALL, MAIN_HALL_SCALE } from '../../../scripts/lingyin_main_hall.js';
-import { distantScan,configureProjectedLOD } from './distant_geometry';
-import { MAIN_INTERIOR_COLUMNS, MAIN_COLUMN_PARTS, MAIN_CENSER, MAIN_CENSER_PROFILE,MAIN_HALL_FIXTURES } from '../../../scripts/lingyin_columns.js';
+import { MAIN_HALL, MAIN_HALL_FLOOR_Y, MAIN_HALL_RAISE, MAIN_HALL_SCALE, MAIN_PORTAL, mainPortalTimbers } from '../../../scripts/lingyin_main_hall.js';
+import { flameAureole } from './flame_aureole';
+import { sculptedTempleBuddha } from './buddha_sculpture';
+import { hallPerimeterColumns, MAIN_INTERIOR_COLUMNS, MAIN_COLUMN_PARTS, MAIN_CENSER, MAIN_CENSER_PROFILE,OFFERING_TABLE,MAIN_SHRINE,MAIN_HALL_FIXTURES } from '../../../scripts/lingyin_columns.js';
 
 export type MainHallStudyAssets = {
   coffer: THREE.Texture;
@@ -15,8 +18,12 @@ export type MainHallStudyAssets = {
   stoneFloor: THREE.Texture;
   carvedAltar: THREE.Texture;
   redRoof: THREE.Texture;
-  buddhaScan: THREE.Object3D;
-  buddhaSideLod: THREE.Object3D;
+  sanctumCraft: THREE.Texture;
+  giltLeaf: THREE.Texture;
+  chasedDetail: THREE.Texture;
+  centralRobe: THREE.Texture;
+  aureoleArt: THREE.Texture;
+  altarStone: THREE.Texture;
 };
 
 // The preview and the FPS map share one authored hall so the reviewed
@@ -25,10 +32,10 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   const group = new THREE.Group();
   group.name = 'lingyin-main-hall-interior';
   const cx = WORLD.temple.x, cz = WORLD.temple.z;
-  const floor = WORLD.platform.y + 1.35;
+  const floor = WORLD.platform.y + MAIN_HALL_FLOOR_Y;
   // Preview-only taller eave: the original 5 m interior compressed the
   // columns, windows and three-figure altar into one low horizontal band.
-  const ceiling = WORLD.platform.y + 9.72;
+  const ceiling = WORLD.platform.y + 9.72 + MAIN_HALL_RAISE;
   // The shell retains metre-sized wall insets. Compensate before the layout
   // transform so the new floor and soffit still meet its inner perimeter.
   const roomW = (MAIN_HALL.w-3.25)/MAIN_HALL_SCALE.x;
@@ -37,7 +44,7 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   // The facade is part of the hall replacement. The original hall's
   // lower blank wall and unpainted eaves made the correctly modeled roof read
   // unlike the supplied two-storey reference.
-  const eave = WORLD.platform.y + 9.9;
+  const eave = WORLD.platform.y + 9.9 + MAIN_HALL_RAISE;
 
   function addFacade() {
     const roof = temple.materials.mainRoof;
@@ -46,7 +53,7 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
       roof.normalMap = null;
       roof.bumpMap = assets.redRoof;
       roof.bumpScale = .035;
-      roof.color.set('#f3dfd4');
+      roof.color.set('#c5a89f');
       roof.roughness = .88;
       roof.needsUpdate = true;
     }
@@ -63,10 +70,7 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
       add('lacquer', .36, 2.56, .32, x, upperY, 7.69);
       add('gilt', .47, .07, .37, x, eave + .29, 7.69);
     }
-    const fasciaArt = assets.paintedBeam.clone();
-    fasciaArt.wrapS = THREE.RepeatWrapping;
-    fasciaArt.repeat.set(9, 1);
-    fasciaArt.needsUpdate = true;
+    const fasciaArt = porchBeamPainting(assets.paintedBeam);
     const painted = new THREE.MeshStandardMaterial({
       name: 'hall-exterior-blue-gold-caihua', map: fasciaArt,
       roughness: .78, metalness: .02, side: THREE.DoubleSide,
@@ -81,33 +85,128 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
       add('gilt', width + .12, .035, .17, 0, y - height / 2 - .04, z - .09);
       add('gilt', width + .12, .035, .17, 0, y + height / 2 + .04, z - .09);
       const face=new THREE.PlaneGeometry(width,height);
+      const uv=face.getAttribute('uv');
+      for(let j=0;j<uv.count;j++)uv.setX(j,uv.getX(j)*Math.round(width/3.1));
       face.translate(cx,y,cz+z);paintedFaces.push(face);
     }
-    const paintedEaves=new THREE.Mesh(merge(paintedFaces),painted);
-    paintedEaves.name='hall-exterior-painted-eaves';group.add(paintedEaves);
-    for (const x of [-9.2, 9.2]) {
-      const medallion = new THREE.Mesh(new THREE.CircleGeometry(1.28, 32),
-        new THREE.MeshStandardMaterial({color:'#244448', roughness:.82,
-          metalness:.06, side:THREE.DoubleSide}));
-      medallion.name = 'hall-exterior-round-window';
-      medallion.position.set(cx + x, floor + 3.95, cz + 7.47);
-      group.add(medallion);
-      const rim = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.34, 48),
-        new THREE.MeshStandardMaterial({color:'#ae8542', roughness:.58,
-          metalness:.4, side:THREE.DoubleSide}));
-      rim.position.set(cx + x, floor + 3.95, cz + 7.49);
-      group.add(rim);
+    const {x:sx,z:sz}=MAIN_HALL_SCALE;
+    const plasterZ=(MAIN_HALL.d/2-1.35+.15)/sz;
+    const frameZ=plasterZ+.064;
+    // A deep lower frieze spans the column line; each bay has its own recessed
+    // painted field and each capital carries the next tier on projecting arms.
+    const columns=hallPerimeterColumns(MAIN_HALL).filter(c=>c.z>0 && c.z===MAIN_HALL.d/2-.9);
+    const beamZ=(MAIN_HALL.d/2-.9)/sz;
+    const beamY=eave-1.33;
+    add('darkWood',MAIN_HALL.w/sx,.94,.63,0,beamY,beamZ);
+    const outerZ=9.58*sz;
+    const brackets=porchBrackets(columns.map(c=>c.x),beamZ*sz,outerZ,fasciaArt);
+    brackets.scale.set(1/sx,1,1/sz);
+    brackets.position.set(cx,beamY,cz+beamZ);
+    group.add(brackets);
+    for(let i=0;i<columns.length;i++){
+      const x=columns[i].x/sx;
+      if(i+1===columns.length)continue;
+      const span=(columns[i+1].x-columns[i].x)/sx, mid=x+span/2;
+      const face=new THREE.PlaneGeometry(span-.21,.69);
+      face.translate(cx+mid,beamY,cz+beamZ+.325);paintedFaces.push(face);
+      // The same bay also has painted inner and lower faces, visible when
+      // walking below the beam. Its edge beads remain solid timber.
+      const back=new THREE.PlaneGeometry(span-.21,.69);
+      back.rotateY(Math.PI);back.translate(cx+mid,beamY,cz+beamZ-.319);
+      const underside=new THREE.PlaneGeometry(span-.14,.56);
+      underside.rotateX(Math.PI/2);underside.translate(cx+mid,beamY-.473,cz+beamZ);
+      paintedFaces.push(back,underside);
+      const soffit=new THREE.PlaneGeometry(span-.05,.46);
+      soffit.rotateX(Math.PI/2);soffit.translate(cx+mid,eave-.929,cz+9.52);
+      add('darkWood',span,.16,.49,mid,eave-.845,9.52);
+      paintedFaces.push(soffit);
+      for(const dy of [-.395,.395])add('teal',span,.075,.075,mid,beamY+dy,beamZ+.34);
+      add('gilt',.075,.74,.07,x+.09,beamY,beamZ+.34);
     }
-    for (const x of [-5.75, 5.75]) {
-      add('darkWood', 3.65, 5.25, .085, x, floor + 3.05, 7.51);
-      for (const dx of [-1.87, 1.87])
-        add('lacquer', .16, 5.48, .12, x + dx, floor + 3.05, 7.59);
-      for (const dy of [-2.7, 2.7])
-        add('lacquer', 3.95, .16, .12, x, floor + 3.05 + dy, 7.59);
-      for (const dx of [-1.15, -.58, 0, .58, 1.15])
-        add('teal', .055, 5.1, .09, x + dx, floor + 3.05, 7.61);
-      for (const dy of [-1.8, -.9, 0, .9, 1.8])
-        add('teal', 3.55, .055, .09, x, floor + 3.05 + dy, 7.61);
+    // Carry the painted fascia around the corners, visible on oblique approaches.
+    for(const side of [-1,1]){
+      const face=new THREE.PlaneGeometry(25.4/sz,.70);
+      const uv=face.getAttribute('uv');
+      for(let j=0;j<uv.count;j++)uv.setX(j,uv.getX(j)*7);
+      face.rotateY(side*Math.PI/2);
+      const x=side*(MAIN_HALL.w/2+.38)/sx;
+      face.translate(cx+x,eave-.48,cz);paintedFaces.push(face);
+      add('teal',.14,.82,25.4/sz,x-side*.085,eave-.48,0);
+    }
+    const paintedEaves=new THREE.Mesh(merge(paintedFaces),painted);
+    paintedEaves.name='hall-exterior-painted-eaves';paintedEaves.receiveShadow=true;group.add(paintedEaves);
+
+    // Backed lattice in circular openings, forward of the lime coat. Shorten
+    // every member to its chord so the ends die into the circular wood rebate.
+    for(const x of [-9.2,9.2]){
+      const y=floor+3.18, z=plasterZ+.037;
+      const disk=new THREE.Mesh(new THREE.CircleGeometry(1.16,48),darkWood);
+      disk.name='hall-exterior-round-window';disk.position.set(cx+x,y,cz+z);group.add(disk);
+      const rim=new THREE.Mesh(new THREE.RingGeometry(1.12,1.25,48),gilt);
+      rim.position.set(cx+x,y,cz+z+.066);group.add(rim);
+      for(const d of [-.81,-.54,-.27,0,.27,.54,.81]){
+        const chord=2*Math.sqrt(1.13**2-d**2);
+        add('teal',.042, chord,.044,x+d/sx,y,z+.041);
+        add('teal',chord/sx,.045,.042,x,y+d,z+.032);
+      }
+    }
+
+    // Work in physical metres so both the reveals and inward-open leaves
+    // meet the collision surfaces after the interior's nonuniform expansion.
+    const timber=(role:Role,w:number,h:number,d:number,x:number,y:number,z:number)=>
+      add(role,w/sx,h,d/sz,x/sx,floor+y,z/sz);
+    for(const p of mainPortalTimbers())timber(p.role==='lacquer'?'portalWood':p.role,p.w,p.h,p.d,p.x,p.y,p.z);
+    const {halfClear,clearHeight,wallZ,leafDepth}=MAIN_PORTAL;
+    timber('gilt',2*halfClear+.84,.044,.674,0,clearHeight+.13,wallZ);
+    // Back-to-back stepped fretwork reads from both the stairs and the nave.
+    for(const side of [-1,1]){
+      for(let i=0;i<6;i++){
+        const cell=halfClear/6,x=side*(i+.5)*cell,y=clearHeight+.795;
+        timber('teal',.055,.81,.10,x,y,wallZ);
+        timber('teal',cell-.055,.064,.10,x+side*cell/2,y+.14,wallZ);
+        timber('portalWood',.062,.29,.12,x+side*cell*.70,y-.005,wallZ);
+        timber('teal',cell*.31,.057,.11,x+side*cell*.55,y-.15,wallZ);
+      }
+      // Raised fielded panels, perimeter nails and a bronze ring on each
+      // open door. Details face the aisle and stay against the solid leaf.
+      const x=side*halfClear,midZ=wallZ-.08-leafDepth/2;
+      for(const face of [-1,1]){
+        const fx=x+side*(face===1?MAIN_PORTAL.leafThickness+.022:-.022);
+        for(const y of [.25,2.08,4.95,clearHeight-.22])
+          timber('darkWood',.045,.14,leafDepth-.14,fx,y,midZ);
+        for(const dz of [-1.62,1.62])
+          timber('darkWood',.046,clearHeight-.20,.13,fx,clearHeight/2,midZ+dz);
+        for(let row=0;row<3;row++)for(let col=0;col<5;col++){
+          const stud=new THREE.SphereGeometry(.058,10,7).scale(.56/sx,1,1/sz);
+          stud.translate(cx+fx/sx,floor+2.50+row*.80,cz+(midZ+(col-2)*.62)/sz);
+          pooled.bronze.push(stud);
+        }
+      }
+      const pullZ=wallZ-leafDepth+.47;
+      timber('bronze',.048,.32,.24,x-side*.044,1.65,pullZ);
+      const ring=new THREE.TorusGeometry(.108,.022,8,24).rotateY(Math.PI/2).scale(1/sx,1,1/sz);
+      ring.translate(cx+(x-side*.085)/sx,floor+1.54,cz+pullZ/sz);pooled.bronze.push(ring);
+    }
+    // Four leaves per closed flank. Their fielded skirts are solid timber;
+    // only the upper portions carry lattice. The central entrance stays open.
+    for(const side of [-1,1]){
+      const bayX=side*MAIN_PORTAL.flankX/sx, leafW=.96;
+      for(let n=0;n<4;n++){
+        const x=bayX+(n-1.5)*leafW;
+        add('darkWood',leafW-.012,5.04,.10,x,floor+2.54,frameZ);
+        for(const dx of [-.445,.445])
+          add('lacquer',.072,5.04,.09,x+dx,floor+2.54,frameZ+.063);
+        for(const h of [.12,1.48,1.98,4.96])
+          add('lacquer',leafW-.11,.14,.085,x,floor+h,frameZ+.066);
+        add('lacquer',.66,1.08,.065,x,floor+.81,frameZ+.057);
+        add('lacquer',.67,.28,.063,x,floor+1.73,frameZ+.055);
+        for(const dx of [-.28,-.14,0,.14,.28])
+          add('lacquer',.035,2.83,.04,x+dx,floor+3.48,frameZ+.076);
+        for(let j=0;j<12;j++)
+          add('lacquer',.80,.033,.04,x,floor+2.15+j*.236,frameZ+.062);
+      }
+      for(const dx of [-2.01,2.01])add('lacquer',.17,5.30,.18,bayX+dx,floor+2.65,frameZ+.016);
+      add('lacquer',4.18,.20,.19,bayX,floor+5.24,frameZ+.016);
     }
   }
 
@@ -127,10 +226,31 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     name: 'hall-cast-bronze', color: '#77603d', metalness: .57,
     roughness: .48,
   });
-  const materials = { lacquer, darkWood, teal, gilt, bronze };
+  // A large door reads as intact lacquer. Modulate the old paint only lightly;
+  // its bare patches are appropriate at pillar scale but dwarf a door fitting.
+  const portalWood=new THREE.MeshStandardMaterial({name:'hall-portal-cinnabar',map:assets.redLacquer,
+    color:0xffffff,roughness:.59,metalness:.045});
+  portalWood.onBeforeCompile=shader=>{
+    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+      float woodValue=dot(diffuseColor.rgb,vec3(.27,.62,.11));
+      diffuseColor.rgb=vec3(.235,.034,.017)*(.80+.46*sqrt(clamp(woodValue,0.,1.)));
+    `);
+  };
+  portalWood.customProgramCacheKey=()=>'hall-portal-painted-timber';
+  const altarTimber=darkWood.clone();
+  altarTimber.name='hall-rubbed-altar-hardwood';altarTimber.color.setHex(0xe1c0a5);
+  altarTimber.roughness=.51;
+  altarTimber.onBeforeCompile=shader=>{
+    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',
+      '#include <map_fragment>\ndiffuseColor.rgb=vec3(.060,.023,.011)+diffuseColor.rgb*.76;');
+  };
+  altarTimber.customProgramCacheKey=()=>'hall-altar-waxed-hardwood';
+  const altarStone=new THREE.MeshStandardMaterial({name:'hall-honed-altar-limestone',
+    map:assets.altarStone,color:0xe1d6bd,roughness:.77});
+  const materials = { lacquer, darkWood, teal, gilt, bronze, portalWood, altarTimber, altarStone };
   type Role = keyof typeof materials;
   const pooled: Record<Role, THREE.BufferGeometry[]> = {
-    lacquer: [], darkWood: [], teal: [], gilt: [], bronze: [],
+    lacquer: [], darkWood: [], teal: [], gilt: [], bronze: [], portalWood: [], altarTimber: [], altarStone: [],
   };
   const add = (role: Role, w: number, h: number, d: number,
     x: number, y: number, z: number) =>
@@ -140,22 +260,8 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
     pooled[role].push(cyl(rt, rb, h, sides, cx + x, y, cz + z));
   addFacade();
 
-  // Polished, irregular gray stone conceals the existing pale floor tiles.
-  const floorMat = (temple.materials.stone as THREE.MeshStandardMaterial).clone();
-  floorMat.name = 'hall-weathered-stone-floor';
-  // The shared stone shell has baked vertex colours, but this photographed
-  // plane does not. Do not inherit a colour attribute that it cannot supply.
+  const floorMat=inlaidPaving(assets.altarStone,roomW-.08,roomD-.08);
   floorMat.vertexColors=false;
-  floorMat.color.set('#e3dfd6');
-  floorMat.roughness = .9;
-  floorMat.map = assets.stoneFloor;
-  floorMat.map.wrapS = floorMat.map.wrapT = THREE.RepeatWrapping;
-  floorMat.map.repeat.set(7*MAIN_HALL_SCALE.x,4*MAIN_HALL_SCALE.z);
-  floorMat.map.needsUpdate = true;
-  // The previous normal/roughness scans belonged to different stone. Use
-  // this floor's own relief, sharing its albedo rather than cloning a GPU map.
-  floorMat.normalMap=null;floorMat.roughnessMap=null;
-  floorMat.bumpMap=assets.stoneFloor;floorMat.bumpScale=.024;
   const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(roomW - .08, roomD - .08), floorMat);
   floorMesh.name = 'hall-stone-floor';
   floorMesh.rotation.x = -Math.PI / 2;
@@ -163,53 +269,13 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   floorMesh.receiveShadow = true;
   group.add(floorMesh);
 
-  // A coffered roof soffit, the central dragon panel, and painted beam faces.
-  add('darkWood', roomW - .08, .16, roomD - .08, 0, ceiling, 0);
-  for (const z of [-5.55, -2.0, 1.55, 5.35]) {
-    add('teal', roomW - .2, .72, .54, 0, ceiling - .38, z);
-    add('gilt', roomW - .2, .045, .62, 0, ceiling - .76, z);
-  }
-  for (const x of [-10.0, -7.7, -3.8, 3.8, 7.7, 10.0])
-    add('teal', .54, .55, roomD - .2, x, ceiling - .28, 0);
-  for (const x of [-10.7, 10.7]) {
-    add('gilt', .035, .06, roomD - .2, x, ceiling - .58, 0);
-  }
-  const beamPaint = assets.paintedBeam.clone();
-  beamPaint.wrapS = THREE.RepeatWrapping;
-  beamPaint.repeat.set(8, 1);
-  beamPaint.needsUpdate = true;
-  const beamMat = new THREE.MeshStandardMaterial({
-    name: 'hall-painted-beam-art', map: beamPaint,
-    roughness: .74, metalness: .03, side: THREE.DoubleSide,
-  });
-  const beamFaces: THREE.BufferGeometry[] = [];
-  for (const z of [-5.55, -2.0, 1.55, 5.35]) {
-    const g = new THREE.PlaneGeometry(roomW - .25, .61);
-    g.translate(cx, ceiling - .37, cz + z + .286);
-    beamFaces.push(g);
-  }
-  const beamMesh = new THREE.Mesh(merge(beamFaces), beamMat);
-  beamMesh.name = 'hall-painted-crossbeams';
-  group.add(beamMesh);
-  const cofferMat = new THREE.MeshStandardMaterial({
-    name: 'hall-dragon-coffer-art', map: assets.coffer, roughness: .76,
-    side: THREE.DoubleSide, emissive: '#45301d', emissiveIntensity: .08,
-  });
-  const coffer = new THREE.Mesh(new THREE.PlaneGeometry(6.75, 6.15), cofferMat);
-  coffer.name = 'hall-central-dragon-coffer';
-  coffer.rotation.x = Math.PI / 2;
-  coffer.position.set(cx, ceiling - .11, cz + .1);
-  group.add(coffer);
-  for (const side of [-1, 1]) {
-    add('gilt', .09, .045, 6.48, side * 3.43, ceiling - .12, .1);
-    add('gilt', 6.95, .045, .09, 0, ceiling - .12, .1 + side * 3.15);
-  }
-
+  add('darkWood',roomW-.08,.16,roomD-.08,0,ceiling+.12,0);
+  group.add(sanctumJoinery(assets.sanctumCraft,assets.coffer,assets.altarStone,cx,cz,floor,ceiling,roomW,roomD));
   // Three pairs of massive lacquered columns. Stone shoes and layered
   // bracket arms visibly transfer the roof load to the shafts.
   for (const [x, z] of MAIN_INTERIOR_COLUMNS) {
     for(const part of MAIN_COLUMN_PARTS)
-      addCyl(part.role,part.rt,part.rb,part.h,x,WORLD.platform.y+part.y,z,part.segments);
+      addCyl(part.role,part.rt,part.rb,part.h,x,WORLD.platform.y+MAIN_HALL_RAISE+part.y,z,part.segments);
     for (let layer = 0; layer < 3; layer++) {
       const y = ceiling - .44 + layer * .16;
       const reach = .85 + layer * .25;
@@ -218,14 +284,6 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
       add('gilt', 2 * reach, .025, .06, x, y - .09, z + .29);
     }
   }
-  // Bracket clusters repeat into the side aisles without new draw calls.
-  for (const x of [-10.1, -5.15, 5.15, 10.1])
-    for (const z of [-5.55, -2.0, 1.55, 5.35]) {
-      add('teal', 1.42, .16, .38, x, ceiling - .82, z);
-      add('teal', .47, .22, .9, x, ceiling - .68, z);
-      add('gilt', 1.32, .035, .04, x, ceiling - .92, z + .22);
-    }
-
   // False translucent paper windows sit just inside the existing side walls.
   // They use emissive fill rather than expensive real transmission.
   const windowMat = new THREE.MeshStandardMaterial({
@@ -260,112 +318,101 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   }
 
   // Deep altar backdrop and stepped timber dais at the actual rear wall.
-  for(const part of MAIN_HALL_FIXTURES)
-    add(part.role,part.w,part.h,part.d,part.x,floor+part.y,part.z);
+  for(const part of MAIN_HALL_FIXTURES){
+    const role=part.name.startsWith('altar-stone-')?'altarStone':
+      part.name.startsWith('altar-')?'altarTimber':part.role;
+    add(role,part.w,part.h,part.d,part.x,floor+part.y,part.z);
+  }
   add('teal', 18.0, .8, .42, 0, ceiling - .65, -6.23);
-  for (const x of [-6.9, -2.3, 2.3, 6.9]) {
-    add('lacquer', .18, 6.95, .13, x, floor + 4.1, -6.48);
-    add('gilt', .035, 6.9, .04, x + .13, floor + 4.1, -6.4);
-  }
-  for (const y of [floor + 5.5, floor + 7.15]) {
-    add('teal', 17.1, .24, .2, 0, y, -6.45);
-    add('gilt', 17.1, .035, .22, 0, y - .13, -6.45);
-  }
-  for (const x of [-8.75, 8.75]) {
-    add('lacquer', .4, 4.8, .36, x, floor + 2.5, -6.35);
-    add('gilt', .07, 4.4, .04, x + (x < 0 ? .23 : -.23), floor + 2.52, -6.12);
-  }
-
-  // The generated image is an original ornamental texture, not a flattened
-  // copy of either user reference. Wood geometry carries the depth.
-  const haloTexture = makeHaloTexture();
-  const haloMat = new THREE.MeshBasicMaterial({
-    name: 'hall-gilt-halos', map: haloTexture, transparent: true,
-    depthWrite: false, side: THREE.DoubleSide,
-  });
-  const distantBuddha=distantScan(assets.buddhaSideLod);
-  for (const x of [-4.6, 0, 4.6]) {
-    const mid = x === 0;
-    const halo = new THREE.Mesh(
-      new THREE.PlaneGeometry(mid ? 4.5 : 3.55, mid ? 4.5 : 3.55), haloMat);
-    halo.name = 'hall-statue-halo';
-    halo.position.set(cx + x, floor + (mid ? 4.05 : 3.56), cz - 6.37);
+  for (const x of [-MAIN_SHRINE.pitch, 0, MAIN_SHRINE.pitch]) {
+    const mid=x===0;
+    const halo=flameAureole(assets.aureoleArt);
+    halo.position.set(cx+x, floor+5.06, cz+MAIN_SHRINE.backZ+.43);
     group.add(halo);
-    const figure = new THREE.LOD();
-    figure.position.set(cx + x, floor + .9, cz - 4.82);
-    figure.addLevel(placeScan(mid ? assets.buddhaScan : assets.buddhaSideLod,
-      gilt, mid ? 1.35 : 1.05, 0, 0, 0), 0);
-    if (mid) {
-      // Preserve the scanned silhouette and gilding outside the hall. Dense
-      // facial detail is useful only close to the altar, not across the court.
-      figure.addLevel(placeScan(assets.buddhaSideLod, gilt, 1.35, 0, 0, 0), 20, .12);
-    }
-    figure.addLevel(placeScan(distantBuddha,gilt,mid?1.35:1.05,0,0,0),40,.12);
-    configureProjectedLOD(figure);
+    const figure = sculptedTempleBuddha(x===0?0:x<0?1:2,assets.giltLeaf,assets.chasedDetail,assets.centralRobe);
+    figure.scale.setScalar(MAIN_SHRINE.scale);
+    figure.position.set(cx+x,floor+MAIN_SHRINE.seatY,cz+MAIN_SHRINE.statueZ);
     figure.name = mid ? 'hall-central-buddha' : 'hall-flanking-buddha';
     group.add(figure);
   }
 
-  // Altar, dense but batched offerings, and a clear red processional route.
-  add('gilt', 13.4, .035, .06, 0, floor + 1.07, -1.3);
-  add('gilt', 13.4, .035, .06, 0, floor + .59, -1.3);
+  const table=OFFERING_TABLE;
+  // Front and end rails meet the four legs beneath an overhanging top.
+  for(const side of [-1,1]){
+    // Curved spandrels join the apron to each front leg without closing the opening.
+    const bracket=new THREE.Shape();
+    bracket.moveTo(0,0);bracket.lineTo(.54,0);bracket.lineTo(.54,-.047);
+    bracket.bezierCurveTo(.43,-.046,.43,-.127,.325,-.12);
+    bracket.bezierCurveTo(.22,-.107,.175,-.218,.12,-.268);
+    bracket.lineTo(0,-.268);bracket.closePath();
+    const cheek=new THREE.ExtrudeGeometry(bracket,{depth:.078,bevelEnabled:true,
+      bevelThickness:.008,bevelSize:.009,bevelSegments:2,curveSegments:10});
+    if(side>0)cheek.rotateY(Math.PI);
+    cheek.translate(cx+side*table.legX,floor+table.top-.188,cz+table.z+table.legZ+(side>0?.039:-.039));
+    pooled.altarTimber.push(cheek);
+    add('altarTimber',.08,.14,2*table.legZ,side*table.legX,floor+table.top-.15,table.z);
+    for(const end of [-1,1]){
+      const x=side*table.legX,z=table.z+end*table.legZ;
+      add('altarTimber',.24,.072,.22,x,floor+.08,z);
+      add('altarTimber',.215,.045,.204,x,floor+table.top-.26,z);
+    }
+  }
+  add('altarTimber',table.w-.06,.036,.041,0,floor+table.top-.065,table.z+table.d/2);
   const carvedArt = assets.carvedAltar.clone();
   carvedArt.wrapS = THREE.RepeatWrapping;
-  carvedArt.repeat.set(5, 1);
+  carvedArt.repeat.set(2, 1);
   carvedArt.needsUpdate = true;
-  const altarFront = new THREE.Mesh(new THREE.PlaneGeometry(13.26, .7),
+  const altarFront = new THREE.Mesh(new THREE.PlaneGeometry(2*table.legX-.20,.14),
     new THREE.MeshStandardMaterial({name:'hall-carved-altar-front', map: carvedArt,
-      roughness:.68, metalness:.04, side:THREE.DoubleSide}));
+      color:0xf1dcc3,bumpMap:carvedArt,bumpScale:.006,roughness:.56,metalness:.025,side:THREE.DoubleSide}));
   altarFront.name='hall-carved-altar-front';
-  altarFront.position.set(cx, floor + .84, cz - 1.31);
+  altarFront.position.set(cx, floor+table.top-.155, cz+table.z+table.legZ+.041);
   group.add(altarFront);
-  for (const x of [-6.3, -3.2, 0, 3.2, 6.3]) {
-    add('gilt', .08, .45, .08, x, floor + .87, -1.15);
+  // Small offering cups share the top of the front table with the censer.
+  for(const x of [-1.74,-.99,.99,1.74]){
+    addCyl('bronze',.095,.13,.054,x,floor+table.top+.027,table.z-.06,20);
+    addCyl('gilt',.075,.051,.091,x,floor+table.top+.0995,table.z-.06,16);
+    addCyl('bronze',.134,.072,.091,x,floor+table.top+.1905,table.z-.06,24);
   }
-  const flames: THREE.BufferGeometry[] = [];
-  for (const x of [-5.7, -4.4, -2.8, -1.4, 1.4, 2.8, 4.4, 5.7]) {
-    addCyl('bronze', .13, .2, .25, x, floor + 1.45, -2.04, 12);
-    addCyl('gilt', .045, .07, .28, x, floor + 1.72, -2.04, 10);
-    const g = new THREE.SphereGeometry(.08, 10, 8);
-    g.scale(.75, 1.7, .75);
-    g.translate(cx + x, floor + 1.93, cz - 2.04);
-    flames.push(g);
+  // A projecting crown and an inset fascia read separately under each knee.
+  for(const x of [-MAIN_SHRINE.pitch,0,MAIN_SHRINE.pitch]){
+    const front=MAIN_SHRINE.statueZ+1.315;
+    add('darkWood',4.66,.052,.072,x,floor+.976,front);
+    add('bronze',4.48,.022,.042,x,floor+.927,front+.006);
+    add('darkWood',4.52,.066,.058,x,floor+.674,front);
   }
-  const flame = new THREE.Mesh(merge(flames), new THREE.MeshBasicMaterial({color:'#ffd185'}));
-  flame.name = 'hall-altar-flames';
-  group.add(flame);
-
-  const carpet = new THREE.Mesh(new THREE.PlaneGeometry(3.65, 11.6),
-    new THREE.MeshStandardMaterial({
-      name: 'hall-woven-carpet', map: makeCarpetTexture(),
-      roughness: .94, metalness: 0,
-    }));
-  carpet.name = 'hall-processional-carpet';
-  carpet.rotation.x = -Math.PI / 2;
-  carpet.position.set(cx, floor + .055, cz + 1.38);
-  group.add(carpet);
   const incense = makeIncenseBurner(bronze, gilt, cx+MAIN_CENSER.x, floor, cz+MAIN_CENSER.z);
   incense.scale.setScalar(MAIN_CENSER.scale);
-  incense.position.set((cx+MAIN_CENSER.x)*(1-MAIN_CENSER.scale),floor*(1-MAIN_CENSER.scale),
+  incense.position.set((cx+MAIN_CENSER.x)*(1-MAIN_CENSER.scale),floor*(1-MAIN_CENSER.scale)+MAIN_CENSER.baseY,
     (cz+MAIN_CENSER.z)*(1-MAIN_CENSER.scale));
   group.add(incense);
 
-  // Keep additional illumination cheap: these small lights do not cast
-  // shadows and are contained in the hall group.
-  const altarLight = new THREE.PointLight(0xffbc70, 13, 16, 2);
-  altarLight.position.set(cx, floor + 3.6, cz - 3.0);
-  group.add(altarLight);
-  for (const side of [-1, 1]) {
-    const light = new THREE.PointLight(0xffe5be, 6, 8, 2);
-    light.position.set(cx + side * 9, floor + 3.2, cz + .2);
-    group.add(light);
+  // The three local fittings wash down the statues. A soft cone keeps
+  // light off the coffer above them and lets the side returns fall away.
+  for(const bay of [-MAIN_SHRINE.pitch,0,MAIN_SHRINE.pitch]){
+    const light=new THREE.SpotLight(bay>0?0xffe7cc:0xffdfb7, bay===0?51:46, 13, .59, .83, 2);
+    light.name='hall-statue-wash';
+    light.position.set(cx+bay-1.42,floor+7.62,cz-2.32);
+    light.target.position.set(cx+bay,floor+4.69,cz+MAIN_SHRINE.statueZ);
+    if(bay===0){
+      light.position.set(cx-1.58,floor+7.68,cz-2.06);
+      light.target.position.set(cx,floor+5.58,cz+MAIN_SHRINE.statueZ);
+      light.angle=.615;light.penumbra=.80;light.intensity=61;
+    }
+    if(bay<0){
+      light.position.set(cx+bay-1.94,floor+7.84,cz-1.96);
+      light.target.position.set(cx+bay,floor+5.58,cz+MAIN_SHRINE.statueZ);
+      light.angle=.65;light.penumbra=.88;light.intensity=82;
+    }
+    group.add(light,light.target);
   }
 
   for (const role of Object.keys(pooled) as Role[]) {
     if (!pooled[role].length) continue;
     const original = merge(pooled[role]);
-    const geo = role === 'lacquer' ? projectedTempleUV(original, 2.4)
-      : role === 'darkWood' || role==='teal' ? projectedTempleUV(original, .9) : original;
+    const geo = role === 'lacquer' || role==='portalWood' ? projectedTempleUV(original, 2.4)
+      : role==='altarStone' ? projectedTempleUV(original,1.36)
+      : role === 'darkWood' || role==='teal' || role==='altarTimber' ? projectedTempleUV(original, .9) : original;
     if(role==='lacquer'||role==='darkWood'||role==='teal') {
       bakeSurfaceFinish(geo,'wood',floor);materials[role].vertexColors=true;
     }
@@ -394,88 +441,6 @@ export function createMainHallInterior(temple: Temple, assets: MainHallStudyAsse
   group.add(layout);
   group.userData.expandedLayout={width:MAIN_HALL.w,depth:MAIN_HALL.d,centerZ:cz,statueProportionsPreserved:true};
   return group;
-}
-
-function placeScan(source: THREE.Object3D, material: THREE.Material, scale: number,
-  x: number, bottom: number, z: number) {
-  const root = source.clone(true);
-  root.rotation.x = Math.PI / 2;
-  root.scale.setScalar(.027 * scale);
-  root.position.set(0, 0, 0);
-  root.traverse(object => {
-    if (object instanceof THREE.Mesh) object.material = material;
-  });
-  root.updateMatrixWorld(true);
-  const bounds = new THREE.Box3().setFromObject(root);
-  root.position.set(
-    x - (bounds.min.x + bounds.max.x) / 2,
-    bottom - bounds.min.y,
-    z - (bounds.min.z + bounds.max.z) / 2,
-  );
-  return root;
-}
-
-function makeHaloTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 512;
-  const ctx = canvas.getContext('2d')!;
-  const c = 256;
-  const ring = (r: number, width: number, color: string) => {
-    ctx.strokeStyle = color; ctx.lineWidth = width;
-    ctx.beginPath(); ctx.arc(c, c, r, 0, Math.PI * 2); ctx.stroke();
-  };
-  ring(218, 14, '#76511e');
-  ring(202, 5, '#edc66c');
-  ring(174, 8, '#9b6c2d');
-  ring(166, 4, '#f4d787');
-  ring(92, 5, '#d5a64e');
-  for (let i = 0; i < 32; i++) {
-    const a = i * Math.PI * 2 / 32;
-    ctx.save(); ctx.translate(c, c); ctx.rotate(a);
-    ctx.fillStyle = i % 2 ? '#a77330' : '#dcad55';
-    ctx.beginPath();
-    ctx.moveTo(0, -178);
-    ctx.quadraticCurveTo(14, -198, 0, -216);
-    ctx.quadraticCurveTo(-14, -198, 0, -178);
-    ctx.fill();
-    ctx.restore();
-  }
-  for (let i = 0; i < 16; i++) {
-    const a = i * Math.PI * 2 / 16;
-    ctx.save(); ctx.translate(c, c); ctx.rotate(a);
-    ctx.fillStyle = '#bd873a';
-    ctx.beginPath(); ctx.ellipse(0, -119, 13, 39, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
-}
-
-function makeCarpetTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 384; canvas.height = 1024;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#6f2520'; ctx.fillRect(0, 0, 384, 1024);
-  for (let i = 0; i < 4800; i++) {
-    const x = (Math.imul(i, 1597334677) >>> 0) % 384;
-    const y = (Math.imul(i, 3812015801) >>> 0) % 1024;
-    ctx.fillStyle = i % 3 ? '#8c332a22' : '#32141322';
-    ctx.fillRect(x, y, 2, 5);
-  }
-  for (const x of [18, 31, 353, 366]) {
-    ctx.fillStyle = '#b48a49'; ctx.fillRect(x, 0, x === 18 || x === 366 ? 3 : 7, 1024);
-  }
-  ctx.strokeStyle = '#aa7c43'; ctx.lineWidth = 3;
-  for (const x of [43, 341]) for (let y = 0; y < 1024; y += 32) {
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + (x < 100 ? 11 : -11), y + 16);
-    ctx.lineTo(x, y + 32); ctx.stroke();
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  return tex;
 }
 
 function makeIncenseBurner(bronze: THREE.Material, gold: THREE.Material,

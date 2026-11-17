@@ -216,9 +216,9 @@
         <div hidden><span id="bpBadge"></span><span id="ammoFill"></span></div>
       </div>
       <div id="skillHud" class="skill-hud" aria-label="玩家技能" hidden>
-        <div class="skill-card ready" data-skill="dash">
+        <div class="skill-card ready" data-skill="flight">
           <kbd>Z</kbd><span class="skill-icon dash-icon" aria-hidden="true"></span>
-          <span class="skill-copy"><b>跃进·超跳</b><small class="skill-value">无冷却</small></span><i></i>
+          <span class="skill-copy"><b>自由飞行</b><small class="skill-value">Z开启 · 无冷却</small></span><i></i>
         </div>
         <div class="skill-card ready" data-skill="cover">
           <kbd>X</kbd><span class="skill-icon cover-icon" aria-hidden="true"></span>
@@ -332,7 +332,7 @@
         <div id="gameMenuSettings" class="game-menu-settings hidden" aria-label="游戏设置">
           <h3>技能功能</h3>
           <button id="skillSettingToggle" class="skill-setting-toggle" type="button" aria-pressed="false">
-            <span><b>玩家技能</b><small>跃进、折叠掩体与天降禁闭笼</small></span><strong>关闭</strong>
+            <span><b>玩家技能</b><small>飞行、折叠掩体与天降禁闭笼</small></span><strong>关闭</strong>
           </button>
           <p>开启后可在支持的单人模式中使用 Z / X / C 技能。</p>
           <h3>准心样式</h3>
@@ -582,6 +582,6 @@
         document.getElementById("bootRetry").hidden = false;
       });
     </script>
-  <script type="module" src="./scripts/main.js?v=public-ordinary-20261117"></script>
+  <script type="module" src="./scripts/main.js?v=skill-flight-20261117"></script>
   </body>
 </html>

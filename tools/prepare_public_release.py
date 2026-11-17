@@ -20,7 +20,7 @@ def files():
         ('audio/weather','**/*')]:
         for p in (ROOT/folder).glob(glob):
             if p.is_file() and publish(p.relative_to(ROOT).as_posix()):result.add(p.relative_to(ROOT).as_posix())
-    for p in ['PUBLIC_RELEASE.md','assets/local/fox_npc/visit-surface.png','assets/map-posters/blacktown.png','.gitattributes','tools/prepare_public_release.py','tools/test_public_release_browser.mjs','tools/test_public_ordinary_browser.mjs']:
+    for p in ['PUBLIC_RELEASE.md','assets/local/fox_npc/visit-surface.png','assets/map-posters/blacktown.png','.gitattributes','tools/prepare_public_release.py','tools/test_public_release_browser.mjs','tools/test_public_ordinary_browser.mjs','tools/test_player_flight_browser.mjs','tools/test_player_skills.mjs']:
         if (ROOT/p).is_file():result.add(p)
     return sorted(result)
 if __name__=='__main__':

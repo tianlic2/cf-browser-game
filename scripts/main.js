@@ -1,3 +1,4 @@
+import { flightMotion } from './player_flight.js';
 import { PUBLIC_CF_WEAPONS } from './public_weapons.js';
 import {updateHeading, updateMagazine, updateVitals, matchNotice} from './match_hud.js';
 // ===== CrossFire FPS - 主游戏（运输船 · 团队竞技 · CF 手感）=====
@@ -61,7 +62,7 @@ import { npcRankForDifficulty } from './npc_ranks.js?v=1';
 import { applyTracerLaunchCorrection, tracerMuzzleKey, tracerMuzzleProfile } from './tracer_muzzle.js?v=1';
 import { WEAPON_TUNING } from './weapon_tuning.js?v=cfv-awp-damage-1';
 import { loadBioZombieView } from './bio_zombie_view.js?v=kukri-hand-material-2';
-import { PlayerSkillSystem, PLAYER_SKILL_RULES } from './player_skills.js?v=7';
+import { PlayerSkillSystem, PLAYER_SKILL_RULES } from './player_skills.js?v=flight-1';
 
 // GitHub Pages is a public redistribution target. Several reviewed weapon and
 // bio-map packages are licensed for this user's local game only and remain
@@ -1613,7 +1614,7 @@ const keys = {};
 const IS_SNEAK = "Sneak";
 const IS_CROUCH = "Crouch";
 const playerSkills = new PlayerSkillSystem(scene, hud);
-const _skillDashVelocity = new THREE.Vector3();
+const _skillFlightVelocity = new THREE.Vector3();
 
 // ---------- 游戏状态 ----------
 let state = "menu";
@@ -5464,7 +5465,7 @@ function fire() {
   }
   const def = activeWeaponDef(currentId);
   // dead 是兜底闸门：死亡视角期间左键、自动连发（走这条）、__tactical.forceFire 全部到此为止
-  if (state !== "playing" || dead || playerSkills.dash.active > 0) return;
+  if (state !== "playing" || dead) return;
   // 收/出枪期间不许开火（CF 同此）。放在守卫之后、actedThisLife 之前 ——
   // 被动画挡下的这一发不该把本回合的背包切换锁掉。出生/复活那次是 kind==="draw"，
   // switchBlocking() 对它返回 false，所以开局第一枪不会被吃掉。
@@ -6058,8 +6059,7 @@ function beginDeath(killer, byEnemy = true) {
   kn57InspectT = null;
   cancelMelee();cancelGrenade();
   cancelAllSkillPreviews();
-  playerSkills.cancelTransient();
-  dashScopeRestore = false; dashScopeWeapon = null;
+  playerSkills.cancelTransient(player);
   hideStreakCallout();
   dead = true;
   matchNotice("YOU WERE KILLED","RESPAWNING…",1400);
@@ -6174,8 +6174,7 @@ function cancelDeath() {
 
 function respawnPlayer() {
   clearFlash();
-  playerSkills.cancelTransient();
-  dashScopeRestore = false; dashScopeWeapon = null;
+  playerSkills.cancelTransient(player);
   setScoped(false);
   player.hp = 100;
   const spawnIndex = selectPlayerSpawnIndex();
@@ -6362,7 +6361,7 @@ document.addEventListener("keydown", (e) => {
     showToast('僵尸已出现，无法更换背包');
     return;
   }
-  if (!e.repeat && e.code === 'KeyZ') { e.preventDefault(); triggerTacticalDash(); return; }
+  if (!e.repeat && e.code === 'KeyZ') { e.preventDefault(); togglePlayerFlight(); return; }
   if (!e.repeat && e.code === 'KeyX') { e.preventDefault(); beginFoldingCoverPreview(); return; }
   if (!e.repeat && e.code === 'KeyC') { e.preventDefault(); beginSkyCagePreview(); return; }
   if (!e.repeat && e.code === "KeyF") rackHarborRifle();
@@ -6856,7 +6855,6 @@ function gameStart() {
   state = "playing";
   playerSkills.resetMatch();
   document.getElementById('skillHud').hidden = !playerSkillsRuntimeEnabled();
-  dashScopeRestore = false; dashScopeWeapon = null;
   impactVfx.clear();
   updateMapChoiceUi();
   kills = 0;
@@ -7008,8 +7006,7 @@ function endTDM(result) {
   if (result === "draw" && kills !== enemyScore) result = kills > enemyScore ? "win" : "lose";
   state = "over";
   cancelAllSkillPreviews();
-  playerSkills.endMatch();
-  dashScopeRestore = false; dashScopeWeapon = null;
+  playerSkills.endMatch(player);
   matchPaused = false;
   closeGameMenu();
   closeBackpack();
@@ -7319,7 +7316,6 @@ function supportAt(x, z, feetY, stepHeight = mapData?.stepHeight ?? STEP_H) {
 }
 
 // ---------- 单机玩家技能 ----------
-let dashScopeRestore = false, dashScopeWeapon = null;
 let coverPreviewHeld = false;
 let coverPreviewPlacement = null;
 let cagePreviewHeld = false;
@@ -7342,9 +7338,8 @@ function applyPlayerSkillsSetting(enabled, persist = false) {
   document.getElementById('skillHud').hidden = !playerSkillsRuntimeEnabled();
   if (!playerSkillsSettingEnabled) {
     cancelAllSkillPreviews();
-    playerSkills.endMatch();
+    playerSkills.endMatch(player);
     playerSkills.drainEvents();
-    dashScopeRestore = false; dashScopeWeapon = null;
   }
   if (persist) {
     try { localStorage.setItem('cf.playerSkillsEnabled', String(playerSkillsSettingEnabled)); }
@@ -7355,29 +7350,13 @@ applyPlayerSkillsSetting(playerSkillsSettingEnabled);
 document.getElementById('skillSettingToggle').addEventListener('click', () =>
   applyPlayerSkillsSetting(!playerSkillsSettingEnabled, true));
 
-function triggerTacticalDash() {
+function togglePlayerFlight() {
   if (!playerSkillsEnabled()) return false;
-  const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
-  const dir = new THREE.Vector3();
-  if (keys.KeyW) dir.add(fwd); if (keys.KeyS) dir.sub(fwd);
-  if (keys.KeyD) dir.add(right); if (keys.KeyA) dir.sub(right);
-  if (dir.lengthSq() < 1e-6) dir.copy(fwd);
-  const wasScoped = scoped;
-  if (!playerSkills.triggerDash(dir, !player.onGround)) {
-    showToast(playerSkills.dash.active > 0 ? '战术跃进进行中' : '空中跃进尚未恢复', true);
-    return false;
-  }
-  dashScopeRestore = wasScoped; dashScopeWeapon = currentId;
-  if (wasScoped) setScoped(false);
-  player.vel.y = Math.max(player.vel.y, jumpVelocityForHeightScale(JUMP_VEL,
-    (mapData?.jumpHeightScale ?? 1) * PLAYER_SKILL_RULES.dash.jumpHeightScale));
-  player.onGround = false;
-  player.jumpBuf = 0;
-  player.coyote = 0;
-  sfx.jump();
-  sfx.skill('dash');
-  showToast('战术跃进 · 超级跳');
+  const active=playerSkills.toggleFlight(player.onGround);
+  player.vel.set(0,0,0);
+  player.jumpBuf=player.coyote=player.stepLift=player.viewDip=0;
+  if(active){player.onGround=false;sfx.skill('dash');}
+  showToast(active?'飞行已开启 · 空格上升 · Ctrl下降 · Shift加速 · Z关闭':'飞行已关闭 · 正常下落');
   return true;
 }
 
@@ -7573,14 +7552,7 @@ function updateBrowsePlayer(dt) {
   if (browseFlying) {
     browseMotion.set(0, 0, 0);
     if (locked && !gameMenuOpen()) {
-      const forward = Number(!!keys.KeyW) - Number(!!keys.KeyS);
-      const right = Number(!!keys.KeyD) - Number(!!keys.KeyA);
-      const up = Number(!!keys.Space) - Number(!!(keys.ControlLeft || keys.ControlRight));
-      const horizontal = forward * Math.cos(player.pitch);
-      const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
-      browseMotion.set(right * cos - horizontal * sin, up + forward * Math.sin(player.pitch),
-        -right * sin - horizontal * cos).normalize();
-      browseMotion.multiplyScalar(keys.ShiftLeft || keys.ShiftRight ? 16 : 6);
+      flightMotion(browseMotion,keys,player.yaw,player.pitch);
     }
     if (gameMenuOpen() || !locked) browseVelocity.set(0, 0, 0);
     else browseVelocity.lerp(browseMotion, 1 - Math.exp(-dt * 9));
@@ -7600,6 +7572,9 @@ function movePlayer(dt) {
   // 死亡视角：只保留重力与落地，一切输入都不接受 —— 但**不能整块跳过这个函数**，
   // 否则在空中被打死时尸体会挂在半空 3 秒。水平速度在这段时间里按加速度自然衰减停下。
   const canAct = !dead && !(bioMatch() && bioMode?.playerOut) && !backpackOpen() && !gameMenuOpen();
+  if(playerSkills.flight.active && (!playerSkillsRuntimeEnabled()||dead))playerSkills.cancelTransient(player);
+  const flying=playerSkills.flight.active;
+  if(flying)player.onGround=false;
   // 前 = player.yaw（与渲染、射击同源，保证 W 始终朝准星正前方）
   const fwd = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
   const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
@@ -7611,7 +7586,7 @@ function movePlayer(dt) {
     if (keys["KeyA"]) move.sub(right);
     if (move.lengthSq() > 0) move.normalize();
 
-    const wantsCrouch = !!keys[IS_CROUCH];
+    const wantsCrouch = !flying && !!keys[IS_CROUCH];
     if (wantsCrouch) player.crouching = true;
     else if (player.crouching) {
       // Releasing Ctrl below a lintel must not expand the capsule through the
@@ -7624,7 +7599,7 @@ function movePlayer(dt) {
       if (brushesClear && worldClear) player.crouching = false;
     }
     // CF 没有冲刺键：Shift 是静步潜行（更慢，但没有脚步声）
-    player.sneaking = !!keys[IS_SNEAK] && !player.crouching;
+    player.sneaking = !flying && !!keys[IS_SNEAK] && !player.crouching;
   }
 
   // Player movement uses one shared ruleset in every mode. A zombie carries no
@@ -7640,22 +7615,30 @@ function movePlayer(dt) {
   const target = move.multiplyScalar(speed);
   // 地面加速度高、空中极低 —— 落地时不做速度归一，水平动量才能保下来，连跳才成立
   const k = Math.min(1, (player.onGround ? ACCEL_GROUND : ACCEL_AIR) * dt);
-  player.vel.x += (target.x - player.vel.x) * k;
-  player.vel.z += (target.z - player.vel.z) * k;
-  const dashVelocity = playerSkills.dashVelocity(_skillDashVelocity);
-  if (dashVelocity) {
-    player.vel.x = dashVelocity.x;
-    player.vel.z = dashVelocity.z;
+  if(!flying){
+    player.vel.x += (target.x - player.vel.x) * k;
+    player.vel.z += (target.z - player.vel.z) * k;
+  }
+  if(flying){
+    const flight=playerSkills.flight,r=PLAYER_SKILL_RULES.flight;
+    if(canAct && locked){
+      flightMotion(_skillFlightVelocity,keys,player.yaw,player.pitch,r.speed,r.fastSpeed);
+      player.vel.lerp(_skillFlightVelocity,1-Math.exp(-dt*9));
+      if(flight.takeoffRemaining>0){
+        if(keys.ControlLeft||keys.ControlRight)flight.takeoffRemaining=0;
+        else player.vel.y=Math.max(player.vel.y,Math.min(2,flight.takeoffRemaining/Math.max(dt,.001)));
+      }
+    }else player.vel.set(0,0,0);
   }
 
   // 跳跃缓冲 + coyote time：dt 被 clamp 到 0.05，严格同帧判定会漏掉落地帧。
   // 死亡期间连这一段也要挡住：只挡水平移动的话，尸体按空格会自己蹦起来（还带起跳音效）。
-  if (canAct && !browseMatch() && keys["Space"]) player.jumpBuf = JUMP_BUFFER;
+  if (canAct && !flying && !browseMatch() && keys["Space"]) player.jumpBuf = JUMP_BUFFER;
   else player.jumpBuf = Math.max(0, player.jumpBuf - dt);
   player.coyote = player.onGround ? COYOTE_TIME : Math.max(0, player.coyote - dt);
 
-  player.vel.y -= GRAVITY * dt;
-  if (canAct && player.jumpBuf > 0 && player.coyote > 0) {
+  if(!flying)player.vel.y -= GRAVITY * dt;
+  if (canAct && !flying && player.jumpBuf > 0 && player.coyote > 0) {
     // 黑色城镇的三轴几何整体放大了 1.2 倍；速度乘 sqrt(1.2) 才会让跳跃高度
     // 同步放大 1.2 倍，保住原地图里能从地面跳上的 48-unit 木箱路线。
     player.vel.y = jumpVelocityForHeightScale(JUMP_VEL, mapData?.jumpHeightScale);
@@ -7715,7 +7698,7 @@ function movePlayer(dt) {
   // In flight, a tread ABOVE the previous feet is a side contact, not a floor.
   // Grounded walking keeps its normal step allowance. This opt-in also avoids
   // cancelling a rising jump by snapping onto a higher stair behind the feet.
-  const supportStep = mapData?.strictAirborneSupport && !player.onGround ?
+  const supportStep = flying || (mapData?.strictAirborneSupport && !player.onGround) ?
     .001 : (mapData?.stepHeight ?? STEP_H);
   player.groundY = supportAt(player.pos.x, player.pos.z, player.pos.y, supportStep);
   const vyBefore = player.vel.y;
@@ -7752,6 +7735,10 @@ function movePlayer(dt) {
       player.vel.y = 0;
     }
   }
+  if(flying && playerSkills.flight.takeoffRemaining>0){
+    playerSkills.flight.takeoffRemaining=Math.max(0,playerSkills.flight.takeoffRemaining-Math.max(0,player.pos.y-prevY));
+    if(player.vel.y===0)playerSkills.flight.takeoffRemaining=0;
+  }
   const landingOnSupport = vyBefore <= 0 && prevY >= player.groundY - .001 &&
     player.pos.y <= player.groundY;
   // Rising vertically cannot create a new horizontal overlap. Correcting it
@@ -7764,7 +7751,7 @@ function movePlayer(dt) {
   }
   // 走下斜坡/楼梯时做经典 step-down：上一帧在地面、落差又不超过爬阶高度，
   // 就直接贴到新台面，而不是先变成空中状态、再靠重力落下一小截。
-  const snapDown = shouldSnapDownToSupport(player.onGround, vyBefore, prevY,
+  const snapDown = !flying && shouldSnapDownToSupport(player.onGround, vyBefore, prevY,
     player.groundY, mapData?.groundSnap ?? 0);
   if (snapDown) player.pos.y = player.groundY;
   if (player.pos.y <= player.groundY) {
@@ -8690,16 +8677,10 @@ function update(dt, rawDt) {
 
   if (coverPreviewHeld) updateFoldingCoverPreview();
   if (cagePreviewHeld) updateSkyCagePreview();
-  const dashWasActive = playerSkills.dash.active > 0;
   const coversBeforeUpdate = playerSkills.snapshot().cover.items;
   const skillsActive = playerSkillsRuntimeEnabled();
   document.getElementById('skillHud').hidden = !skillsActive;
   playerSkills.update(dt, player, skillsActive);
-  if (dashWasActive && playerSkills.dash.active <= 0 && dashScopeRestore) {
-    if (currentId === dashScopeWeapon && WEAPON_DEFS[currentId]?.stats?.zoom && !WEAPON_STATE.reloading)
-      setScoped(true);
-    dashScopeRestore = false; dashScopeWeapon = null;
-  }
   for (const event of playerSkills.drainEvents()) {
     if (event.type === 'cageLanded') sfx.skill('cageImpact', event.position);
     else if (event.type === 'cageFaceBreak') sfx.skill('cageBreak', event.position);
@@ -9327,7 +9308,7 @@ async function init() {
       enemiesShoot,
       movementStep: (dt) => movePlayer(dt),
       skillState: () => playerSkills.snapshot(),
-      useSkill: (id) => id === 'dash' ? triggerTacticalDash() :
+      useSkill: (id) => (id === 'flight' || id === 'dash') ? togglePlayerFlight() :
         id === 'cover' ? triggerFoldingCover() : id === 'ultimate' ? triggerSkyCage() : false,
       skillCoverPreviewBegin: beginFoldingCoverPreview,
       skillCoverPreviewUpdate: updateFoldingCoverPreview,
@@ -9352,7 +9333,7 @@ async function init() {
         }
       },
       skillCamera: () => playerSkills.cameraProfile(player.yaw),
-      skillDashVelocity: () => playerSkills.dashVelocity(new THREE.Vector3())?.toArray() || null,
+      skillDashVelocity: () => null,
       skillPlaceCoverAt: (position, yaw = player.yaw) => playerSkills.placeCover(
         new THREE.Vector3(...position), yaw),
       skillPlaceCageAt: (position, yaw = player.yaw) => playerSkills.placeCage(

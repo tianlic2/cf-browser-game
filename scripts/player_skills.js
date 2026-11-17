@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export const PLAYER_SKILL_RULES = Object.freeze({
-  dash: Object.freeze({ distance: 5, duration: .28, jumpHeightScale: 1.8 }),
+  flight: Object.freeze({ speed: 6, fastSpeed: 16, takeoffHeight: .35 }),
   cover: Object.freeze({ width: 2.4, height: 2.05, depth: .16, health: 800, life: 120,
     killRepair: 50 }),
   ultimate: Object.freeze({ size: 3.6, height: 3.1, depth: .16, faceHealth: 800, life: 120,
@@ -51,7 +51,7 @@ export class PlayerSkillSystem {
   constructor(scene, hud) {
     this.scene = scene;
     this.hud = hud;
-    this.dash = { charges: Infinity, timers: [], active: 0, direction: new THREE.Vector3(), airSpent: false };
+    this.flight = { active: false, takeoffRemaining: 0 };
     this.covers = [];
     this.cover = { active: false, count: 0, health: 0, life: 0, cooldown: 0, age: 0,
       center: new THREE.Vector3(), normal: new THREE.Vector3(0, 0, -1), right: new THREE.Vector3(1, 0, 0), group: null };
@@ -223,8 +223,7 @@ export class PlayerSkillSystem {
   }
 
   resetMatch() {
-    this.dash.charges = Infinity; this.dash.timers.length = 0;
-    this.dash.active = 0; this.dash.airSpent = false;
+    this.flight.active = false; this.flight.takeoffRemaining = 0;
     this.hideCoverPreview();
     this.hideCagePreview();
     this._removeAllCovers();
@@ -233,32 +232,26 @@ export class PlayerSkillSystem {
     this._syncHud();
   }
 
-  cancelTransient() {
+  cancelTransient(player) {
+    if(this.flight.active && player)player.vel.y=Math.min(0,player.vel.y);
+    this.flight.active=false;this.flight.takeoffRemaining=0;
     this.hideCoverPreview();
     this.hideCagePreview();
-    this.dash.active = 0;
     this._syncHud();
   }
 
-  endMatch() {
-    this.cancelTransient();
+  endMatch(player) {
+    this.cancelTransient(player);
     this._removeAllCovers();
     this._removeAllCages();
     this._syncHud();
   }
 
-  triggerDash(direction, airborne = false) {
-    if (this.dash.active > 0 || (airborne && this.dash.airSpent)) return false;
-    this.dash.active = PLAYER_SKILL_RULES.dash.duration;
-    this.dash.direction.copy(direction).setY(0).normalize();
-    if (airborne) this.dash.airSpent = true;
+  toggleFlight(grounded = false) {
+    this.flight.active=!this.flight.active;
+    this.flight.takeoffRemaining=this.flight.active&&grounded?PLAYER_SKILL_RULES.flight.takeoffHeight:0;
     this._syncHud();
-    return true;
-  }
-
-  dashVelocity(out) {
-    if (this.dash.active <= 0) return null;
-    return out.copy(this.dash.direction).multiplyScalar(PLAYER_SKILL_RULES.dash.distance / PLAYER_SKILL_RULES.dash.duration);
+    return this.flight.active;
   }
 
   placeCover(position, yaw) {
@@ -497,9 +490,7 @@ export class PlayerSkillSystem {
   cameraProfile() { return { fovBoost: 0, roll: 0 }; }
 
   update(dt, player, enabled = true) {
-    if (!enabled) { this.cancelTransient(); this._removeAllCovers(); this._removeAllCages(); this._syncHud(); return; }
-    if (this.dash.active > 0) this.dash.active = Math.max(0, this.dash.active - dt);
-    if (player.onGround) this.dash.airSpent = false;
+    if (!enabled) { this.cancelTransient(player); this._removeAllCovers(); this._removeAllCages(); this._syncHud(); return; }
     for (const cover of [...this.covers]) {
       cover.life -= dt; cover.age += dt;
       if (cover.life <= 0) this._removeCover(cover);
@@ -533,13 +524,14 @@ export class PlayerSkillSystem {
   _syncHud() {
     const root = this.hud?.querySelector('#skillHud'); if (!root) return;
     const r = PLAYER_SKILL_RULES;
-    const dash = root.querySelector('[data-skill="dash"]');
+    const flight = root.querySelector('[data-skill="flight"]');
     const cover = root.querySelector('[data-skill="cover"]');
     const ult = root.querySelector('[data-skill="ultimate"]');
-    if (dash) {
-      dash.classList.add('ready'); dash.classList.toggle('active', this.dash.active > 0);
-      dash.style.setProperty('--skill-fill', '100%');
-      dash.querySelector('.skill-value').textContent = '无冷却';
+    if (flight) {
+      flight.classList.add('ready');flight.classList.toggle('active',this.flight.active);
+      flight.style.setProperty('--skill-fill','100%');
+      flight.title='Z开关飞行 · 空格上升 · Ctrl下降 · Shift加速 · 保留实体碰撞';
+      flight.querySelector('.skill-value').textContent=this.flight.active?'飞行中 · Z关闭':'Z开启 · 无冷却';
     }
     if (cover) {
       cover.classList.add('ready');
@@ -555,7 +547,7 @@ export class PlayerSkillSystem {
   }
 
   snapshot() { return {
-    dash: { charges: null, timers: [], active: this.dash.active, airSpent: this.dash.airSpent, cooldown: 0 },
+    flight: { ...this.flight, cooldown: 0 },
     cover: { active: this.cover.active, health: this.cover.health, life: this.cover.life, cooldown: this.cover.cooldown,
       count: this.covers.length, maxCount: null,
       width: PLAYER_SKILL_RULES.cover.width, height: PLAYER_SKILL_RULES.cover.height,

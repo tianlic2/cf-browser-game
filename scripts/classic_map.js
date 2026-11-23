@@ -1,13 +1,14 @@
 import { createTransportCompartments, createCompartmentLightProbe, paintCompartmentWalls } from './transport_compartments.js';
 import { createDeckhouseWindowFrames, createDeckhouseGlass } from './transport_pilothouse.js';
 import { createTransportSuperstructure } from './transport_superstructure.js';
-import { dampenTransportMaterial } from './transport_damp.js';
+import { dampenTransportMaterial } from './transport_damp.js?v=rain-ripples-1';
+import { createTransportDynamics, harbourWaterGeometry } from './transport_dynamics.js';
 import * as THREE from 'three';
 import { lightTransportSurfaces, createTransportSkyProbe, createTransportSunProbe, softenTransportCargoShadow, transportSunPosition } from './transport_lighting.js?v=compartment-light-1';
 import { createDeckTracks, createFreightNote } from './transport_paper_and_tracks.js';
 import { detachMastScanner, createHoistSignals } from './transport_deck_signals.js';
-import { createTransportRain, createTransportStormAudio } from './transport_weather.js?v=doorway-rain-1';
-import { animateShipWater } from './transport_motion.js';
+import { createTransportRain, createTransportStormAudio } from './transport_weather.js?v=roof-runoff-1';
+import { animateShipWater } from './transport_motion.js?v=harbour-swell-1';
 import { waterMaps } from './map.js';
 import { configureMapTexture } from './map_texture_quality.js';
 import { hasCardinalBoxFootprint } from './brush_collision.js?v=transport-rounded-corners-1';
@@ -15,7 +16,7 @@ import { createTransportSurfaceDetail } from './transport_surface_detail.js?v=3'
 import { createFreightFlySheets, updateFreightWind } from './transport_fly_sheets.js?v=gust-steps-1';
 import { canvasLoads, formTransportCanvas } from './transport_canvas_relief.js?v=hanging-folds-2';
 import { formTransportCargoPanel } from './transport_corrugation.js?v=2';
-import { createTransportCargoDetail } from './transport_cargo_detail.js?v=continuous-freight-1';
+import { createTransportCargoDetail } from './transport_cargo_detail.js?v=harbour-dynamics-1';
 import { upgradeTransportTexture } from './transport_texture_detail.js?v=1';
 
 import { createTransportOutfitting, createDeckContactMap, addBulkheadLight, deckStencil } from './transport_outfitting.js?v=cargo-dust-1';
@@ -378,6 +379,8 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   const signals=createHoistSignals();
   booms.add(signals,createDeckhouseWindowFrames(),createTransportSuperstructure(group.getObjectByName('transportship/texture_94').material));
   const fog=new THREE.Fog(0xb4bdc1,31,165);
+  const rain=createTransportRain(data.colliders,rainCover);
+  const dynamics=createTransportDynamics(rainCover,rain.roofAt);
   const cargoRelief=createTransportCargoDetail(data.colliders);
   cargoRelief.add(createTransportDoorGear(group.getObjectByName('transportship/texture_79')));
   cargoRelief.add(createFreightFlySheets(data.colliders,sheetColor,sheetNormal));
@@ -453,7 +456,7 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
     if (['deck','canvas-top','canvas-side','pine','painted-wood'].includes(finish))
       filterLaneFinish(mesh.material);
     if (finish==='deck' || finish==='canvas-top' || finish==='canvas-side')
-      dampenTransportMaterial(mesh.material,rainCover,finish.replace('canvas-',''));
+      dampenTransportMaterial(mesh.material,rainCover,finish.replace('canvas-',''),dynamics.userData.clock);
   }
   filterLaneFinish(braces.material);
   filterLaneFinish(sheet.material);
@@ -464,15 +467,15 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   scene.add(group,cargoRelief,fittings,booms);scene.background=sky;scene.environment=environment;scene.fog=fog;
   const water=waterMaps();
   for(const k of ['map','normalMap','roughnessMap'])water[k].repeat.set(1600/14,1600/14);
-  const sea=new THREE.Mesh(new THREE.PlaneGeometry(1600,1600),new THREE.MeshStandardMaterial({
+  const sea=new THREE.Mesh(harbourWaterGeometry(),new THREE.MeshStandardMaterial({
     map:water.map,normalMap:water.normalMap,roughnessMap:water.roughnessMap,normalScale:water.normalScale,
     color:0xdce8ef,roughness:.72,metalness:.1,envMapIntensity:.55,
   }));
   sea.name='transport-open-water';
-  const updateWater=animateShipWater(sea.material);
+  const updateWater=animateShipWater(sea.material,dynamics.userData.clock);
   sea.rotation.x=-Math.PI/2;sea.position.y=-3.42;scene.add(sea);
-  const rain=createTransportRain(data.colliders,rainCover), storm=createTransportStormAudio();
-  scene.add(rain.root);
+  const storm=createTransportStormAudio();
+  scene.add(rain.root,dynamics);
   // Identify the visible face directly under a supported foot. A box brush
   // can list wood and metal together; a standing actor may also be below it.
   group.updateWorldMatrix(true,true);
@@ -490,7 +493,7 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
     if (rainHit===2) return 'canvas';
     return 'dry-steel';
   }
-  return {...data, obstacles, visuals:[group,cargoRelief,sea,fittings,booms,rain.root], background:sky, environment, fog,
+  return {...data, obstacles, visuals:[group,cargoRelief,sea,fittings,booms,rain.root,dynamics], background:sky, environment, fog,
     renderLook:{hemiSky:0xccdaea,hemiGround:0x939089,hemiIntensity:1.45,
       sunPosition:transportSunPosition,sunColor:0xffe0b8,sunIntensity:1.85,exposure:1.04},
     skyVisibilityAt:createTransportSkyProbe(skyAccess),
@@ -511,6 +514,7 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
       if (!active) {storm.stop();scene.backgroundIntensity=1;}
     },
     source:'cf-transportship-source-port', update(t){
+      dynamics.userData.update(t);
       rain.update(t);
       scanner.rotation.y=t*.70;
       signals.userData.update(t);

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { containerFrameEnvelopes } from './transport_stack_paint.js?v=freight-steel-1';
-import { createBuckleTail } from './transport_motion.js';
+import { createBuckleTail } from './transport_motion.js?v=harbour-swell-1';
 
 // The imported cargo is a set of flat, painted boxes. These inset steel
 // members give the repeated 3.17 m modules real silhouettes at walking

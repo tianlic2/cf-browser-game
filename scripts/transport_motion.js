@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { harbourSwellGLSL } from './transport_dynamics.js';
+import { freightGust } from './transport_wind.js';
 
 // Twin impellers share the existing rectangular vent opening. Their shallow
 // pitched blades fit between the dark back plate and the fixed louvres.
@@ -82,7 +84,8 @@ export function createBuckleTail(clipPose) {
     since=time;
   };
   tail.userData.setTime=t=>{
-    const angle=swing(t);
+    const wind=.022*Math.sin(t*2.6)+freightGust(t-.9)*(.12+.045*Math.sin(t*8.4));
+    const angle=swing(t)+wind;
     tail.rotation.x=-Math.max(-.13,angle);
     tail.rotation.z=.19*angle;
   };
@@ -91,10 +94,17 @@ export function createBuckleTail(clipPose) {
 
 // Sample the same seamless wave field at two scales. Rotate the slopes of
 // the short waves back into the tangent frame used for the broad swell.
-export function animateShipWater(material) {
+export function animateShipWater(material,clock={value:0}) {
   const drift={value:new THREE.Vector2()};
   material.onBeforeCompile=shader=>{
     shader.uniforms.uShipRippleDrift=drift;
+    shader.uniforms.uHarbourTime=clock;
+    shader.vertexShader=harbourSwellGLSL+'\n'+shader.vertexShader
+      .replace('#include <beginnormal_vertex>',`#include <beginnormal_vertex>
+        vec3 swellNormal=harbourSwell(vec2(position.x,-position.y));
+        objectNormal=normalize(vec3(-swellNormal.y,swellNormal.z,1.));`)
+      .replace('#include <begin_vertex>',`#include <begin_vertex>
+        transformed.z+=harbourSwell(vec2(position.x,-position.y)).x;`);
     const normals=THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;\n\tmapN.xy *= normalScale;',`
       mat2 rippleBasis=mat2(.8,.6,-.6,.8);
       vec2 swellUV=vNormalMapUv+shipWaveWarp(vNormalMapUv);
@@ -116,8 +126,9 @@ export function animateShipWater(material) {
         float roughnessFactor=.26+.43*texture2D(roughnessMap,vRoughnessMapUv+shipWaveWarp(vRoughnessMapUv)).g;
       `);
   };
-  material.customProgramCacheKey=()=>'transport-crossing-waves-1';
+  material.customProgramCacheKey=()=>'transport-crossing-swell-2';
   return t=>{
+    clock.value=t;
     for(const tex of [material.map,material.roughnessMap,material.normalMap])
       tex.offset.set(t*.008,t*.004);
     drift.value.set(-t*.039,t*.012);

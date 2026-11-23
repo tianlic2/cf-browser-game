@@ -580,7 +580,7 @@ function waitForMapEntryLock() {
 async function ensureMapLoaded(id, onProgress = () => {}) {
   if (mapCatalog[id]) { onProgress(1); return mapCatalog[id]; }
   const loaders = {
-    transport: () => import('./classic_map.js?v=tween-deck-bridge-1').then(m => m.buildClassicMap),
+    transport: () => import('./classic_map.js?v=harbour-dynamics-1').then(m => m.buildClassicMap),
     blacktown: () => import('./blacktown_map.js?v=visible-alpha-2').then(m => m.buildBlacktownMap),
     bio: () => import('./zone13_map.js?v=zone13-collision-alignment-1').then(m => m.buildZone13Map),
     lingyin: () => import('./lingyin_map.js?v=flanking-apron-leaf-1').then(m => m.buildLingyinMap),

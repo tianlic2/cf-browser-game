@@ -178,7 +178,7 @@ export function createTransportRain(brushes, cover) {
     if (steel && now>=nextSteel) {emit(steel);nextSteel=now+.14+steel.phase*.14;}
     if (canvas && now>=nextCanvas) {emit(canvas);nextCanvas=now+.13+canvas.phase*.10;}
   }
-  return {root, soundHits, receiverAt:surfaceAt, update(t){time.value=t; gust.value=freightGust(t);}, sheltered(p) {
+  return {root, soundHits, receiverAt:surfaceAt,roofAt:(x,z)=>rainStop(physical,x,z,0,0), update(t){time.value=t; gust.value=freightGust(t);}, sheltered(p) {
     if (Math.abs(p.x-lastX)+Math.abs(p.z-lastZ)>.14) {
       roof=rainStop(physical,p.x,p.z,0,0); lastX=p.x; lastZ=p.z;
     }

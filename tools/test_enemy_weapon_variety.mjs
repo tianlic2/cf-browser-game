@@ -49,8 +49,8 @@ assert.doesNotMatch(main, /iconId === 'scar' \? ' is-mirrored'/,
 
 // Player and enemy playback must resolve to the same source recording, rate
 // and truncation window. Only enemy spatialisation/air absorption may differ.
-const sandbox=vm.createContext({addEventListener(){}});
-vm.runInContext(audio.replace(/^import .*cf_vanilla_catalog\.js.*;$/m, 'const CF_VANILLA=[];').replace('export class SFX','class SFX')+'\nglobalThis.SFX=SFX;',sandbox);
+const sandbox=vm.createContext({addEventListener(){},publicDeployment:()=>false,PUBLIC_CF_WEAPONS:new Set(),CF_VANILLA:[]});
+vm.runInContext(audio.replace(/^import .*;$/gm, '').replace('export class SFX','class SFX')+'\nglobalThis.SFX=SFX;',sandbox);
 const sfx=Object.create(sandbox.SFX.prototype),played=[];
 sfx.ready=()=>true;
 sfx._playMapped=(method,options)=>played.push({method,...options});

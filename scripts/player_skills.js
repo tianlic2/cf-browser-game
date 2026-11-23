@@ -471,6 +471,8 @@ export class PlayerSkillSystem {
     return point;
   }
 
+  occludesSound(origin,target){return !!this._segmentBarrierHit(origin,target);}
+
   explosiveScale(origin, target) { return this._segmentBarrierHit(origin, target) ? .6 : 1; }
 
   addDamage() {}

@@ -56,7 +56,9 @@ impacts/ricochet_1..2        <- freesound.org/s/30932/   (bullet ricochet.wav by
 impacts/headshot             <- freesound.org/s/660769/  (Headshot sound by MadPanCake)  CC0  [headshot_a.mp3]
 impacts/hurt                 <- freesound.org/s/547209/  (Voice_AdultMale_PainGrunts_09.wav by MrFossy)  CC0  [grunts.mp3]
 impacts/brass_1..5           <- freesound.org/s/210102/  (Brass bullet shell casing drop onto concrete, multiple takes by GrayJoy)  CC0  [brass.mp3]
-impacts/whiz                 <- freesound.org/s/855248/  (Real Bullet Flyby Sound by qubodup)  CC0  [flyby.mp3]
+impacts/whiz (legacy, not used for enemy flybys) <- freesound.org/s/855248/ by qubodup, CC0; original author does not verify the sound cause.
+impacts/flyby/pass_1..3       <- freesound.org/s/730351/ by GO_s0unds123, CC0
+impacts/flyby/crack_1..3      <- freesound.org/s/675948/ by craigsmith, CC0 archival sound effects; see impacts/flyby/CREDITS.md and provenance.json.
 
 foley/bodyfall               <- freesound.org/s/504626/  (BODY FALL - V HVY - DIRT by leonelmail)  CC0  [bodyfall.mp3]
 foley/c4_explode             <- freesound.org/s/482993/  (large explosion 1 by V-ktor)  CC0  [explosion_a.mp3]

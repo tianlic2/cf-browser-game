@@ -159,7 +159,8 @@ const SAMPLES = {
   hurt:         ["impacts/hurt"],
   brass:        ["impacts/brass_1", "impacts/brass_2", "impacts/brass_3",
                  "impacts/brass_4", "impacts/brass_5"],
-  whiz:         ["impacts/whiz"],
+  whiz: ['impacts/flyby/pass_1.wav','impacts/flyby/pass_2.wav','impacts/flyby/pass_3.wav'],
+  bullet_crack: ['impacts/flyby/crack_1.wav','impacts/flyby/crack_2.wav','impacts/flyby/crack_3.wav'],
   bodyfall:     ["foley/bodyfall"],
   explosion:    ["foley/c4_explode"],
   knife_wall:   ["melee/knife_wall"],
@@ -594,13 +595,14 @@ export class SFX {
     const dur = win || full;
 
     let node = src;
+    const cleanupNodes=[];let spatial=null;
     if (o.lowpass) {
       const f = c.createBiquadFilter();
       f.type = "lowpass";
       f.frequency.value = Math.max(300, o.lowpass);
       f.Q.value = 0.5;
       node.connect(f);
-      node = f;
+      node = f;cleanupNodes.push(f);
     }
 
     const gain = c.createGain();
@@ -622,6 +624,17 @@ export class SFX {
     } else if (typeof o.x === "number") {
       // 有世界坐标 → 走 panner（左右 + 远近），这正是 FPS 里最关键的听觉信息
       const pn = this.panner(o.x, o.y == null ? 0 : o.y, o.z);
+      spatial=pn;cleanupNodes.push(pn);
+      if(o.hrtf)pn.panningModel='HRTF';
+      if(o.nearField){pn.refDistance=1;pn.rolloffFactor=.35;}
+      if(o.motion && pn.positionX){
+        const d=o.motion,lead=.004,before=Math.min(d.before??4,(d.speed||715)*lead),after=d.after??8;
+        for(const [axis,v,dir] of [['X',o.x,d.x],['Y',o.y,d.y],['Z',o.z,d.z]]){
+          pn['position'+axis].setValueAtTime(v-dir*before,t);
+          pn['position'+axis].linearRampToValueAtTime(v,t+lead);
+          pn['position'+axis].linearRampToValueAtTime(v+dir*after,t+lead+after/(d.speed||715));
+        }
+      }
       gain.connect(pn);
       this.send(pn, o.wet == null ? 1 : o.wet);
     } else {
@@ -634,7 +647,7 @@ export class SFX {
     this._voices++;
 
     const h = {
-      src, gain, dur, at: t, delay: o.delay || 0, method: o.schedule || null, stopped: false,
+      src, gain, panner:spatial, dur, at: t, delay: o.delay || 0, method: o.schedule || null, stopped: false,
       // A deploy event can be scheduled ahead of its authored animation frame.
       // If the weapon is switched away before that frame, cancel it before its
       // AudioBufferSource ever starts instead of fading a sound that should not exist.
@@ -658,7 +671,7 @@ export class SFX {
     src.onended = () => {
       this._voices--;
       if (h.method) this._scheduled.delete(h);
-      try { src.disconnect(); gain.disconnect(); } catch (_) {}
+      try { src.disconnect(); gain.disconnect();for(const node of cleanupNodes)node.disconnect(); } catch (_) {}
     };
     if (o.schedule) this._scheduled.add(h);
     return h;
@@ -699,7 +712,7 @@ export class SFX {
     if (!this._scheduled.size) return;
     for (const h of Array.from(this._scheduled)) {
       if (method && h.method !== method) continue;
-      if (h.hbr7 && h.at>this.ctx.currentTime) h.cancelPending();
+      if ((h.hbr7 || h.method==='flyby') && h.at>this.ctx.currentTime) h.cancelPending();
       else h.stop(fade);
     }
   }
@@ -1164,11 +1177,33 @@ export class SFX {
     }, () => this._impactSynth(kind));
   }
 
-  // 子弹掠过耳边（敌人打偏）。坐标由 main.js 按弹道算好传进来。
-  whiz(x, y, z) {
-    if (!this.ready()) return;
-    this._playMapped("whiz", { id: "whiz", x, y, z, vol: 0.8, wet: 0, rateJitter: 0.08 },
-      () => this._whizSynth(x, y, z));
+  // Actual completed near-pass: short pressure snap plus a restrained moving air tail.
+  // Pitch stays at the recorded speed. Missing recordings stay silent.
+  bulletFlyby(pass) {
+    if(!this.ready()||!pass||pass.distance<.12||pass.distance>2.5)return false;
+    const now=this.ctx.currentTime;
+    if(now-(this._lastFlybyAt??-Infinity)<.075 || (this._flybyVoices||0)>=6)return false;
+    this._lastFlybyAt=now;
+    const close=Math.max(0,1-pass.distance/2.5),motion={x:pass.dx,y:pass.dy,z:pass.dz,speed:pass.speed,before:pass.before,after:pass.after};
+    let played=0;
+    const play=(id,vol,attack,moving)=>{
+      if(this._voices>=this.maxVoices || (this._flybyVoices||0)>=6)return;
+      const h=this._sample(id,{x:pass.x,y:pass.y,z:pass.z,vol,rate:1,rateJitter:0,volJitter:0,
+        wet:0,hrtf:true,nearField:true,lowpass:9000+close*9000,
+        delay:Math.max(0,pass.delay-attack),schedule:'flyby',motion:moving?motion:null});
+      if(!h)return;
+      this._flybyVoices=(this._flybyVoices||0)+1;
+      const ended=h.src.onended;h.src.onended=()=>{this._flybyVoices--;ended();};played++;
+    };
+    if(pass.supersonic)play('bullet_crack',.18+.26*close,.004,false);
+    if(pass.distance<1.6)play('whiz',.16+.30*close,.004,true);
+    this._lastFlyby={...pass,played};
+    this._note('flyby',{id:pass.supersonic?'bullet_crack':'whiz'},played?'sample':'missing',0);
+    return played>0;
+  }
+  cancelFlybys(){this.cancelScheduled('flyby',.01);this._lastFlybyAt=-Infinity;}
+  whiz(x,y,z){
+    return this.bulletFlyby({x,y,z,distance:this._dist3(x,y,z),dx:0,dy:0,dz:-1,delay:0,supersonic:true});
   }
 
   // 敌人倒地（替代「击杀只有一声音调」：现在还有一具身体砸在钢甲板上）
@@ -2144,6 +2179,7 @@ export class SFX {
       preloadDone: !!this._preloadDone,
       voices: this._voices,
       maxVoices: this.maxVoices,
+      flyby: {active:this._flybyVoices||0,last:this._lastFlyby?{...this._lastFlyby}:null},
       killVoiceLimit: this.maxVoices + KILL_VOICE_RESERVE,
       lastAttempt: this._last ? { ...this._last } : null,
       scheduled,

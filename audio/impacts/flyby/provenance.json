@@ -1,0 +1,65 @@
+{
+  "sources": {
+    "pass": {
+      "page": "https://freesound.org/people/GO_s0unds123/sounds/730351/",
+      "author": "GO_s0unds123",
+      "license": "CC0-1.0",
+      "title": "Bullet Fly By",
+      "url": "https://cdn.freesound.org/previews/730/730351_15855556-hq.mp3",
+      "sha256": "4fb3d6f9abba140ba34b8adf6fa400c7ee3f7498b753954e6de78508d605980d"
+    },
+    "crack": {
+      "page": "https://freesound.org/people/craigsmith/sounds/675948/",
+      "author": "craigsmith",
+      "license": "CC0-1.0",
+      "title": "S20-43 Heavy ammunition bullets flying overhead & hitting things",
+      "url": "https://cdn.freesound.org/previews/675/675948_2524442-hq.mp3",
+      "sha256": "1e56750cfd3a0bc0335a24c075360914b35ce93645433d64df26a20648ea7b42"
+    }
+  },
+  "cues": {
+    "pass_1": {
+      "source": "pass",
+      "start": 5.204541666666667,
+      "end": 5.39,
+      "attack": 0.004,
+      "sha256": "92b810b2c4b49d201bbf265f56d4069d0af7f27714d8cc58e32cc0061347dde2"
+    },
+    "pass_2": {
+      "source": "pass",
+      "start": 6.7720416666666665,
+      "end": 6.96,
+      "attack": 0.004,
+      "sha256": "9b8c64a3204336131060120c308c996eae3d336c1b4a48164ac99b68d68ad17b"
+    },
+    "pass_3": {
+      "source": "pass",
+      "start": 9.5144375,
+      "end": 9.68,
+      "attack": 0.004,
+      "sha256": "166493322ce564bcb353a361c0940dcc8bd15b5e44eb0abeacba8404fc114ca7"
+    },
+    "crack_1": {
+      "source": "crack",
+      "start": 0.071,
+      "end": 0.191,
+      "attack": 0.00198,
+      "sha256": "7056ede751749c03108e094be087682749020d04af4e5826438b49512ab8b874"
+    },
+    "crack_2": {
+      "source": "crack",
+      "start": 1.0595,
+      "end": 1.174,
+      "attack": 0.004,
+      "sha256": "94b05d1832909e509a1d210305c9e4a8e4820a21dc67dd5be62168fd1b27cfb4"
+    },
+    "crack_3": {
+      "source": "crack",
+      "start": 2.0824374999999997,
+      "end": 2.194,
+      "attack": 0.004,
+      "sha256": "8ea7776cd4a88c60a145d4b117e416e74de4ab4b9fa8e182a1780e1cf1809a8f"
+    }
+  },
+  "processing": "Mono 48 kHz, high-pass rumble removal, short equal-power fades, level normalization; no pitch/time change. Designed effects, not verified live-fire field recordings."
+}

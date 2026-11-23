@@ -8,10 +8,10 @@ assert.match(main, /const terminalImpact = impacts\[impacts\.length - 1\]/,
   'player tracer must derive its endpoint from the resolved hit sequence');
 assert.match(main, /impactVfx\.tracer\(_playerTraceStart,_playerTraceEnd,"player",\{launchDirection:_playerTraceLaunchDir\}\)/,
   'player shots must emit a tracer from the first-person muzzle area');
-assert.match(main, /impactVfx\.tracer\(coverHit && !hitAheadOfMuzzle \? from : mz, coverHit \|\| eye, "enemy"\)/,
+assert.match(main, /emitEnemyRound\(coverHit && !hitAheadOfMuzzle \? from : mz, coverHit \|\| eye, e\.gunId/,
   'enemy hits trace from muzzle or from eyeline when cover blocks behind the muzzle');
-assert.match(main, /raycaster\.set\(mz, _enemyMissDir\)[\s\S]*?impactVfx\.surface\(missHit,true,_enemyMissDir\)[\s\S]*?impactVfx\.tracer\(mz, _enemyTraceEnd, "enemy"\)/,
-  'enemy misses must raycast into the world, leave a surface mark and draw their actual path');
+assert.match(main,/raycaster\.set\(from,_enemyMissDir\)[\s\S]*?surfaceAtArrival/,
+  'misses are clipped from the shooter capsule and impacts arrive with their visual projectile');
 
 assert.match(vfx, /this\.markLimit = 144/,
   'bullet marks must use a bounded circular instanced pool');

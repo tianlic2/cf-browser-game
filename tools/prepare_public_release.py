@@ -17,10 +17,10 @@ def files():
     for folder,glob in [('scripts','*.js'),('styles','*.css'),('lingyin-map/src','**/*'),
         ('assets/classic/m4a1_conv','**/*'),('assets/classic/deagle_conv','**/*'),('assets/transport-materials','**/*'),('assets/lingyin','**/*'),
         ('assets/hud','**/*'),('assets/ui','**/*'),('audio/footsteps/transport','**/*'),
-        ('audio/weather','**/*')]:
+        ('audio/weather','**/*'),('audio/impacts/flyby','**/*')]:
         for p in (ROOT/folder).glob(glob):
             if p.is_file() and publish(p.relative_to(ROOT).as_posix()):result.add(p.relative_to(ROOT).as_posix())
-    for p in ['PUBLIC_RELEASE.md','assets/local/fox_npc/visit-surface.png','assets/map-posters/blacktown.png','.gitattributes','tools/prepare_public_release.py','tools/test_public_release_browser.mjs','tools/test_public_ordinary_browser.mjs','tools/test_player_flight_browser.mjs','tools/test_player_skills.mjs']:
+    for p in ['PUBLIC_RELEASE.md','assets/local/fox_npc/visit-surface.png','assets/map-posters/blacktown.png','.gitattributes','tools/prepare_public_release.py','tools/test_public_release_browser.mjs','tools/test_public_ordinary_browser.mjs','tools/test_player_flight_browser.mjs','tools/test_player_skills.mjs','tools/test_enemy_ballistics.mjs','tools/test_enemy_flyby_browser.mjs','tools/build_bullet_flyby_audio.py']:
         if (ROOT/p).is_file():result.add(p)
     return sorted(result)
 if __name__=='__main__':

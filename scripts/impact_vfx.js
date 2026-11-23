@@ -1,3 +1,4 @@
+import { enemyRoundProfile } from './enemy_ballistics.js';
 import * as THREE from "three";
 
 // Shared procedural textures keep the effects crisp without loading a separate
@@ -248,25 +249,20 @@ export class ImpactVfx {
 
     // 曳光弹是短距离高速移动的亮段，而不是从枪口一直连到落点的激光线。
     // 每条共用同一个低面数圆柱几何，只保留独立材质以便逐条淡出；池耗尽时循环复用。
-    this.tracerCursor = 0;
+    this.tracerCursor = 0;this.enemyShotSerial=0;this.pendingImpacts=[];
     this.tracerGeometry = new THREE.CylinderGeometry(1, 1, 1, 5, 1, true);
-    this.shipTracerGeometry = new THREE.CylinderGeometry(1, 1, 1, 8, 6, true);
-    // Vertex colour + additive blending makes the dim tail taper into the air.
-    for (const geom of [this.tracerGeometry,this.shipTracerGeometry]) {
-      const pos=geom.attributes.position, rgb=[];
-      for (let i=0;i<pos.count;i++) {
-        const along=pos.getY(i)+.5;
-        if (geom===this.shipTracerGeometry) {
-          const radius=.13+.87*Math.sin(along*1.8);
-          pos.setX(i,pos.getX(i)*radius);pos.setZ(i,pos.getZ(i)*radius);
-          rgb.push(.06+1.6*along,.12*along+1.02*along*along,.65*along**3);
-        } else rgb.push(1,1,1);
-      }
-      geom.setAttribute('color',new THREE.Float32BufferAttribute(rgb,3));
+    this.enemyTracerGeometry=new THREE.CylinderGeometry(1,1,1,6,8,true);
+    this.tracerGeometry.setAttribute('color',new THREE.Float32BufferAttribute(
+      new Float32Array(this.tracerGeometry.attributes.position.count*3).fill(1),3));
+    const ep=this.enemyTracerGeometry.attributes.position,ec=[];
+    for(let i=0;i<ep.count;i++){
+      const t=ep.getY(i)+.5,r=.12+.88*Math.sin(t*Math.PI*.5),energy=t*t;
+      ep.setX(i,ep.getX(i)*r);ep.setZ(i,ep.getZ(i)*r);
+      ec.push(energy,energy*.88,energy*.65);
     }
+    this.enemyTracerGeometry.setAttribute('color',new THREE.Float32BufferAttribute(ec,3));
     this.smokeOrigin=new THREE.Vector3();
     this.smokeVelocity=new THREE.Vector3();
-    this.wakePosition=new THREE.Vector3();
     this.tracers = [];
     this.tracerUp = new THREE.Vector3(0, 1, 0);
     this.tracerMid = new THREE.Vector3();
@@ -329,8 +325,8 @@ export class ImpactVfx {
     tracer.mesh.quaternion.setFromUnitVectors(this.tracerUp,
       this.tracerVector.copy(this.tracerHead).sub(this.tracerTail).normalize());
     tracer.mesh.scale.set(tracer.radius, length, tracer.radius);
-    const fade = Math.min(1, Math.max(0, (tracer.life - tracer.t) / .045));
-    tracer.mesh.material.opacity = fade * (tracer.kind === "enemy" ? .82 : .72);
+    const fade = tracer.kind==="enemy" ? 1 : Math.min(1, Math.max(0, (tracer.life - tracer.t) / .045));
+    tracer.mesh.material.opacity = fade * (tracer.kind === "enemy" ? tracer.opacity : .72);
     tracer.mesh.visible = true;
   }
 
@@ -370,24 +366,25 @@ export class ImpactVfx {
     item.speed = kind === "enemy" ? 175 : 235;
     item.segment = kind === "enemy" ? 1.25 : 1.65;
     item.radius = kind === "enemy" ? .012 : .009;
-    const shipRound=this.transportCombat && kind==="enemy";
-    item.mesh.geometry=shipRound ? this.shipTracerGeometry : this.tracerGeometry;
-    if (shipRound) {
-      item.speed=260; item.segment=3.5; item.radius=.025;
-      // A few short-lived wisps near the muzzle linger after the hot head passes.
-      const reach=Math.min(item.distance,6.5);
-      if (reach>2) for (const fraction of [.25,.66]) {
-        this.wakePosition.copy(start).addScaledVector(item.dir,reach*(fraction+.1*Math.random()));
-        const w=this.emit('dust',this.wakePosition,this.smokeVelocity.copy(item.dir).multiplyScalar(.38),
-          .06,.46+Math.random()*.2,0);
-        if (w) {w.alpha=.18;w.grow=2;w.sprite.material.opacity=0;}
-      }
+    if(kind==='enemy'){
+      const profile=enemyRoundProfile(options.weaponId);
+      item.speed=options.speed||profile.speed;item.segment=profile.segment;item.radius=profile.radius;
+      item.mesh.geometry=this.enemyTracerGeometry;item.opacity=(this.enemyShotSerial++%3===0)?.62:.22;
+      item.mesh.material.color.setHex(0xffe8bd);item.mesh.material.toneMapped=false;
+      item.life=(item.distance+item.segment-.42)/item.speed;
+    }else{
+      item.mesh.geometry=this.tracerGeometry;
+      item.life=Math.min(.32,Math.max(.055,(item.distance+item.segment-.42)/item.speed));
+      item.mesh.material.color.setHex(0xffd28a);
     }
-    item.t = 0;
-    item.life = Math.min(shipRound?.64:.32, Math.max(.055,
-      (item.distance + item.segment - .42) / item.speed));
-    item.mesh.material.color.setHex(shipRound ? 0xffdfa9 : kind === "enemy" ? 0xff6a32 : 0xffd28a);
+    item.t=0;
     this._placeTracer(item);
+    return item;
+  }
+
+  surfaceAtArrival(hit,solid,direction,delay,onArrival){
+    if(this.pendingImpacts.length>=48)this.pendingImpacts.shift();
+    this.pendingImpacts.push({hit,solid,direction:direction.clone(),delay,onArrival});
   }
 
   normal(hit, incomingDirection = null) {
@@ -612,6 +609,10 @@ export class ImpactVfx {
       if (mark.t > mark.life - this.markFade) marksChanged = true;
     }
     if (marksChanged) this._syncMarks();
+    for(let i=this.pendingImpacts.length-1;i>=0;i--){
+      const p=this.pendingImpacts[i];p.delay-=dt;
+      if(p.delay<=0){this.pendingImpacts.splice(i,1);this.surface(p.hit,p.solid,p.direction);p.onArrival?.();}
+    }
     for (const tracer of this.tracers) {
       if (tracer.t >= tracer.life) continue;
       tracer.t += dt;
@@ -660,6 +661,7 @@ export class ImpactVfx {
     this.markCursor = 0;
     for (const mark of this.marks) { mark.t = Infinity; mark.life = 0; }
     this._syncMarks();
+    this.pendingImpacts.length=0;
     for (const tracer of this.tracers) { tracer.t = tracer.life; tracer.mesh.visible = false; }
     for (const p of this.particles) { p.t = p.life; p.sprite.visible = false; }
   }

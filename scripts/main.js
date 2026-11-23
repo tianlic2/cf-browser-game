@@ -1,10 +1,11 @@
+import { enemyRoundProfile, closestBulletPass } from './enemy_ballistics.js';
 import { flightMotion } from './player_flight.js';
 import { PUBLIC_CF_WEAPONS } from './public_weapons.js';
 import {updateHeading, updateMagazine, updateVitals, matchNotice} from './match_hud.js';
 // ===== CrossFire FPS - 主游戏（运输船 · 团队竞技 · CF 手感）=====
 import * as THREE from "three";
 import { makeGLTFLoader } from "./gltf.js";
-import { SFX } from "./audio.js?v=public-ordinary-1";
+import { SFX } from "./audio.js?v=enemy-flyby-1";
 let createHarborRifleModel, createHarborRifleView, HARBOR_ACTION_SECONDS;
 import { EnemyManager, ENEMY_TUNING } from "./enemies.js?v=visit-skeleton-1";
 import { setEnemyMuzzleTexture } from "./enemy_model.js";
@@ -24,7 +25,7 @@ import { BioMode } from "./bio_mode.js?v=visit-skeleton-1";
 import { Zone13Presentation } from "./zone13_presentation.js?v=initial-eight-1";
 import { BIO_INITIAL_ZOMBIES, BIO_NPC_COUNT, refillTwoMagazines, bioDamageBadges } from "./bio_rules.js?v=initial-eight-1";
 import { HUMAN_RUN_SPEED, weaponMoveScale } from "./move_speed.js?v=weapon-weight-1";
-import { ImpactVfx } from "./impact_vfx.js?v=rain-combat-1";
+import { ImpactVfx } from "./impact_vfx.js?v=enemy-flyby-1";
 import { BrowseCharacter } from "./browse_character.js";
 import { BrowseCamera } from "./browse_camera.js";
 import { loadFoxSoldier, cloneFoxForVisit } from "./fox_soldier.js?v=visit-skeleton-1";
@@ -62,7 +63,7 @@ import { npcRankForDifficulty } from './npc_ranks.js?v=1';
 import { applyTracerLaunchCorrection, tracerMuzzleKey, tracerMuzzleProfile } from './tracer_muzzle.js?v=1';
 import { WEAPON_TUNING } from './weapon_tuning.js?v=cfv-awp-damage-1';
 import { loadBioZombieView } from './bio_zombie_view.js?v=kukri-hand-material-2';
-import { PlayerSkillSystem, PLAYER_SKILL_RULES } from './player_skills.js?v=flight-1';
+import { PlayerSkillSystem, PLAYER_SKILL_RULES } from './player_skills.js?v=enemy-flyby-1';
 
 // GitHub Pages is a public redistribution target. Several reviewed weapon and
 // bio-map packages are licensed for this user's local game only and remain
@@ -1908,12 +1909,10 @@ function bindOnlineRoomUi() {
     const origin = new THREE.Vector3().fromArray(event.detail.origin);
     const direction = new THREE.Vector3().fromArray(event.detail.dir);
     sfx.enemyShoot(origin.x, origin.y, origin.z, event.detail.weapon);
-    let distance=90;
-    if (impactVfx.transportCombat) {
-      const path=new THREE.Raycaster(origin,direction,0,distance);
-      distance=path.intersectObjects(obstacleFlat,false)[0]?.distance ?? distance;
-    }
-    impactVfx.tracer(origin, origin.clone().addScaledVector(direction, distance), 'enemy');
+    const path=new THREE.Raycaster(origin,direction,0,140);
+    const hit=path.intersectObjects(obstacleFlat,false)[0];
+    const end=hit?.point || origin.clone().addScaledVector(direction,90);
+    emitEnemyRound(origin,end,event.detail.weapon);
     onlinePeer.recoil();
   });
   multiplayer.addEventListener('damage', event => {
@@ -4450,7 +4449,7 @@ document.addEventListener('visibilitychange',()=>{
 
 function activateMap(id) {
   if (state === "playing" || !mapCatalog[id] || !mapAvailableForMode(id)) return false;
-  impactVfx.clear();
+  impactVfx.clear(); sfx.cancelFlybys();
   selectedMapId = id;
   if (!bioMatch() && !browseMatch()) lastArenaMapId = id;
   if (mapData && mapData !== mapCatalog[id]) mapData.setActive?.(false);
@@ -5894,6 +5893,29 @@ function updatePool(dt) {
   }
 }
 
+// Projectile presentation shares its clipped path with near-pass audio.
+const enemyFlybyRay=new THREE.Raycaster(),enemyEar=new THREE.Vector3();
+const enemyPassPoint=new THREE.Vector3(),enemyPassDirection=new THREE.Vector3();
+let enemyFlybyBlocked=0,enemyFlybyPlayed=0;
+function listenerEye(){return enemyEar.set(player.pos.x,
+  player.pos.y+player.eyeH-player.viewDip*.11+player.stepLift,player.pos.z);}
+function emitEnemyRound(start,end,weaponId,{hit=false}={}){
+  const profile=enemyRoundProfile(weaponId);
+  const tracer=impactVfx.tracer(start,end,'enemy',{weaponId,speed:profile.speed});
+  if(hit || dead || state!=='playing')return tracer;
+  const ear=listenerEye(),pass=closestBulletPass(start,end,ear,profile.speed);
+  if(!pass)return tracer;
+  enemyPassPoint.set(pass.x,pass.y,pass.z);
+  enemyPassDirection.copy(ear).sub(enemyPassPoint).normalize();
+  enemyFlybyRay.set(enemyPassPoint,enemyPassDirection);
+  enemyFlybyRay.near=.015;enemyFlybyRay.far=Math.max(.015,pass.distance-.02);
+  if(enemyFlybyRay.intersectObjects(obstacleFlat,false).length || playerSkills.occludesSound(enemyPassPoint,ear)){
+    enemyFlybyBlocked++;return tracer;
+  }
+  if(sfx.bulletFlyby(pass))enemyFlybyPlayed++;
+  return tracer;
+}
+
 // ---------- 敌人感知与开火 ----------
 const enemySightRay = new THREE.Raycaster();
 const enemySightOrigin = new THREE.Vector3();
@@ -5922,7 +5944,7 @@ function enemySeesPlayer(e) {
 }
 function enemiesShoot() {
   if (dead || state !== "playing" || !enemyManager.enemies.length) return;
-  const eye = new THREE.Vector3(player.pos.x, player.pos.y + EYE, player.pos.z);
+  const eye = listenerEye().clone();
   const losMeshes = obstacleFlat;
   const pSpeed = Math.hypot(player.vel.x, player.vel.z);
 
@@ -5967,7 +5989,7 @@ function enemiesShoot() {
       const hitAheadOfMuzzle = coverHit &&
         (coverHit.x - mz.x) * (eye.x - mz.x) + (coverHit.y - mz.y) * (eye.y - mz.y) +
         (coverHit.z - mz.z) * (eye.z - mz.z) > 0;
-      impactVfx.tracer(coverHit && !hitAheadOfMuzzle ? from : mz, coverHit || eye, "enemy");
+      emitEnemyRound(coverHit && !hitAheadOfMuzzle ? from : mz, coverHit || eye, e.gunId,{hit:!coverHit});
       if (coverHit) {
         sfx.skill(playerSkills.lastInterceptKind === 'cage' ? 'cageHit' : 'coverHit', coverHit);
         continue;
@@ -5978,33 +6000,24 @@ function enemiesShoot() {
       // 正贴着耳朵反而是「打中了」的听感，挪开半米才是「擦过去」。
       // 水平面的垂直方向 `(-dz, dx)` 是 `dir` 在 xz 平面上的法向。
       const ox = -dir.z, oz = dir.x;
-      const off = (Math.random() < 0.5 ? -1 : 1) * (0.35 + Math.random() * 0.55);
+      const off = (Math.random() < 0.5 ? -1 : 1) * (Math.random()<.7 ? .25+Math.random()*1.25 : 1.8+Math.random()*2);
       _whiz.set(eye.x + ox * off, eye.y + (Math.random() - 0.5) * 0.5, eye.z + oz * off);
-      const coverHit = playerSkills.interceptEnemyShot(mz, _whiz, e.damage, from);
-      if (coverHit) {
-        const hitAheadOfMuzzle =
-          (coverHit.x - mz.x) * (_whiz.x - mz.x) + (coverHit.y - mz.y) * (_whiz.y - mz.y) +
-          (coverHit.z - mz.z) * (_whiz.z - mz.z) > 0;
-        impactVfx.tracer(hitAheadOfMuzzle ? mz : from, coverHit, "enemy");
-        sfx.skill(playerSkills.lastInterceptKind === 'cage' ? 'cageHit' : 'coverHit', coverHit);
-        continue;
+      // Resolve walls from the shooter capsule before asking a protruding muzzle
+      // or a cage face to describe the visible segment.
+      _enemyMissDir.copy(_whiz).sub(from).normalize();
+      raycaster.set(from,_enemyMissDir);raycaster.far=140;
+      const missHit=raycaster.intersectObjects(losMeshes,false)[0];
+      _enemyTraceEnd.copy(missHit?.point || from).addScaledVector(_enemyMissDir,missHit?0:90);
+      const coverHit=playerSkills.interceptEnemyShot(mz,_enemyTraceEnd,e.damage,from);
+      const end=coverHit || _enemyTraceEnd;
+      const ahead=(end.x-mz.x)*_enemyMissDir.x+(end.y-mz.y)*_enemyMissDir.y+(end.z-mz.z)*_enemyMissDir.z>0;
+      emitEnemyRound(ahead?mz:from,end,e.gunId);
+      if(coverHit){
+        sfx.skill(playerSkills.lastInterceptKind==='cage'?'cageHit':'coverHit',coverHit);
+      }else if(missHit){
+        const delay=from.distanceTo(missHit.point)/enemyRoundProfile(e.gunId).speed;
+        impactVfx.surfaceAtArrival(missHit,true,_enemyMissDir,delay,()=>sfx.impact(missHit.point,'wall'));
       }
-      sfx.whiz(_whiz.x, _whiz.y, _whiz.z);
-
-      // 将原来只有声音的“打偏”补成真实世界轨迹。子弹先穿过掠耳点，再继续前进；
-      // 若撞上墙面或地面，就在那个真实交点生成弹孔、扬尘与空间撞击声。
-      _enemyMissDir.copy(_whiz).sub(mz).normalize();
-      raycaster.set(mz, _enemyMissDir);
-      raycaster.far = 140;
-      const missHit = raycaster.intersectObjects(losMeshes, false)[0];
-      if (missHit) {
-        _enemyTraceEnd.copy(missHit.point);
-        impactVfx.surface(missHit,true,_enemyMissDir);
-        sfx.impact(missHit.point, "wall");
-      } else {
-        _enemyTraceEnd.copy(mz).addScaledVector(_enemyMissDir, 90);
-      }
-      impactVfx.tracer(mz, _enemyTraceEnd, "enemy");
     }
   }
 }
@@ -6056,6 +6069,7 @@ function normAngle(a) {
 
 // 进入死亡视角：**不再当帧瞬移**。先把镜头交给击杀者，DEATH_DELAY 秒后才真正复活。
 function beginDeath(killer, byEnemy = true) {
+  sfx.cancelFlybys();
   kn57InspectT = null;
   cancelMelee();cancelGrenade();
   cancelAllSkillPreviews();
@@ -6462,7 +6476,7 @@ function toggleMatchPause() {
   if (matchPaused) { resumeFromGameMenu(); return; }
   matchPaused = true;
   clearBackpackInput();
-  if (matchPaused) sfx.cancelStreak();
+  sfx.cancelStreak(); sfx.cancelFlybys();
   updateGameMenu();
 }
 function refreshPlayerPosition() {
@@ -6497,7 +6511,7 @@ function quitMatchToLobby() {
   backpackResumePending = false;
   closeBackpack(); closeGameMenu(); clearBackpackInput();
   cancelDeath(); setScoped(false); clearFlash(); resetSwitchState();
-  sfx.cancelStreak();
+  sfx.cancelStreak(); sfx.cancelFlybys();
   for (const e of enemyManager.enemies) enemyManager.release(e);
   for (const c of enemyManager.corpses) enemyManager.release(c);
   enemyManager.enemies = []; enemyManager.corpses = [];
@@ -6850,12 +6864,12 @@ function gameStart() {
   matchPaused = false;
   closeGameMenu();
   closeBackpack();
-  sfx.cancelStreak();
+  sfx.cancelStreak(); sfx.cancelFlybys();
   hideStreakCallout();
   state = "playing";
   playerSkills.resetMatch();
   document.getElementById('skillHud').hidden = !playerSkillsRuntimeEnabled();
-  impactVfx.clear();
+  impactVfx.clear(); sfx.cancelFlybys();
   updateMapChoiceUi();
   kills = 0;
   enemyScore = 0;
@@ -7000,7 +7014,7 @@ function gameStart() {
 
 // result: "win" | "lose" | "draw"
 function endTDM(result) {
-  sfx.cancelStreak();
+  sfx.cancelStreak(); sfx.cancelFlybys();
   if (result === true) result = "win";
   if (result === false) result = "lose";
   if (result === "draw" && kills !== enemyScore) result = kills > enemyScore ? "win" : "lose";
@@ -8596,13 +8610,13 @@ function update(dt, rawDt) {
     mapData.update(time, dt, camera); // 大厅不推进已缓存地图的环境动画
   if (browseMatch() && state === "playing") {
     updateBrowsePlayer(dt);
-    sfx.updateListener(player.pos, player.yaw);
+    sfx.updateListener(camera.position, player.yaw);
     return;
   }
   updateSmokes(dt);
   updateFlash(dt);
   updatePool(dt);
-  sfx.updateListener(player.pos, player.yaw);
+  sfx.updateListener(listenerEye(), player.yaw);
   // 聊天：行寿命 / 限流冷却 / 应答延迟 / 冷场计时全部由 dt 推进（绝不用 setTimeout 或
   // CSS 动画 —— 那样跟不上 __tactical.pause()，也没法在无头测试里定步长快进）。
   // 放在下面那行 `state !== "playing"` 的 return **之前**：结算画面上已有的行也能淡完。
@@ -8775,6 +8789,7 @@ function update(dt, rawDt) {
   // bounds 与 colliders 一起灌给敌人：敌人现在走的是和玩家同一套分轴碰撞解算
   // （见 scripts/enemies.js 的 blockedAt / moveBy），少了边界这一项它会被绕行逻辑推出舷外。
   enemyManager.update(dt, player, colliders, bounds, !dead, enemySeesPlayer);
+  sfx.updateListener(listenerEye(),player.yaw);
   enemiesShoot();
 }
 
@@ -9300,6 +9315,11 @@ async function init() {
       clearTrainingTargets: () => clearTrainingTargets(true),
       resetTrainingStats,
       impactFx: () => impactVfx.stats(),
+      enemyRoundFx: (start,end,weapon='ak') => emitEnemyRound(new THREE.Vector3(...start),new THREE.Vector3(...end),weapon),
+      enemyBulletState: () => ({played:enemyFlybyPlayed,occluded:enemyFlybyBlocked,
+        impacts:impactVfx.pendingImpacts.length,tracers:impactVfx.tracers.filter(t=>t.kind==='enemy'&&t.t<t.life).map(t=>({
+          start:t.start.toArray(),end:t.end.toArray(),head:Math.min(t.distance,t.t*t.speed+.42),speed:t.speed,
+          segment:t.segment,radius:t.radius,visible:t.mesh.visible,position:t.mesh.position.toArray()}))}),
       playerTracerEnabled: () => playerTracerEnabled(currentId,activeSkinId(currentId)),
       clearImpactFx: () => impactVfx.clear(),
       stepImpactFx: dt => impactVfx.update(dt),

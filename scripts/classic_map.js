@@ -3,6 +3,7 @@ import { createDeckhouseWindowFrames, createDeckhouseGlass } from './transport_p
 import { createTransportSuperstructure } from './transport_superstructure.js';
 import { dampenTransportMaterial } from './transport_damp.js?v=rain-ripples-1';
 import { createTransportDynamics, harbourWaterGeometry } from './transport_dynamics.js';
+import { formTimberBoards, formCabinetSteel, precisionHatchGeometry, addBattenFasteners, createCaseCornerPlates } from './transport_precision.js';
 import * as THREE from 'three';
 import { lightTransportSurfaces, createTransportSkyProbe, createTransportSunProbe, softenTransportCargoShadow, transportSunPosition } from './transport_lighting.js?v=compartment-light-1';
 import { createDeckTracks, createFreightNote } from './transport_paper_and_tracks.js';
@@ -16,7 +17,7 @@ import { createTransportSurfaceDetail } from './transport_surface_detail.js?v=3'
 import { createFreightFlySheets, updateFreightWind } from './transport_fly_sheets.js?v=gust-steps-1';
 import { canvasLoads, formTransportCanvas } from './transport_canvas_relief.js?v=hanging-folds-2';
 import { formTransportCargoPanel } from './transport_corrugation.js?v=2';
-import { createTransportCargoDetail } from './transport_cargo_detail.js?v=harbour-dynamics-1';
+import { createTransportCargoDetail } from './transport_cargo_detail.js?v=precision-models-1';
 import { upgradeTransportTexture } from './transport_texture_detail.js?v=1';
 
 import { createTransportOutfitting, createDeckContactMap, addBulkheadLight, deckStencil } from './transport_outfitting.js?v=cargo-dust-1';
@@ -363,7 +364,15 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
       mat.normalScale.setScalar(.78);
       if(authored.get(p.material.name)==='canvas-side')markTransportFreight(mesh);
     }
-    if(WOOD_BULLET_MATERIALS.has(mesh.name))dressTimberCases(mesh,data.colliders,caseMarks);
+    if(WOOD_BULLET_MATERIALS.has(mesh.name)){
+      formTimberBoards(mesh);
+      dressTimberCases(mesh,data.colliders,caseMarks);
+      mat.normalScale.setScalar(.68);
+    }
+    if(authored.get(mesh.name)==='service-cabinet'){
+      formCabinetSteel(mesh);
+      mat.normalScale.setScalar(.35);
+    }
     mesh.castShadow=surface || airframe;
     mesh.receiveShadow=surface || airframe;
     if(WOOD_BULLET_MATERIALS.has(p.material.name))mesh.userData.bulletMaterial='wood';
@@ -394,6 +403,9 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   const tracks=createDeckTracks(deckContact);
   fittings.add(receipt,tracks.mesh,createTransportCompartments());
   const braces = fittings.getObjectByName('transport-timber-braces');
+  const casePlates=createCaseCornerPlates(data.colliders,caseMarks);
+  fittings.add(casePlates);
+  fittings.add(addBattenFasteners(braces));
   const bands = cargoRelief.getObjectByName('transport-tarp-webbing');
   const clips = cargoRelief.getObjectByName('transport-tarp-clips');
   // Use the same receiving filter across the cloth, hems and fastening hardware.
@@ -408,7 +420,7 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   clips.userData.impactSurface = 'metal';
   for (const mesh of obstacles) {
     const finish = authored.get(mesh.name);
-    if (finish === 'pine' || finish === 'painted-wood') mesh.impactLayers = [sheet,braces];
+    if (finish === 'pine' || finish === 'painted-wood') mesh.impactLayers = [sheet,braces,casePlates];
     if (finish !== 'canvas-side' && finish !== 'canvas-top' && finish !== 'cargo') continue;
     // These meshes override raycast with the flat BSP proxy. Share the formed
     // geometry and matrix with a receiver outside the scene for the VFX query.
@@ -440,7 +452,7 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
     shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',
       'float roughnessFactor=roughness*texture2D(roughnessMap,vRoughnessMapUv).a;');
   };
-  const covers=new THREE.InstancedMesh(new THREE.PlaneGeometry(1.2,1.5),coverMaterial,3);
+  const covers=new THREE.InstancedMesh(precisionHatchGeometry(),coverMaterial,3);
   covers.name='transport-flush-inspection-covers';
   const pose=new THREE.Object3D();
   for (const [i,[x,z,yaw]] of [[7,-11,.04],[-7,10,Math.PI],[1,-23,0]].entries()) {
@@ -513,7 +525,8 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
       tracks.reset();
       if (!active) {storm.stop();scene.backgroundIntensity=1;}
     },
-    source:'cf-transportship-source-port', update(t){
+    source:'cf-transportship-source-port', update(t,dt,camera){
+      if(camera)cargoRelief.userData.updateDetailLod(camera.position,t);
       dynamics.userData.update(t);
       rain.update(t);
       scanner.rotation.y=t*.70;

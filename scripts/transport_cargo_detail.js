@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { containerFrameEnvelopes } from './transport_stack_paint.js?v=freight-steel-1';
 import { createBuckleTail } from './transport_motion.js?v=harbour-swell-1';
+import { cornerCastingGeometry, installCastingLod } from './transport_precision.js';
 
 // The imported cargo is a set of flat, painted boxes. These inset steel
 // members give the repeated 3.17 m modules real silhouettes at walking
@@ -23,7 +24,8 @@ export function createTransportCargoDetail(colliders) {
   const webbing=new THREE.MeshStandardMaterial({color:0x172721,roughness:.94,
     metalness:0,envMapIntensity:.08});
   const frame=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),steel,frameEnvelopes.length*12);
-  const corners=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),casting,frameEnvelopes.length*8);
+  const castMetal=casting.clone();castMetal.vertexColors=true;
+  const corners=new THREE.InstancedMesh(cornerCastingGeometry(),castMetal,frameEnvelopes.length*8);
   const locks=new THREE.InstancedMesh(new THREE.CylinderGeometry(.018,.018,1,8),casting,doors.length*4);
   const tarpBands=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),webbing,tarps.length*8);
   const tarpClips=new THREE.InstancedMesh(new THREE.BoxGeometry(1,1,1),casting,tarps.length*4);
@@ -118,5 +120,6 @@ export function createTransportCargoDetail(colliders) {
   root.userData.frameEnvelopes=frameEnvelopes.length;
   root.userData.doors=doors.length;
   root.userData.tarps=tarps.length;
+  installCastingLod(root,corners,casting);
   return root;
 }

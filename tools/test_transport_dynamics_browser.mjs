@@ -67,7 +67,7 @@ try{
     });
     console.log('DYNAMICS',JSON.stringify({...audit,sources:audit.sources.length}));
     assert(audit.runoffSources>5&&audit.runoffSources<150);assert(audit.gulls===9&&audit.changed&&audit.finite&&!audit.collider);
-    assert(audit.waterVertices<15000&&audit.waterVertices>10000);assert.match(audit.deckShader,/ripples-1/);
+    assert(audit.waterVertices<15000&&audit.waterVertices>10000);assert.match(audit.deckShader,/wet-film-2/);
     assert(audit.maxWave<.257&&audit.maxWave>.15);assert(audit.receiverError<.03,'drips terminate on actual support surfaces');
   }
 

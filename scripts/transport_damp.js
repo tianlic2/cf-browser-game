@@ -12,6 +12,12 @@ export function dampenTransportMaterial(material, mask, finish,clock={value:0}) 
     if(finish==='deck'){
       shader.uniforms.uShipSurfaceTime=clock;
       shader.fragmentShader=`uniform float uShipSurfaceTime;
+        float shipFilmHash(vec2 p){vec3 q=fract(vec3(p.xyx)*.1031);q+=dot(q,q.yzx+33.33);return fract((q.x+q.y)*q.z);}
+        float shipFilmPatch(vec2 p){
+          vec2 a=floor(p),f=fract(p);f=f*f*(3.-2.*f);
+          return mix(mix(shipFilmHash(a),shipFilmHash(a+vec2(1.,0.)),f.x),
+            mix(shipFilmHash(a+vec2(0.,1.)),shipFilmHash(a+1.),f.x),f.y);
+        }
         vec2 shipRainRing(vec2 p,float offset){
           vec2 cell=floor(p/.73),v=p-.73*(cell+.5);
           float seed=fract(sin(dot(cell,vec2(127.1,311.7)))*43758.5453);
@@ -48,18 +54,19 @@ export function dampenTransportMaterial(material, mask, finish,clock={value:0}) 
       ${finish==='deck' ? 'wet*=mix(.54,.98,smoothstep(.42,.76,grain))*(1.-.43*dust);' : ''}
       diffuseColor.rgb*=1.-.25*wet;
       roughnessFactor=mix(roughnessFactor,min(roughnessFactor,max(.60,roughnessFactor-.17)),wet);
+      ${finish==='deck'?'float wetFilm=wet*smoothstep(.42,.74,shipFilmPatch(vShipLightPosition.xz*.43));\nroughnessFactor=mix(roughnessFactor,min(roughnessFactor,.27),wetFilm);':''}
     `;
     shader.fragmentShader=shader.fragmentShader.replace('#include <metalnessmap_fragment>',
       `vec3 worldFace=inverseTransformDirection(normalize(vNormal),viewMatrix);
        if (dot(worldFace,cameraPosition-vShipLightPosition)<0.) worldFace=-worldFace;
        ${coverage}
        #include <metalnessmap_fragment>`);
-    if(finish==='deck')shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`
-      #include <normal_fragment_maps>
+    if(finish==='deck')shader.fragmentShader=shader.fragmentShader.replace('#include <emissivemap_fragment>',`
       // Perturb the steel itself; roof and dry margins remain motionless.
       vec2 ripple=shipRainRing(vShipLightPosition.xz,0.)+
         shipRainRing(vShipLightPosition.xz+vec2(.31,.43),.71)*.65;
-      normal=normalize(normal+mat3(viewMatrix)*vec3(ripple.x,0.,ripple.y)*wet);`);
+      normal=normalize(mix(normal,nonPerturbedNormal,.65*wetFilm)+mat3(viewMatrix)*vec3(ripple.x,0.,ripple.y)*wet);
+      #include <emissivemap_fragment>`);
   };
-  material.customProgramCacheKey=()=>previousKey+'-rain-damp-'+finish+(finish==='deck'?'-ripples-1':'');
+  material.customProgramCacheKey=()=>previousKey+'-rain-damp-'+finish+(finish==='deck'?'-wet-film-2':'');
 }

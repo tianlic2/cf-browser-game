@@ -580,7 +580,7 @@ function waitForMapEntryLock() {
 async function ensureMapLoaded(id, onProgress = () => {}) {
   if (mapCatalog[id]) { onProgress(1); return mapCatalog[id]; }
   const loaders = {
-    transport: () => import('./classic_map.js?v=precision-models-1').then(m => m.buildClassicMap),
+    transport: () => import('./classic_map.js?v=cinematic-harbour-1').then(m => m.buildClassicMap),
     blacktown: () => import('./blacktown_map.js?v=visible-alpha-2').then(m => m.buildBlacktownMap),
     bio: () => import('./zone13_map.js?v=zone13-collision-alignment-1').then(m => m.buildZone13Map),
     lingyin: () => import('./lingyin_map.js?v=flanking-apron-leaf-1').then(m => m.buildLingyinMap),
@@ -645,6 +645,7 @@ async function prepareSelectedMap(id, report = () => {}) {
   });
   renderer.shadowMap.needsUpdate = true;
   const selected = mapCatalog[id];
+  selected.prepareRender?.(renderer,scene,camera);
   if (id === 'lingyin') {
     // Prepare Lingyin surface variants behind the loading page rather than
     // on the first turn. Only this map, not cached maps, is compiled.
@@ -8881,6 +8882,7 @@ function loop(now) {
     // 把这一帧挡住，画面看起来是凝固的。
     const lobbyCover = !!(menu && !menu.classList.contains("hidden"));
     if (!lobbyCover && !mapLoading) {
+      mapData?.beforeRender?.(renderer,scene,camera);
       renderer.clear();
       renderer.render(scene, camera);
     }

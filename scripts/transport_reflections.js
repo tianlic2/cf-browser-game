@@ -3,7 +3,7 @@ import * as THREE from 'three';
 // One small, linear-HDR cache serves whichever horizontal surface the camera
 // can actually see. Original BSP proxies keep this pass independent of the
 // fine crate/cabinet/fastener geometry used by the main camera.
-export function createTransportReflections(proxies,quay,background,environment) {
+export function createTransportReflections(proxies,background,environment) {
   const root=new THREE.Group();root.name='transport-wet-reflections';
   const reflected=new THREE.Scene();reflected.add(proxies);
   const mirror=new THREE.PerspectiveCamera(),matrix=new THREE.Matrix4();
@@ -14,9 +14,6 @@ export function createTransportReflections(proxies,quay,background,environment) 
   reflected.fog=new THREE.Fog(0xb4bdc1,42,185);
   reflected.add(new THREE.HemisphereLight(0xccdaea,0x939089,1.25));
   const sun=new THREE.DirectionalLight(0xffe0b8,2.05);sun.position.set(-40.28,27.56,87.28);reflected.add(sun);
-  quay.traverse(o=>{if(o.isMesh&&!o.isShaderMaterial&&o.name!=='transport-boiler-vapour'){
-    const clone=o.clone(false);clone.matrixAutoUpdate=false;clone.matrix.copy(o.matrixWorld);reflected.add(clone);
-  }});
   const actors=new Map(),normal=new THREE.Vector3(0,1,0),clip=new THREE.Plane(),clipVector=new THREE.Vector4(),corner=new THREE.Vector4();
   const eye=new THREE.Vector3(),look=new THREE.Vector3(),up=new THREE.Vector3(),forward=new THREE.Vector3();
   const oldViewport=new THREE.Vector4(),oldScissor=new THREE.Vector4();

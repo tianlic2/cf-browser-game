@@ -4,8 +4,7 @@ import { createTransportSuperstructure } from './transport_superstructure.js';
 import { dampenTransportMaterial } from './transport_damp.js?v=wet-film-2';
 import { createTransportDynamics, harbourWaterGeometry } from './transport_dynamics.js';
 import { formTimberBoards, formCabinetSteel, precisionHatchGeometry, addBattenFasteners, createCaseCornerPlates } from './transport_precision.js';
-import { createTransportQuay } from './transport_quay.js?v=harbour-depth-1';
-import { createTransportReflections } from './transport_reflections.js';
+import { createTransportReflections } from './transport_reflections.js?v=ship-only-2';
 import { transportPlacard,orientTransportPlacard } from './transport_placards.js';
 import * as THREE from 'three';
 import { lightTransportSurfaces, createTransportSkyProbe, createTransportSunProbe, softenTransportCargoShadow, transportSunPosition } from './transport_lighting.js?v=compartment-light-1';
@@ -403,7 +402,6 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   const fog=new THREE.Fog(0xb4bdc1,42,185);
   const rain=createTransportRain(data.colliders,rainCover);
   const dynamics=createTransportDynamics(rainCover,rain.roofAt);
-  const quay=createTransportQuay(dynamics.userData.clock);quay.updateMatrixWorld(true);
   const cargoRelief=createTransportCargoDetail(data.colliders);
   cargoRelief.add(createTransportDoorGear(group.getObjectByName('transportship/texture_79')));
   cargoRelief.add(createFreightFlySheets(data.colliders,sheetColor,sheetNormal));
@@ -500,11 +498,11 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
   sea.name='transport-open-water';
   const updateWater=animateShipWater(sea.material,dynamics.userData.clock);
   sea.rotation.x=-Math.PI/2;sea.position.y=-3.42;scene.add(sea);
-  const reflections=createTransportReflections(reflectionProxies,quay,sky,environment);
+  const reflections=createTransportReflections(reflectionProxies,sky,environment);
   reflections.attach(group.getObjectByName('transportship/texture_95').material,'deck');
   reflections.attach(sea.material,'sea');group.userData.reflectionStats=reflections.stats;
   const storm=createTransportStormAudio();
-  scene.add(rain.root,dynamics,quay,reflections.root);
+  scene.add(rain.root,dynamics,reflections.root);
   // Identify the visible face directly under a supported foot. A box brush
   // can list wood and metal together; a standing actor may also be below it.
   group.updateWorldMatrix(true,true);
@@ -522,7 +520,7 @@ export async function buildClassicMap(scene, onProgress = () => {}) {
     if (rainHit===2) return 'canvas';
     return 'dry-steel';
   }
-  return {...data, obstacles, visuals:[group,cargoRelief,sea,fittings,booms,rain.root,dynamics,quay,reflections.root], background:sky, environment, fog,
+  return {...data, obstacles, visuals:[group,cargoRelief,sea,fittings,booms,rain.root,dynamics,reflections.root], background:sky, environment, fog,
     beforeRender:reflections.capture,
     prepareRender:reflections.prepare,
     renderLook:{hemiSky:0xccdaea,hemiGround:0x939089,hemiIntensity:1.25,

@@ -32,37 +32,8 @@ function quayFinish(parameters, corrugated = false) {
         float runoff = sin(u*2.1+.6*sin(u*.87))*sin(height*.19+u*.8);
         diffuseColor.rgb *= 1.-.19*seam+.042*ribs+.062*runoff;`);
     }
-    if(!corrugated){
-      shader.vertexShader='attribute float yardRole; varying float vYardRole;\n'+shader.vertexShader.replace('#include <begin_vertex>',
-        '#include <begin_vertex>\nvYardRole=yardRole;');
-      shader.fragmentShader='varying float vYardRole;\n'+shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
-        vec3 yardN=inverseTransformDirection(normalize(vNormal),viewMatrix);
-        float yardSide=abs(yardN.x)>.5?vQuayWorld.z:vQuayWorld.x;
-        float yardFilter=1.-smoothstep(.12,.55,fwidth(yardSide));
-        float yardVertical=1.-smoothstep(.15,.7,abs(yardN.y));
-        if(vYardRole>.5&&vYardRole<1.5){
-          float ribs=cos(yardSide*22.5)*yardFilter*yardVertical;
-          float streak=sin(yardSide*.85+sin(yardSide*2.4))*.05;
-          diffuseColor.rgb*=.93+.09*ribs+streak*yardVertical;
-        }
-        if(vYardRole>1.5&&vYardRole<2.5){
-          float joint=1.-smoothstep(.008,.025+fwidth(yardSide),abs(fract(yardSide/4.)-.5));
-          float tide=exp(-pow((vQuayWorld.y+2.9)*1.7,2.));
-          float mineral=sin(yardSide*3.1+sin(vQuayWorld.y*2.))*sin(yardSide*.43)*.045;
-          diffuseColor.rgb*=1.-.15*joint-.29*tide+mineral;
-        }
-        if(vYardRole>2.5){
-          float seam=1.-smoothstep(.006,.025+fwidth(vQuayWorld.y),abs(fract(vQuayWorld.y/1.8)-.5));
-          diffuseColor.rgb*=1.-.12*seam+.04*sin(yardSide*3.2)*yardVertical;
-        }`).replace('#include <emissivemap_fragment>',`
-        if(vYardRole>.5&&vYardRole<1.5){
-          vec3 tangent=abs(yardN.x)>.5?vec3(0.,0.,1.):vec3(1.,0.,0.);
-          normal=normalize(normal+mat3(viewMatrix)*tangent*sin(yardSide*22.5)*.26*yardFilter*yardVertical);
-        }
-        #include <emissivemap_fragment>`);
-    }
   };
-  material.customProgramCacheKey = () => 'quay-altitude-detail-2-' + corrugated;
+  material.customProgramCacheKey = () => 'quay-altitude-haze-' + corrugated;
   return material;
 }
 
@@ -89,7 +60,7 @@ function boilerVapour(clock) {
       void main(){
         age=fract(phase+clock*.087);
         seed=phase*43.+position.x*.18;
-        vec3 p=position+vec3(-20.*age*age+sin(seed+age*5.)*age,
+        vec3 p=position+vec3(20.*age*age+sin(seed+age*5.)*age,
           15.*age-4.*age*age,2.4*age);
         vec4 view=modelViewMatrix*vec4(p,1.);
         view.xy+=corner*vec2(1.+6.*age,1.5+3.7*age);
@@ -125,8 +96,8 @@ export function createTransportQuay(clock) {
   const upright=new THREE.Vector3(0,1,0);
   const origin=new THREE.Vector3(), delta=new THREE.Vector3(), rotation=new THREE.Quaternion();
   const column='#525e60', brace='#445355', rail='#818783', machinery='#a58151';
-  function box(x,y,z,w,h,d,colour,role=0) {
-    parts.push({matrix:new THREE.Matrix4().makeScale(w,h,d).setPosition(x,y,z),colour,role});
+  function box(x,y,z,w,h,d,colour) {
+    parts.push({matrix:new THREE.Matrix4().makeScale(w,h,d).setPosition(x,y,z),colour});
   }
   function beam(a,b,width,depth,colour=brace) {
     origin.fromArray(a);
@@ -172,23 +143,15 @@ export function createTransportQuay(clock) {
     const transform=new THREE.Matrix4().makeRotationY(heading).scale(new THREE.Vector3(scale,scale,scale)).setPosition(cx,0,cz);
     for(let i=first;i<parts.length;i++) parts[i].matrix.premultiply(transform);
   }
-  box(33,-2.65,101,116,4,26,'#686967',2);
-  box(74,-2.65,-10,43,4,198,'#686967',2);
-  box(33,-.57,88,116,.16,.34,'#8e9389');
-  box(52.5,-.57,-10,.34,.16,198,'#8e9389');
+  box(33,-2.65,101,116,4,26,'#686967');
+  box(74,-2.65,-10,43,4,198,'#686967');
   crane(18,101,1.03,.22);
   crane(65,52,.90,.04);
   crane(65,-62,1.14,-.14);
   const freightColours=['#536568','#946653','#606f77','#a18d6e'];
   for(let bay=0;bay<13;bay++) {
     for(let tier=0;tier<1+(bay*7%4);tier++) {
-      const x=64+bay%2*8,y=.63+tier*2.59,z=-94+bay*13;
-      box(x,y,z,2.44,2.59,12.1,freightColours[(bay+tier*3)%4],1);
-      for(const sx of [-1,1])for(const sz of [-1,1])box(x+sx*1.19,y,z+sz*6.02,.075,2.59,.075,'#657579');
-      for(const sy of [-1,1]){
-        for(const sx of [-1,1])box(x+sx*1.19,y+sy*1.26,z,.075,.075,12.1,'#81908b');
-        for(const sz of [-1,1])box(x,y+sy*1.26,z+sz*6.02,2.44,.075,.075,'#81908b');
-      }
+      box(64+bay%2*8,.63+tier*2.59,-94+bay*13,2.44,2.59,12.1,freightColours[(bay+tier*3)%4]);
     }
   }
   // Bulk terminal behind the working quay. The elevator headhouse breaks the
@@ -215,7 +178,7 @@ export function createTransportQuay(clock) {
     }
     beam([x1,y1,z1],[x2,y2,z2],2.12,.32,'#737e78');
   }
-  box(-10,-2.6,126,91,4,48,'#838581',2);
+  box(-10,-2.6,126,91,4,48,'#838581');
   for(const [x,z,h] of [[-30,117,37],[-20.8,117,35],[-30,126,38],[-20.8,126,36]])bin(x,z,4.38,h);
   // Hopper legs and access platforms are visible through the space below the headhouse.
   for(const dx of [-3.1,3.1])for(const dz of [-3,3]) {
@@ -314,7 +277,7 @@ export function createTransportQuay(clock) {
   const roofFaces=[];
   function roofTriangle(a,b,c,colour) {roofFaces.push({a,b,c,colour});}
   function workshop(x,z,base,width,depth,bays,rise) {
-    box(x+width/2,base/2-1,z,width,base+2,depth,'#88918b',3);
+    box(x+width/2,base/2-1,z,width,base+2,depth,'#88918b');
     const near=z-depth/2,far=z+depth/2,span=width/bays;
     for(let i=0;i<bays;i++) {
       const left=x+i*span, right=left+span;
@@ -345,8 +308,7 @@ export function createTransportQuay(clock) {
     reaches[z<0?2:z<82?1:0].push(part);
   }
   const batches=reaches.map(reach=>{
-    const geometry=cube.clone();geometry.setAttribute('yardRole',new THREE.InstancedBufferAttribute(new Float32Array(reach.map(p=>p.role||0)),1));
-    const batch=new THREE.InstancedMesh(geometry,yardPaint,reach.length);
+    const batch=new THREE.InstancedMesh(cube,yardPaint,reach.length);
     reach.forEach(({matrix,colour},i)=>{batch.setMatrixAt(i,matrix);batch.setColorAt(i,new THREE.Color(colour));});
     batch.computeBoundingSphere();
     return batch;
@@ -354,12 +316,6 @@ export function createTransportQuay(clock) {
   const [mesh,...otherReaches]=batches;
   mesh.add(...otherReaches);
   mesh.name='transport-distant-quay';
-  const fenders=[];
-  for(let z=-102;z<90;z+=8)fenders.push([52.23,-1.8,z,-Math.PI/2]);
-  for(let x=-20;x<91;x+=8)fenders.push([x,-1.8,87.73,Math.PI]);
-  const tires=new THREE.InstancedMesh(new THREE.TorusGeometry(.43,.13,6,12),new THREE.MeshStandardMaterial({color:0x26302d,roughness:.96}),fenders.length);
-  const pose=new THREE.Object3D();fenders.forEach(([x,y,z,yaw],i)=>{pose.position.set(x,y,z);pose.rotation.set(0,yaw,0);pose.updateMatrix();tires.setMatrixAt(i,pose.matrix);});
-  tires.name='transport-quay-fenders';tires.computeBoundingSphere();mesh.add(tires);
   // Merge the bin walls, rolled seams and roofs for a single terminal draw.
   const positions=[],normals=[],colours=[];
   for(const {a,b,c,colour} of roofFaces) {

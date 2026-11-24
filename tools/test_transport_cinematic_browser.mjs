@@ -56,6 +56,7 @@ try{
 
 
   await page.evaluate(()=>{__tactical.freezeEnemies(true);__tactical.pause();});
+  assert.equal(await page.evaluate(()=>['transport-distant-quay','transport-bulk-terminal','transport-quay-fenders','transport-boiler-vapour'].some(n=>__tactical.scene.getObjectByName(n))?true:null),null,'new exterior port structures removed');
   const views=[{name:'lane',eye:[7,1.7,-15],target:[7,1,-2]},{name:'cabin',eye:[-6.69,1.7,41.87],target:[-5.5,1.5,30]},{name:'harbour',eye:[21,5,15],target:[65,12,35]},{name:'terminal',eye:[0,10,32],target:[15,22,101]},{name:'sea',eye:[-21,3,12],target:[-47,-3.42,-2]}];const captures=[];
   const proofs=[];
   for(const view of views){
